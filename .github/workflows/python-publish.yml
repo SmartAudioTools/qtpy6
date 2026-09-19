@@ -1,0 +1,24 @@
+# Publication sur PyPI, déclenchée par un tag de version (git tag v0.2.0 ;
+# git push origin v0.2.0), ou à la main depuis l'onglet Actions de GitHub.
+# Authentification par Trusted Publishing : PyPI fait confiance à CE fichier,
+# dans l'environnement « pypi » : aucun mot de passe ni jeton stocké. Ne pas
+# renommer ce fichier sans mettre à jour la déclaration sur pypi.org
+# (Your projects > qtpy6 > Publishing).
+
+name: Publication PyPI
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  publication:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - run: pipx run build
+      - uses: pypa/gh-action-pypi-publish@release/v1
