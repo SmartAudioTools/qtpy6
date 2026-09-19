@@ -26,6 +26,10 @@ classifiers = [
     "Topic :: Software Development :: User Interfaces",
 ]
 
+[project.urls]
+Homepage = "https://github.com/SmartAudioTools/qtpy6"
+Changelog = "https://github.com/SmartAudioTools/qtpy6/blob/master/CHANGELOG.md"
+
 [project.optional-dependencies]
 pyside6 = ["PySide6>=6.4"]
 pyqt6 = ["PyQt6>=6.4"]

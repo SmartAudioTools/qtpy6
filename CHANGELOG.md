@@ -1,14 +1,6 @@
 # Changelog
 
-## Non publié
-
-- `QTimer.single_shot(msec, receiver, slot)`, forme à trois arguments de PySide6
-  (tir abandonné si `receiver` est détruit avant), émulée sur PyQt6 par un `QTimer`
-  enfant du récepteur.
-- `QtWidgets.QFileSystemModel` sur PyQt6, qui l'a rangé dans `QtGui` (PySide6 le garde
-  dans `QtWidgets`).
-
-## 0.1.0 — 2026-09-18
+## 0.1.0 — 2026-09-19
 
 Première version.
 
@@ -20,3 +12,8 @@ Première version.
 - Réglages de session `QT_API`, `QT_SCALE`, `QT_FONT`, `QT_FONT_SIZE`
   (`get_env`/`set_env`, `scaled`), fenêtre `qtselector`.
 - Bindings Qt5 (PySide2, PyQt5) non pris en charge.
+- `QTimer.single_shot(msec, receiver, slot)`, forme à trois arguments de PySide6
+  (tir abandonné si `receiver` est détruit avant), émulée sur PyQt6 par un `QTimer`
+  enfant du récepteur.
+- `QtWidgets.QFileSystemModel` sur PyQt6, qui l'a rangé dans `QtGui` (PySide6 le garde
+  dans `QtWidgets`).
