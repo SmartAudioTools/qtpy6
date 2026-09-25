@@ -11,5 +11,10 @@ if PYSIDE6:
         return _move_position(self, operation, mode, n)
 
     QTextCursor.movePosition = movePosition  # noqa: F821
+else:
+    from .QtCore import QObject
+
+    class QPyTextObject(QObject, QTextObjectInterface):  # noqa: F821
+        """PySide's ready-made QObject + QTextObjectInterface (its multiple inheritance can't); PyQt's can."""
 
 _binding.finish(globals())
