@@ -132,8 +132,24 @@ passages par fichier un décalage d'une seule réponse aurait commité le travai
   `False` en natif). Non essayé sur un vrai écran tactile : il n'y en a pas ici, et `offscreen` n'en recense aucun.
 - Non essayé : en ligne (GitHub Pages + Dropbox) après ce changement, et tout appareil Apple.
 
-## 7. À vérifier en priorité par un relecteur
+## 7. Les trois points laissés au relecteur, vérifiés ensuite (même jour)
 
-- `sous_processus.run` et le `timeout` : `p.kill()` puis lecture des tampons — un worker tué rend-il ce qu'il avait écrit ?
-- `_zipper` zippe les dossiers du script, du `cwd` et du tempdir : un `cwd` très gros (dossier personnel) serait copié entier.
-- Le `QTimer.singleShot` de `soumettre` : deux clics rapides lancent-ils deux corrections ? (la question grisée devrait l'empêcher).
+Demande de l'utilisateur : « il reste des choses à faire ? », puis « oui » pour que je mène seul les trois vérifications.
+Mesures dans Firefox (sonde, lecteur `essais_types`, un scénario jetable non versionné).
+
+- **`timeout` de `sous_processus.run`** : `TimeoutExpired` levée à 4,2 s pour `timeout=4` ; la sortie écrite avant le
+  `kill()` est rendue, qu'elle ait été vidée ou non (`'vidé\nnon vidé\n'`) ; une boucle infinie est arrêtée à 4,0 s avec
+  sa sortie (`'go\n'`). Après une fin normale, le `QTimer` du délai ne lève rien. Rien à changer.
+- **`_zipper`** : le dossier du script, dans le lecteur, est `/lecteur` (12,7 Mo : polices 7,6 Mo, pygments 4,5 Mo), zippé en
+  0,05 s à chaque lancement ; `cwd` (`/home/pyodide`) et `/tmp` sont petits. Lancement complet d'un script de trois lignes :
+  1,41 et 1,48 s depuis un petit dossier, 1,51 et 1,59 s depuis `/lecteur` — le zip coûte donc environ 0,1 s. Laissé tel
+  quel : filtrer les dossiers copiés ajouterait une règle (quoi exclure ?) pour un gain invisible. Le cas d'un `cwd` énorme
+  reste possible pour une autre application ; il n'existe pas dans SmartTeacher.
+- **Double soumission : vrai défaut, corrigé dans SmartTeacher** (`modele.py`, `Code.soumettre`). Griser la question
+  n'empêchait pas un second appel par programme : « Corriger mes réponses » (`noyau.soumettre_tout`) appelle `soumettre()`
+  sur chaque question non fermée, y compris celle dont la vérification est en cours. Mesure : deux `soumettre()`
+  d'affilée lançaient **2 workers**, et le second verdict fermait la question (seconde chance perdue). Correctif : un
+  drapeau `en_correction`, posé avant le `QTimer.singleShot` et levé dans le verdict ; un appel pendant la correction
+  ne fait rien. Même mesure après : **1 worker**, verdict unique, question fermée une fois. `tests_modele.py` vert.
+  Écarté : se fier à `isEnabled()` — `setEnabled(False)` d'un parent grisé rend le même `False`, et le drapeau dit ce qu'il
+  veut dire.
