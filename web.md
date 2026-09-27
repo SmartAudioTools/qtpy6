@@ -1,0 +1,372 @@
+# qtpy6 dans le navigateur (`qtpy6.web`)
+
+*Run a qtpy6 application in the browser, unchanged, on
+[Pyodide-Qt](https://github.com/JarrettSJohnson/pyodide-with-pyqt6) — documentation in French below.*
+
+Une application écrite avec **qtpy6** tourne **telle quelle dans le navigateur** : Qt 6 et PyQt6 compilés en WebAssembly
+(Pyodide-Qt) dessinent la fenêtre dans un élément de la page, le code Python de l'application n'est pas modifié.
+
+**Ce que Qt-WASM n'a pas et qui a un nom Qt, qtpy6 le double lui-même**, sous ce nom, dans le navigateur seulement
+(`sys.platform == "emscripten"`) ; en natif, rien ne change :
+
+| Nom Qt | Dans le navigateur |
+|---|---|
+| `QtCore.QProcess` | `ProcessusWeb` : la surface de `QProcess` sur un Web Worker Pyodide (section « Le worker ») |
+| `QtGui.QFontDatabase.systemFont(FixedFont)` | la première police à chasse fixe que l'application a chargée (`addApplicationFont`), à la taille de celle de l'interface |
+| `exec()` de `QApplication`, `QDialog`, `QMenu`, `QEventLoop` ; `QMessageBox.question`, `QInputDialog.getText`, `QFileDialog.getOpenFileName`… | suspendus par JSPI jusqu'à leur fin, puis rendent leur valeur comme en natif (`qtpy6.web.bloquant`) ; les sélecteurs de fichiers passent par ceux du navigateur (téléverser, télécharger) |
+| `QThread`, `QThreadPool`, `QRunnable`, `QMutex`, `QWaitCondition`, `QSemaphore`, `time.sleep` | des fils coopératifs sur le fil unique de la page : un `sleep`, un `wait()`, un verrou pris cèdent la main (`qtpy6.web.fils`) |
+
+Le reste n'a pas d'équivalent Qt et vit dans le sous-paquet **`qtpy6.web`** : le chargeur de la page, la `QApplication`
+et ses polices, les cibles au doigt, le stockage du navigateur, l'assemblage de l'archive et une sonde Firefox sans
+interface pour vérifier le tout sans écran ni clic.
+
+```python
+# mon_application.py : une application de bureau ordinaire, rien n'y parle du navigateur
+import sys
+from qtpy6.QtWidgets import QApplication, QMessageBox, QPushButton
+
+app = QApplication(sys.argv)
+bouton = QPushButton("Bonjour")
+bouton.clicked.connect(lambda: print(QMessageBox.question(bouton, "Question", "Continuer ?")))
+bouton.show()
+sys.exit(app.exec())
+```
+
+```bash
+python -m qtpy6.web.construire mon_application.py site/    # site/index.html, qtpy6web.js, app.zip
+python -m qtpy6.web.sonde --racine site site/index.html capture.png   # ou n'importe quel serveur statique
+```
+
+`construire` prend le dossier du script entier (sauf fichiers cachés et `__pycache__`), qtpy6, et ce qu'on ajoute
+(`--paquet`, `--distribution`, `--police`) ; la page (`js/gabarit.html`) lance le script comme `python mon_application.py`
+(`qtpy6.web.lancer` : `__main__`, `sys.argv`, dossier courant, `sys.exit` rattrapé) et le montre quand il entre dans
+`app.exec()`. Pyodide-Qt vient par défaut de l'hébergement de qtpy6 (`--pyodide ./pyodide-qt/` pour un dossier local).
+
+Une page à soi qui embarque l'application dans un élément garde la main sur le chargement :
+
+```html
+<div id="qt" style="position:fixed; inset:0"></div>
+<script type="module">
+  import { preparer, lancer } from "./qtpy6web.js";   // qtpy6/web/js/, copié à côté de la page
+  const py = await preparer(document.getElementById("qt"), {
+    indexURL: "./pyodide-qt/",                                        // Pyodide-Qt
+    archives: [{ url: "./app.zip", dossier: "/home/pyodide/app" }],  // le code, qtpy6, les polices
+  });
+  lancer(py, "/home/pyodide/app/mon_application.py");  // ou py.pyimport(...) d'une fonction qui ne fait pas exec()
+</script>
+```
+
+Extrait du lecteur d'épreuves de SmartTeacher (septembre 2026), où
+un lecteur Qt de 2 000 lignes (tableaux, éditeur de code avec exécution, graphes à tracer, SVG) s'est mis à tourner dans
+le navigateur sans qu'une ligne de son interface change.
+
+## Installation
+
+```bash
+pip install qtpy6               # qtpy6.web en fait partie ; PyQt6 n'est PAS nécessaire en natif si PySide6 est là
+pip install qtpy6[sonde]        # + selenium, pour la sonde (Firefox et geckodriver viennent du système)
+```
+
+Python ≥ 3.10. Le paquet n'embarque **pas** Pyodide-Qt : la page le charge depuis l'URL `indexURL` (à côté d'elle, ou sur
+un hôte qui autorise CORS). La version épinglée est dans `qtpy6/web/versions.json` (Pyodide-Qt 0.29.3 : Qt 6.10.2, PyQt6
+6.10.2, Python 3.13 ; le Pyodide ordinaire du worker : 314.0.7, Python 3.14) ; `preparer` compare celle qu'il a chargée
+et écrit une ligne d'avertissement au journal si elles diffèrent. Pyodide-Qt est publié sous GPL v3 (celle de PyQt6) :
+toute page qui le sert distribue PyQt6, et le code de l'application servi avec doit en tenir compte. qtpy6 est MIT
+et ne contient aucun binaire.
+
+**Installation éditable (développement)** : si le dépôt est rangé sous un dossier déjà présent sur `sys.path` (un `.pth`
+qui met `~/Python` ou `/DATA/Python` sur le chemin), le dossier du dépôt lui-même devient un paquet-espace de noms
+`qtpy6` que Python trouve avant le finder éditable de setuptools : `import qtpy6` réussit et le paquet est vide
+(`__file__ is None`). Installer alors en mode compat, qui écrit un `.pth` classique :
+
+```bash
+pip install -e . --no-deps --no-build-isolation --config-settings editable_mode=compat
+```
+
+## Ce que fait `qtpy6.web`
+
+| Où | Quoi |
+|---|---|
+| `qtpy6.web.navigateur()` | `True` sous Pyodide (`sys.platform == "emscripten"`) : l'interrupteur de tout le reste. Une fonction, pas une constante, pour rester forçable par un test. |
+| `qtpy6.web.application(polices=None, defaut=None)` | La `QApplication`, créée au besoin et rendue (idempotente). Sans session graphique (ni `DISPLAY` ni `WAYLAND_DISPLAY`) elle passe en `offscreen` : tests et exports tournent sans écran. Dans le navigateur, où Qt n'a **aucune** police système, les `.ttf`/`.otf` du dossier `polices` sont chargés (la première à chasse fixe devient `systemFont(FixedFont)`) et `defaut` (`QFont` ou `("Noto Sans", 10)`) devient la police de l'interface. Elle garde une référence à l'application : sous PyQt6, une `QApplication` dont la dernière référence Python disparaît est détruite, et toutes ses fenêtres avec. |
+| `qtpy6.web.tactile` | `detecte()` : un doigt parmi les pointeurs du navigateur (`any-pointer: coarse`). `activer(app, cible=44)` : boutons, listes, champs, cases montent à la taille d'une cible au doigt par une feuille de style **ajoutée** à celle de l'application, à appeler avant de construire les widgets. `marge()` : l'espace à mettre autour d'un widget d'une ligne pour en faire une cible. `defiler_au_doigt(zone)` : une `QScrollArea` que le doigt fait défiler (`QScroller` ; sans lui, un glisser fait 0 px). |
+| `qtpy6.web.dispositions` | `Disposition`, `Rangee` : des dispositions qui se **replient** quand la place manque. `QHBoxLayout` impose la somme de ses colonnes comme largeur minimale (mesuré : une barre de boutons à 574 px, une fenêtre à 451 px au minimum) ; `Rangee` passe à la ligne comme du texte. |
+| `qtpy6.web.travailleur` | Un Web Worker Pyodide piloté depuis l'application (`Travailleur`), et `ProcessusWeb`, le `QProcess` du navigateur (section suivante). |
+| `qtpy6.web.stockage` | `lire(cle)`, `ecrire(cle, texte)`, `effacer(cle)` sur `localStorage` (du texte, quelques Mio, qui survit au rechargement) ; `telecharger(nom, contenu, mime, lien=None)`, le seul chemin vers le disque de l'utilisateur (tout de suite, ou par un `<a>` de la page qu'il clique). |
+| `qtpy6.web.assembler` | `assembler(archive, fichiers, paquets, distributions, polices)` écrit le zip que la page dépaquette : des fichiers, des paquets purs Python pris là où ils sont installés (`qtpy6`, `qtpy6.web` compris, et ceux de l'application), des distributions avec leurs métadonnées, des polices. `polices(*motifs)` : des globs, erreur si aucun fichier. |
+| `qtpy6.web.sonde` | `python -m qtpy6.web.sonde page.html capture.png [--racine DIR] [--delai 120] [--etat fini] [--taille 1000x900] [--zoom 2] [--tactile]` : sert `--racine` en local, ouvre la page dans Firefox sans interface, attend `window.etat`, imprime `window.journal`, capture l'écran et écrit chaque image de `window.captures` (`{suffixe: png en base64}`) en `capture_<suffixe>.png`. Code de retour 0 si l'état attendu est atteint. |
+| `qtpy6.web.lancer(script, args=(), pret=None)` | Exécute un script écrit pour le bureau comme `python script args…` ; `app.exec()` y suspend jusqu'à `quit()`, `sys.exit` est rattrapé et donne le code de retour ; `pret()` quand l'application entre dans `exec()`. À appeler d'une entrée suspendable : `lancer` de `qtpy6web.js`. |
+| `qtpy6.web.construire` | `python -m qtpy6.web.construire app.py [site] [--pyodide URL] [--paquet p]… [--distribution d]… [--police f]… [--titre t]` : le site complet d'une application de bureau (page, chargeur, archive). |
+| `qtpy6.web.bloquant` | Les `exec()` et boîtes statiques suspendus (première ligne du tableau d'en tête), le report des slots venus de Qt vers une entrée suspendable, et la pompe de la boucle d'événements (section « Pièges »). Posé par `QtCore`/`QtWidgets` de qtpy6 : rien à importer. |
+| `qtpy6.web.fils` | `QThread` (`run()` redéfini, ou un travailleur `moveToThread`), `QThreadPool`, verrous et `time.sleep` coopératifs ; un interblocage lève `RuntimeError` au lieu de figer la page. Posé par `QtCore` de qtpy6. |
+| `js/qtpy6web.js` | `preparer(conteneur, {indexURL, archives, roues, env, sur_ligne})` : charge Pyodide-Qt et les archives en parallèle, dépaquette, charge les roues WebAssembly par URL (`roues`, pour une extension compilée : le lock de Pyodide-Qt est vide, ni `loadPackage("nom")` ni micropip ; une adresse qui finit par `.whl`, sans requête `?v=` : Pyodide y lit le nom du paquet), pose `env` (`QT_API=pyqt6` par défaut) et met chaque dossier d'archive dans `sys.path` ; rend l'objet Pyodide. `lancer(py, script, args)` : `qtpy6.web.lancer` dans une entrée suspendable, rend `{pret, fin}` (deux promesses : l'application est dans `exec()`, le script est fini avec son code). `print` et `journal` : le journal horodaté (console, `window.journal`, `sur_ligne`) que lit la sonde. `rendu()` : attend quelques images pour qu'une capture voie la fenêtre. |
+| `js/travailleur.js` | Le Worker (lu par `importlib.resources`, lancé depuis une URL `blob:`). |
+| `js/gabarit.html` | La page minimale, que `construire` remplit (sinon à copier) : conteneur `position: fixed; inset: 0` qui **a sa taille dès le chargement** (Qt la prend au démarrage ; `display: none` donne une fenêtre de 0 px, cacher par `visibility`), message d'attente, `window.etat`. |
+
+### Le worker : un sous-processus sans processus
+
+Le navigateur n'a pas de `QProcess`, et Qt-WASM tourne dans le fil de la page : un calcul long, le programme d'un
+utilisateur, une boucle infinie y gèleraient l'écran. `Travailleur` lance un **Web Worker** avec un Pyodide ordinaire
+(pas Pyodide-Qt), y dépaquette des archives, y importe un module, et appelle ses fonctions :
+
+```python
+from qtpy6.web.travailleur import Travailleur
+
+w = Travailleur("pyodide/", [("app.zip", "/home/pyodide/app")], "echo", parent=fenetre)
+w.sortie.connect(lambda numero, texte: ...)    # ce que la fonction imprime, au fil de l'eau (même sans "\n")
+w.termine.connect(lambda numero, retour: ...)  # le retour (dict, list, str, nombres, None convertis)
+w.erreur.connect(lambda numero, texte: ...)    # la trace
+w.expire.connect(lambda numero: ...)           # rien au bout de `delai`
+numero = w.appeler("echo", "bonjour", delai=60)
+w.tuer()                                       # le seul « Arrêter » qu'un navigateur connaisse ; le prochain appel relance
+```
+
+`ProcessusWeb` pose sur un `Travailleur` la surface de `QProcess` qu'un code écrit pour un sous-processus utilise
+(`start`, `write`, `readAllStandardOutput`, `kill`, `readyReadStandardOutput`, `finished`) : chaque ligne écrite est passée
+à `module.fonction(ligne)`, ce qu'il imprime est la sortie. `configurer(indexURL, archives, module, fonction, cwd)` lui
+donne ses réglages une fois pour toutes, et dans le navigateur `qtpy6.QtCore.QProcess` EST `ProcessusWeb` (alias
+snake_case compris) : le code de l'application écrit `QProcess(self)` et ne voit pas la différence. Les URL passées au worker sont relatives à la
+**page** (le worker naît d'un `blob:` et n'a pas d'adresse propre : elles sont rendues absolues côté Python). Un
+`import()` de `pyodide.mjs` depuis un autre hôte exige CORS.
+
+## Rendre une application qtpy6 compatible
+
+Le plus souvent rien : `construire` et le script tel quel. Ce qui reste différent du bureau, mesuré :
+
+1. **Un `exec()` bloque dans un slot, pas dans une méthode virtuelle.** Dans un slot (un `clicked`, un `triggered`, la
+   fonction d'un `QTimer.singleShot`, le script principal), `QDialog.exec()`, `QMessageBox.question()`, `menu.exec()`, `QFileDialog.getOpenFileName()` attendent
+   et rendent leur valeur comme en natif. Dans une méthode que Qt appelle lui-même (`contextMenuEvent`,
+   `mousePressEvent`, `closeEvent`…), rien ne peut suspendre : `exec()` y ouvre sans bloquer et rend la valeur d'un
+   abandon (`Rejected`, `None`), avec un avertissement une fois. Y préférer `menu.popup(pos)` et les signaux, ou
+   en sortir par `QTimer.singleShot(0, …)`.
+2. **Un `exec()` que Qt lance en C++ ne bloque pas** : le menu d'un `QPushButton`/`QToolButton` (`setMenu`, `showMenu()`)
+   s'ouvre et `showMenu()` revient aussitôt ; le choix arrive par `triggered`, comme il se doit.
+3. **Les fils sont coopératifs** (Pyodide-Qt est mono-fil : ni `SharedArrayBuffer`, ni en-têtes COOP/COEP, un serveur
+   statique nu suffit). Un `run()` qui calcule sans jamais appeler `time.sleep`, `msleep`, un verrou ou `wait()` garde la
+   main jusqu'au bout et fige l'écran pendant ce temps ; `threading.Thread` et `multiprocessing` ne sont pas doublés. Un
+   vrai calcul long va dans un `Travailleur`.
+4. **`QProcess` reste `QProcess`** (qtpy6 le double), mais ce qui tournait dans le sous-processus devient un module
+   importé par le worker, dont une fonction reçoit chaque ligne (`travailleur.configurer`).
+5. **Les fichiers** vivent dans le système de fichiers de Pyodide (en mémoire, perdu au rechargement) : ce qui doit
+   survivre passe par `stockage.ecrire`. `QFileDialog.getOpenFileName` ouvre le sélecteur du navigateur et y dépose le
+   fichier choisi ; `getSaveFileName` demande un nom, et le fichier est téléchargé dès que l'application l'a écrit
+   (`stockage.telecharger` pour le faire soi-même).
+6. **Les polices** : livrer celles de l'interface et la fixe dans l'archive (`assembler(..., polices=...)`), les déclarer
+   à `application(polices=..., defaut=...)`, `QFontDatabase.systemFont(FixedFont)` pour les éditeurs, comme en natif. Sans cela Qt-WASM dessine avec sa police
+   de secours, différente du natif ; et un symbole qu'aucune police livrée n'a (⭘, ◉…) sort en carré vide, là où le natif
+   le prend dans une police système : livrer un sous-ensemble (`fontTools.subset`, les blocs U+2190-U+2BFF de Noto Sans
+   Symbols 2 font 134 Kio).
+7. **Le doigt** : `tactile.activer()` si `tactile.detecte()`, `defiler_au_doigt` sur les zones défilantes, `Rangee` là où
+   une barre de boutons imposerait sa largeur à la fenêtre.
+8. **La fenêtre principale en `show_full_screen()`** dans le navigateur : tout le conteneur, sans barre de titre (une
+   fenêtre Qt-WASM ordinaire a une barre de titre dessinée par Qt, que l'utilisateur peut déplacer et fermer).
+9. **PyQt6 sous le capot** : qtpy6 traduit l'API, mais pas ce que PyQt6 ne fait pas. Pas d'arguments nommés de propriétés
+   dans les constructeurs (`QPlainTextEdit(read_only=True)` échoue : setters), et une méthode redéfinie en Python se
+   teste en camelCase (`heightForWidth`) — l'appel snake_case tombe sur la méthode de base C++.
+
+Puis `construire` (ou, pour une page à soi, `assembler` l'archive et copier `js/gabarit.html`), et vérifier par la
+sonde : `python -m qtpy6.web.sonde --racine site site/index.html capture.png`, en lisant la capture.
+
+## L'exemple
+
+`exemple/` est la preuve sans autre application : un compteur (`compteur.py`, un bouton, un affichage, une zone d'écho)
+et un worker `echo.py` qui imprime une invite sans retour à la ligne, attend, répond et rend un dict.
+
+```bash
+# Pyodide-Qt dans exemple/pyodide-qt/ (hebergement/telecharger.sh, section Hébergement) et un Pyodide ordinaire dans
+# exemple/pyodide/ (le tarball npm `pyodide` 314.0.7, ou son dossier full/ du CDN) : ni l'un ni l'autre ne sont versionnés
+python exemple/construire.py                                     # exemple/app.zip (qtpy6 et deux polices)
+python -m qtpy6.web.sonde --racine . "exemple/index.html?auto" capture.png
+```
+
+`?auto` clique le bouton depuis la page, attend l'écho, et pose `window.captures = {grab}` (le `grab()` de la fenêtre).
+Mesuré le 26/09/2026 (Firefox sans interface, fichiers en local) : Pyodide-Qt chargé et archive dépaquetée en 1,2 s,
+fenêtre montrée en 0,27 s de plus, worker prêt 1,2 s après son démarrage, écho revenu en 1,75 s (l'invite sans `\n` arrive
+tout de suite, en message séparé), tas WebAssembly 35 Mio.
+
+En natif : `python exemple/compteur.py` ouvre la même fenêtre (le worker ne s'y lance pas : `Travailleur` ne sert que
+dans le navigateur).
+
+## Tests
+
+```bash
+QT_QPA_PLATFORM=offscreen python -m pytest tests/test_web.py -q
+```
+
+En natif, tout s'importe et est inerte ; les doublures sont vérifiées dans un sous-processus où `sys.platform` est forcé à
+`emscripten` avant l'import de qtpy6 (`QProcess` est `ProcessusWeb`, la police fixe est celle qu'on a chargée). Les
+`exec()` suspendus et les fils coopératifs y sont éprouvés sous PyQt6 avec `greenlet`, qui imite JSPI (des piles qui se
+suspendent et reprennent dans n'importe quel ordre) et son mensonge de `can_run_sync()` ; sans PyQt6 ou greenlet, ces
+tests sont sautés.
+
+Ce que le navigateur fait vraiment se mesure avec la sonde sur `exemple/` (section précédente) : c'est le test
+d'intégration, il demande Firefox, geckodriver et selenium.
+
+## Servir la page par Google Apps Script, sans serveur à soi
+
+Un tableur Google et son projet Apps Script suffisent comme serveur : `doGet` sert la page, et l'application appelle
+des fonctions du script par `google.script.run` (lire un fichier du Drive, déposer un résultat, le reprendre depuis un
+autre appareil), sous le compte de celui qui déploie (`executeAs: USER_DEPLOYING`, le script écrit dans SON Drive) et
+sans compte pour les utilisateurs (`access: ANYONE_ANONYMOUS` ; le prix : qui connaît le nom d'un utilisateur peut
+rouvrir ce qu'il a déposé). Google affiche un bandeau « Cette application a été créée par un utilisateur de Google Apps
+Script » au-dessus de la page, qui ne s'enlève pas. *Mesuré en septembre 2026 avec une page Pyodide sans Qt (un lecteur
+d'épreuves HTML) ; pour Qt-WASM, les inconnues sont à la fin de cette section.*
+
+**Ce que Google impose, et la réponse.**
+- **Une page d'un seul fichier `.html`** : ni CSS, ni JS, ni zip à côté, pas de chemins relatifs. Un script de
+  construction fabrique le fichier servi à partir des sources (feuille de style et scripts en ligne, par des
+  remplacements dont chacun est asserté unique) ; le dérivé n'est pas versionné, on n'édite que les sources.
+- **Deux iframes sandbox** : `script.google.com/macros/s/<id>/exec` → iframe `*.googleusercontent.com` → iframe
+  `userCodeAppPanel`, où tourne le code. `location.search` y est vide : `doGet` écrit `e.parameter` dans la page
+  (`<script>window.PARAMETRES = <?!= parametres ?>;</script>`, avec `page.parametres = JSON.stringify(e.parameter)`),
+  et `new URLSearchParams(window.PARAMETRES ?? location.search)` sert en local comme chez Google (`URLSearchParams`
+  accepte un objet). Chromium y signale « An iframe which has both allow-scripts and allow-same-origin for its sandbox
+  attribute can escape its sandboxing » : c'est Google, inoffensif.
+- **`importScripts` est refusé** dans un Worker né de cette page ; **`import()` passe** (mesuré le 25/09/2026).
+  `js/travailleur.js` est déjà ce qu'il faut : un module ES lancé depuis un `blob:`, qui charge Pyodide par `import()`.
+- **`localStorage`** est celui de l'origine `googleusercontent`, pas de l'adresse `/exec` : `stockage` y marche (`lire` rend
+  `None` pour une clé absente), la reprise au rechargement aussi.
+- **Ni COOP ni COEP** : Google ne les pose pas, Pyodide-Qt n'en a pas besoin.
+- **Les fichiers de l'application** : un petit fichier (une archive de quelques centaines de Kio, un document) se
+  demande au script, qui rend le base64 d'un fichier du dossier Drive du tableur (filtrer le nom, `/^[^\/\\]+\.(zip|…)$/`,
+  pour que rien d'autre ne sorte du Drive). Pyodide-Qt (36 Mo, dont `pyodide.asm.wasm` 32 Mio) et une archive de
+  plusieurs Mo sont **hors de portée d'Apps Script** : un hôte statique avec CORS (GitHub Pages, un serveur à soi qui
+  envoie `Access-Control-Allow-Origin`) est inévitable, et il doit compresser (section suivante). Dans la page servie
+  par Google, `indexURL`, `archives`, `roues` et le `indexURL` du `Travailleur` sont des **URL absolues** de cet hôte :
+  `preparer` et `Travailleur` les rendent absolues par rapport à `location.href`, qui est celui de l'iframe. Le Pyodide
+  ordinaire du worker peut venir de jsdelivr (`https://cdn.jsdelivr.net/pyodide/v314.0.7/full/` : CORS, mesuré).
+
+**Le script, en quatre fonctions** (`Code.gs`, lié au tableur : `SpreadsheetApp.getActive()` le désigne, et son dossier
+Drive est `DriveApp.getFileById(SpreadsheetApp.getActive().getId()).getParents().next()`) :
+
+```javascript
+function doGet(e) {
+  const page = HtmlService.createTemplateFromFile("page");      // page.html, le seul fichier
+  page.parametres = JSON.stringify(e.parameter);
+  return page.evaluate().setTitle("…").addMetaTag("viewport", "width=device-width, initial-scale=1");
+}
+function fichier(nom) {                                          // un fichier du dossier, en base64
+  if (!/^[^\/\\]+\.(zip|dat)$/.test(nom)) throw new Error("nom refusé");
+  const f = dossier_().getFilesByName(nom);
+  if (!f.hasNext()) throw new Error(nom + " introuvable");
+  return Utilities.base64Encode(f.next().getBlob().getBytes());
+}
+function deposer(r) {                                            // r : {utilisateur, contenu, …} ; ne rend rien
+  const verrou = LockService.getScriptLock(); verrou.waitLock(30000);   // deux dépôts en même temps
+  try { /* écrire ou remplacer <utilisateur>.dat dans un sous-dossier ; une ligne du tableur si l'on veut y lire l'état */ } finally { verrou.releaseLock(); }
+}
+function reprendre(utilisateur) {                                // {contenu, date: f.getLastUpdated().getTime()} ou null
+}
+```
+
+Un modèle : les noms des champs et des arguments sont ceux de l'application, pas de Google.
+
+Côté page, un appel est une promesse :
+`new Promise((ok, echec) => google.script.run.withSuccessHandler(ok).withFailureHandler(echec)[fonction](...args))`.
+`deposer` ne rend rien : le succès est l'absence d'échec. La date que rend `reprendre` arbitre entre la copie locale
+(`stockage.ecrire`, avec une seconde clé `<cle>|date` posée à chaque écriture) et la distante : la plus récente gagne. Depuis Python, le même appel se fait par
+`js.google.script.run…` avec des arguments convertis (`pyodide.ffi.to_js(d, dict_converter=js.Object.fromEntries)`) et
+des gestionnaires gardés par `create_proxy` ; ou l'envoi reste en JavaScript et le pont Python n'expose que l'état à
+déposer, ce qui est plus simple.
+
+**L'outillage** : `clasp` (`npm install -g @google/clasp`, `clasp login`, l'API Apps Script activée sur
+`script.google.com/home/usersettings`) et `rclone` (un remote `drive`, `scope drive`). *Une fois* : `clasp create --type
+sheets --title <nom> --rootDir . --json` **dans un dossier temporaire** (le `Code.gs` vide du projet neuf n'écrase pas le
+vôtre), n'en garder que `scriptId` dans `.clasp.json` ; `appsscript.json` avec sa section `webapp` (`executeAs`,
+`access`) ; `clasp push -f` ; `clasp create-deployment -d "mise en place" --json` rend l'id du déploiement, l'URL est
+`https://script.google.com/macros/s/<id>/exec`, à ouvrir une fois connecté au compte pour autoriser le script (Drive,
+Sheets). Si cette page répond « Un problème est survenu », l'éditeur du projet (`script.google.com/d/<scriptId>/edit`,
+Exécuter > une fonction) pose la même demande, et elle y aboutit (vu le 25/09/2026). *Chaque mise à jour* : construire
+la page, `clasp push -f && clasp deploy -i <id du déploiement> -d "<libellé>"`, `rclone copy` des fichiers du Drive.
+**Sans `-i`, `clasp deploy` crée un NOUVEAU déploiement, donc une nouvelle URL**, et le lien déjà distribué meurt (coûté
+le 25/09/2026). `rclone` avertit que son client_id partagé pour Google Drive est retiré courant 2026 : répondre `y`
+jusque-là, puis créer le sien dans la console Google Cloud.
+
+**Vérifier en ligne** : Selenium + Chromium `--headless=new` (Firefox de la sonde en local, Chromium pour Google : il
+faut le réseau, donc un poste qui l'a), descendre les deux iframes (`switch_to.frame` de la première iframe de chaque
+niveau), attendre `window.etat`, lire `window.journal`. Le critère d'un dépôt réussi est un dépôt **postérieur** à
+l'action testée (poser `window.envoi = {date}` à chaque dépôt et comparer à un `Date.now()` pris après l'action), pas « un
+dépôt » : une page qui dépose dès l'ouverture (ce qu'elle a repris) validait une reprise vide (coûté le 25/09/2026). Puis
+`localStorage.clear()`, rechargement : l'état doit revenir depuis le Drive.
+
+**Inconnues pour Qt-WASM**, jamais mesurées au 26/09/2026, à lever dans l'ordre sur une page minimale (`exemple/`) avant
+de brancher une application : (1) Qt-WASM dessine-t-il dans l'iframe sandbox de Google (canvas, `requestAnimationFrame`,
+clavier) ; (2) `import()` cross-origin depuis cette iframe vers un hôte à soi (mesuré pour jsdelivr seulement) ;
+(3) le quota `localStorage` de l'origine `googleusercontent` ; (4) la mémoire (+360 Mio sur un poste de bureau) sur les
+postes visés ; (5) le temps de chargement à froid derrière le bandeau, avec la compression de l'hôte choisi.
+
+## Pièges et mesures (Qt-WASM 6.10, Pyodide-Qt 0.29.3)
+
+- **La boucle d'événements ne tourne pas seule** : compilé avec JSPI, Qt-WASM n'envoie ni minuteries ni événements
+  postés de lui-même, il attend qu'on reprenne SA boucle `exec()` suspendue (`onTimer` : `if (useAsyncify()) return;`,
+  `qeventdispatcher_wasm.cpp`) ; or cette boucle native, imbriquée, arrête tout (`Aborted()`). Mesuré : un `QTimer` ne
+  part que tant que la page redessine, puis plus du tout, `exec()` ou pas. `bloquant` pose donc une pompe
+  (`setInterval` de 10 ms qui appelle `processEvents()`), dès le chargement de `QtCore` ; avec elle, soixante
+  tics de 100 ms sur six secondes.
+- **`can_run_sync()` ment** pendant qu'une entrée est suspendue : un slot que Qt appelle alors y voit `True`, mais un
+  `run_sync` n'y reprend jamais (ni retour ni erreur). `bloquant` tient donc son propre compte (`_actif`, `_suspendus`) :
+  un slot venu de Qt n'est exécuté sur place que si aucune pile n'attend ; sinon il part à la tâche asyncio suivante.
+- **Un `started` de `QThread` émis avant `exec()`** laissait le `quit()` d'un travailleur rapide le précéder (`wait()`
+  rendait `False`) : il est émis à la tâche suivante, comme les slots d'un autre fil en Qt.
+
+- **Téléchargement** : `pyodide.asm.wasm` fait 32 Mio, 9,9 en gzip, 8,6 en brotli ; l'hôte doit compresser (une classe
+  de 30 postes à froid : 300 Mio si oui, 1,2 Gio sinon). Une archive d'application ne se compresse plus (zip).
+- **Mémoire** : +360 Mio sur un Firefox de bureau pour une application de 2 000 lignes ; un téléphone d'entrée de gamme
+  peut tuer l'onglet, d'où `stockage` pour reprendre au rechargement.
+- **Listes déroulantes** : Qt-WASM 6.10 referme un `QComboBox` au relâchement qui suit l'appui d'ouverture (le
+  relâchement tombe sur le cadre de la liste, personne ne le prend). Un filtre d'événements sur la liste, qui consomme ce
+  relâchement, le corrige ; la sonde `--tactile` sert à le vérifier.
+- **Clavier virtuel** : un clic dans un champ donne le focus à l'`<input>` caché de Qt (`inputmode=text`, le clavier d'un
+  téléphone monte) ; une liste déroulante au `focus-helper` (`inputmode=none`).
+- **Lecteur d'écran** : Qt-WASM n'expose que « boutons et cases à cocher » ; une vue complexe ne produit rien. Un usage
+  accessible reste au DOM.
+- **Ce que le navigateur ne fait plus** dans la fenêtre Qt : sélection et recherche dans le texte, traduction
+  automatique, clic droit. Safari (iPad, iPhone) : déclaré pris en charge par Qt, non essayé ici.
+- **Deux Pyodide** : la page (Pyodide-Qt, roues par URL seulement, ABI `cp313-cp313-pyemscripten_2025_0_wasm32`) et le
+  worker (Pyodide ordinaire, Python 3.14) ; les deux versions sont dans `versions.json`.
+- **`import js`** n'existe que dans le navigateur : jamais au niveau d'un module qui doit s'importer en natif (un test le
+  garantit ici) ; dans le worker, `js` existe mais ni `document` ni `localStorage`.
+- **La sonde** : Firefox ne descend pas sous 500 px de large (une largeur de téléphone se mesure en natif hors écran, ou
+  avec `--zoom`) ; Chromium n'ouvre pas sans socket Unix, ce qu'un bac à sable peut interdire. Selenium Manager tente de
+  télécharger geckodriver avant de prendre celui du système : sans réseau, ses messages sont du bruit, pas une panne.
+
+## Hébergement
+
+Pyodide-Qt (36 Mo, dont le `.wasm` de 32 : 9,9 en gzip) ne se versionne pas : `hebergement/telecharger.sh` rapporte la
+release épinglée dans `qtpy6/web/versions.json` (`archive`, `sha256` vérifiée ; un zip déjà téléchargé en argument, sans
+réseau) et la dépaquette dans `exemple/pyodide-qt/`. L'action `.github/workflows/pages.yml` fait la même chose et publie le
+dossier sur GitHub Pages quand le script, `versions.json` ou elle-même changent (ou à la main, *Run workflow*) :
+
+    indexURL: "https://smartaudiotools.github.io/qtpy6/pyodide-qt/"
+
+Un hôte statique à part, avec CORS ouvert, est inévitable : la page importe `pyodide.mjs` par `import()` depuis une autre
+origine, et l'application n'a alors plus à déployer le dossier avec sa page. Le dossier local (`./pyodide-qt/`) reste le
+bon choix pour développer et pour la sonde : pas de réseau, et les mesures de temps ne comptent que le chargement.
+
+Mise en service, une fois, avec `gh` authentifié (le jeton de l'action n'a pas le droit de créer le site : mesuré) :
+`gh api -X POST repos/SmartAudioTools/qtpy6/pages -f build_type=workflow`, l'équivalent de réglages → Pages →
+*Source : GitHub Actions* ; le push suivant, ou *Run workflow*, déploie. Puis, depuis n'importe où :
+
+```bash
+curl -sI https://smartaudiotools.github.io/qtpy6/pyodide-qt/pyodide.mjs | grep -i "access-control\|content-type"
+curl -sI -H "Accept-Encoding: gzip, br" https://smartaudiotools.github.io/qtpy6/pyodide-qt/pyodide.asm.wasm | grep -i "content-encoding\|content-length"
+```
+
+La première doit rendre `access-control-allow-origin: *` (Pages l'envoie sur tout). La seconde dit si le `.wasm` part
+compressé : sans `content-encoding`, ce sont 32 Mio à froid au lieu de 10, et il faut un hôte qui compresse le type
+`application/wasm`. Mesuré au premier déploiement (26/09/2026, depuis l'ancien dépôt qtpy6web, même action) : `access-control-allow-origin: *` sur tout, `content-type:
+application/wasm`, et le `.wasm` part en `content-encoding: gzip`, 10 516 295 octets pour 33 652 901 nus ; `pyodide.mjs`
+aussi en gzip, `python_stdlib.zip` tel quel (2,4 Mo, déjà compressé). Aucun en-tête d'isolation (COOP/COEP)
+n'est nécessaire : ce build est mono-fil. Le cache du navigateur garde le `.wasm` d'une visite à l'autre (`ETag`).
+
+Changer de version : `versions.json` seul (`archive`, `sha256`, `version`, `abi`) ; `preparer()` compare la version
+chargée à celle du fichier et l'écrit au journal si elles diffèrent. L'ABI des roues change avec le Python embarqué :
+toute roue compilée pour la page est à reconstruire.
+
+Le site ainsi publié distribue PyQt6, donc du GPL v3 : `hebergement/LICENSE-Pyodide-Qt.txt` est servi à côté, et
+`hebergement/index.html` renvoie aux sources de la release (la recette de construction de Qt, PyQt6 et Pyodide). Le
+dépôt lui-même ne contient aucun binaire et reste MIT.
+
+## Licence
+
+MIT (`LICENSE.txt`). Pyodide-Qt, que la page charge et que l'hébergement distribue, est GPL v3 (`hebergement/LICENSE-Pyodide-Qt.txt`) ; Pyodide est MPL 2.0 ; Qt est LGPL v3.

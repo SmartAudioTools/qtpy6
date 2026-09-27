@@ -1,2 +1,4 @@
 include CHANGELOG.md
 include tests/conftest.py
+include web.md
+include tests/test_web.py

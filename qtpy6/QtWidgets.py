@@ -1,5 +1,8 @@
 """The binding's QtWidgets with PySide6's names (QFileSystemModel included), QFileDialog's `dir` keyword,
-and the QT_FONT / QT_FONT_SIZE settings applied by QApplication."""
+the QT_FONT / QT_FONT_SIZE settings applied by QApplication - and, in the browser, the blocking exec() of
+dialogs and menus, and their static functions (qtpy6.web.bloquant)."""
+import sys
+
 from . import PYQT6, QT_FONT, QT_FONT_SIZE, _binding
 
 _binding.load(globals(), 'QtWidgets')
@@ -7,6 +10,10 @@ _binding.load(globals(), 'QtWidgets')
 # QFileSystemModel: in QtWidgets for PySide6 (its Qt5 place), moved to QtGui by PyQt6.
 if PYQT6:
     from PyQt6.QtGui import QFileSystemModel  # noqa: F401
+
+if sys.platform == 'emscripten' and PYQT6:
+    from .web.bloquant import doubler_qtwidgets
+    doubler_qtwidgets(globals())
 
 # QFileDialog's static functions: the keyword is `dir` in PySide6, `directory` in PyQt6; both work.
 _alias, _name = ('dir', 'directory') if PYQT6 else ('directory', 'dir')

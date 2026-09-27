@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Application</title>
+<style>
+  /* Le conteneur de Qt occupe toute la fenêtre et A SA TAILLE dès le chargement : Qt la prend au démarrage, un élément
+     en display:none lui donnerait une fenêtre de 0 px. Caché, il reste dimensionné (visibility, pas display). */
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #efefef; font-family: sans-serif; }
+  #qt { position: fixed; inset: 0; display: flex; }
+  #qt[hidden] { display: flex !important; visibility: hidden; }
+  #attente { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; color: #444; }
+</style></head><body>
+<div id="attente">Chargement…</div>
+<div id="qt" hidden></div>
+<script type="module">
+import { preparer, lancer, print, rendu } from "./qtpy6web.js";  // ou l'URL où qtpy6web.js est servi
+window.etat = "en cours";  // ce que lit qtpy6.web.sonde : l'état attendu, ou "erreur"
+const attente = document.getElementById("attente"), qt = document.getElementById("qt");
+try {
+  const py = await preparer(qt, {
+    indexURL: "./pyodide-qt/",                                       // Pyodide-Qt (à côté, ou un hôte avec CORS)
+    archives: [{ url: "./app.zip", dossier: "/home/pyodide/app" }],  // qtpy6.web.assembler : le code et les polices
+    sur_ligne: l => attente.textContent = l,
+  });
+  // Le script tel qu'on le lance sur un bureau (python app.py), ``sys.exit(app.exec())`` compris.
+  const { pret, fin } = lancer(py, "/home/pyodide/app/app.py");
+  fin.then(code => print(`application terminée (code ${code})`), e => { print("ERREUR " + (e.message || e)); window.etat = "erreur"; });
+  await pret;
+  qt.hidden = false; attente.remove();
+  await rendu();
+  if (window.etat === "en cours") window.etat = "fini";
+} catch (e) { print("ERREUR " + (e.message || e)); console.error(e); window.etat = "erreur"; }
+</script></body></html>

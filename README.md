@@ -118,6 +118,16 @@ Sous Windows, l'import rend aussi le processus « DPI aware ».
 - `qtpy6.QtStateMachine` n'existe que si le binding sait l'importer : les roues
   PyQt6 livrent le module sans `libQt6StateMachine`.
 
+## Dans le navigateur
+
+Le même code tourne dans une page web, sous Pyodide-Qt (Qt 6 et PyQt6 en WebAssembly) :
+`python -m qtpy6.web.construire app.py site/` en fait un site statique, `sys.exit(app.exec())` compris. Ce que Qt-WASM
+n'a pas et qui a un nom Qt, qtpy6 le double sous ce nom, dans le navigateur seulement : les `exec()` et boîtes statiques
+(`QMessageBox.question`, `QFileDialog.getOpenFileName`…) attendent leur réponse, `QThread` et ses verrous deviennent des
+fils coopératifs, `QtCore.QProcess` un Web Worker Pyodide, `QFontDatabase.systemFont(FixedFont)` la police fixe que
+l'application a chargée. Le reste (chargeur de la page, polices, tactile, stockage, archive, sonde Firefox) est dans
+`qtpy6.web` : voir [web.md](web.md), qui dit aussi ce qui diffère encore du bureau.
+
 ## Référence
 
 | Nom | Rôle |
@@ -130,15 +140,22 @@ Sous Windows, l'import rend aussi le processus « DPI aware ».
 | `QT_SCALE`, `QT_FONT`, `QT_FONT_SIZE` | valeurs lues à l'import (`QT_SCALE` : flottant, ou `None` tant que `auto` n'est pas résolu) |
 | `scaled(obj, *more)` | `obj × QT_SCALE`, résout `auto` au premier appel (il faut une `QApplication`) |
 | `qtpy6.QtSelector` | les widgets de réglage et `main()` (point d'entrée `qtselector`) |
+| `qtpy6.web` | le navigateur : `navigateur()`, `application()`, `lancer()`, `construire`, `bloquant`, `fils`, `tactile`, `dispositions`, `travailleur`, `stockage`, `assembler`, `sonde` ([web.md](web.md)) |
 
 ## Tests et niveau de preuve
 
-- **PySide6 6.11.1 et PyQt6 6.11 (Qt 6.11.1) : testés** — 56 tests, verts sur
-  les deux, sur Python 3.12, 3.13 et 3.14. `tests/test_qtpy6.py` tourne dans le
+- **PySide6 6.11.1 et PyQt6 6.11 (Qt 6.11.1) : testés** — 73 tests, verts sur
+  les deux (sur Python 3.12, 3.13 et 3.14 avant la fusion du navigateur, 3.13 seul depuis). `tests/test_qtpy6.py` tourne dans le
   processus de test (un binding par lancement) ; `tests/test_process.py` lance
   des interpréteurs neufs et couvre, pour chaque binding installé, la sélection
   (environnement, fichier de session, binding déjà importé, valeur invalide,
   aucun binding), les réglages de police et d'échelle, `QtSelector` et sa démo.
+- **Le navigateur : testé en direct dans Firefox sans interface** (Pyodide-Qt 0.29.3, Qt 6.10.2,
+  PyQt6 seul) : une application de bureau construite telle quelle (`construire`) a enchaîné
+  `QMessageBox.question`, `QInputDialog`, un `QMenu.exec`, un `QThread` attendu par `wait()`, l'ouverture et
+  l'enregistrement d'un fichier, puis `quit()` jusqu'au code de sortie. `tests/test_web.py` (15 tests)
+  rejoue en natif la mécanique de suspension, `greenlet` y tenant le rôle de JSPI : il prouve la
+  logique, pas le comportement de Qt-WASM.
 - **La branche Windows de `_env.py` n'a tourné que contre des doublures**
   (`tests/test_env_windows.py` : `winreg`, `nt`, `ctypes.windll` et `setx`
   simulés). Cela prouve que le code s'exécute et prend les bonnes branches,

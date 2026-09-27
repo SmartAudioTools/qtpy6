@@ -4,3 +4,9 @@ __pycache__/
 build/
 dist/
 .claude/
+exemple/pyodide-qt/
+exemple/pyodide/
+exemple/app.zip
+exemple/*.png
+.mcp.json
+hebergement/*.zip

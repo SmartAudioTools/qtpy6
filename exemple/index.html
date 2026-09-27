@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>qtpy6.web : Compteur</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #efefef; font-family: sans-serif; }
+  #qt { position: fixed; inset: 0; display: flex; }
+  #qt[hidden] { display: flex !important; visibility: hidden; }
+  #attente { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; color: #444; }
+</style></head><body>
+<div id="attente">Chargement…</div>
+<div id="qt" hidden></div>
+<script type="module">
+// L'exemple, servi depuis la racine du dépôt (python -m qtpy6.web.sonde --racine . exemple/index.html capture.png, ou
+// python -m http.server à la racine) : le gabarit js/gabarit.html, plus ?auto qui clique le bouton et attend l'écho.
+import { preparer, print, rendu } from "../qtpy6/web/js/qtpy6web.js";
+window.etat = "en cours";
+const attente = document.getElementById("attente"), qt = document.getElementById("qt");
+try {
+  const py = await preparer(qt, {
+    indexURL: "./pyodide-qt/",
+    archives: [{ url: "./app.zip", dossier: "/home/pyodide/app" }],
+    sur_ligne: l => attente.textContent = l,
+  });
+  const t0 = performance.now();
+  py.pyimport("compteur").demarrer();
+  print(`fenêtre montrée : ${(performance.now() - t0).toFixed(0)} ms`);
+  qt.hidden = false; attente.remove();
+  await rendu();
+  if (new URLSearchParams(location.search).has("auto")) {
+    await py.runPythonAsync(`
+import asyncio, compteur
+f = compteur.FENETRE
+f.bouton.click()
+print("compteur après un clic :", f.affichage.text(), "; fenêtre", f.width(), "x", f.height())
+for i in range(160):
+    await asyncio.sleep(0.25)
+    if "appel 1" in f.echo.to_plain_text(): break
+print(f"écho au bout de {(i + 1) * 0.25:.2f} s :", repr(f.echo.to_plain_text()))
+f.grab().save("/capture.png")
+`);
+    await rendu();
+    const png = py.FS.readFile("/capture.png");
+    window.captures = { grab: btoa(Array.from(png, o => String.fromCharCode(o)).join("")) };
+  }
+  print("tas wasm : " + (py._module.HEAPU8.length / 1048576).toFixed(0) + " Mio");
+  window.etat = "fini";
+} catch (e) { print("ERREUR " + (e.message || e)); console.error(e); window.etat = "erreur"; }
+</script></body></html>

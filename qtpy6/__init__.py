@@ -25,7 +25,7 @@ import sys
 
 from ._env import get_env, set_env  # noqa: F401  (set_env is part of the API)
 
-__version__ = '0.1.0'
+__version__ = '0.2.0'
 
 API_NAMES = {'pyside6': 'PySide6', 'pyqt6': 'PyQt6'}
 

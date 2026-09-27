@@ -1,5 +1,8 @@
 """The binding's QtCore with PySide6's names: Signal, Slot, Property,
-SignalInstance, QEnum, ClassInfo, __version__."""
+SignalInstance, QEnum, ClassInfo, __version__ - and, in the browser, what
+Qt-WASM lacks: QProcess, the threads and locks, a nested exec() (qtpy6.web)."""
+import sys
+
 from . import PYQT6, _binding
 from . import QT_VERSION as _QT_VERSION  # PyQt's QtCore has an integer QT_VERSION
 
@@ -28,6 +31,17 @@ if PYQT6:
             _singleShot(msec, *args)
 
     QTimer.singleShot = staticmethod(_singleShot_with_receiver)
+
+if sys.platform == 'emscripten':
+    # Qt-WASM has no QProcess (a browser has no processes): a Pyodide Web Worker under its surface.
+    from .web.travailleur import ProcessusWeb as QProcess  # noqa: F401
+
+if sys.platform == 'emscripten' and PYQT6:  # Pyodide-Qt is PyQt6
+    # One thread, and no nested event loop: cooperative threads, and exec() suspended by JSPI.
+    from .web import bloquant, fils
+    fils.doubler(globals())
+    bloquant.doubler_qtcore(globals())
+    fils.doubler_sleep()
 
 __version__ = _QT_VERSION
 __version_info__ = tuple(int(part) for part in _QT_VERSION.split('.'))
