@@ -3,7 +3,13 @@
 Suite de « qtpy6.web, fusion et trous comblés » (même jour, commit 98269d4). Même but : dire ce qui a été fait, POURQUOI,
 ce qui a été écarté, et le niveau de preuve. La doc de référence reste `web.md`.
 
-## 1. Les trois points demandés
+## 1. Les demandes
+
+La demande, mot pour mot : *« commence par documenter tout ce que tu as fait dans /DATA/Python/qtpy6/notes/, ajoute des
+instruction dans CLAUDE.md général à mon profil, pour systematiquement commenter ce qui a été fait et les choix que tu
+as fait argumenté. puis commite qtpy6 et enfin aborde les 3 points. »* La note de l'étape précédente est « qtpy6.web,
+fusion et trous comblés » (commit 98269d4). La règle est dans `Commun/config_files/Claude/CLAUDE.md` de SmartOS, révision 170,
+avec comme déclencheur la demande d'autorisation de commiter. Les trois points :
 
 1. `subprocess.run` dans le navigateur, comme `QProcess` l'était déjà.
 2. Safari : qu'en est-il de JSPI, sur lequel tout `exec()` et toute attente reposent ?
@@ -89,6 +95,30 @@ classe, c'était doubler les chemins à tester pour un appelant qui n'existe plu
   `lecteur.py` active de lui-même les cibles au doigt (`--tactile` force toujours). Choix : même règle que le navigateur,
   un écran tactile présent compte même si l'élève se sert de la souris — le rendu d'un PC tactile change donc (cibles de
   44 px), accepté par l'utilisateur. Écarté : QScroller partout ou un style « doigt » de Qt, qui n'existe pas.
+
+## 5 bis. Les questions posées en chemin, et leurs réponses
+
+- *« tout ce qui est spécifique au web ne se charge que si sur le web ? »* Oui, mesuré sur le bureau par `sys.modules`
+  après le démarrage du lecteur : sont chargés seulement `qtpy6.web` (pour `navigateur()` et `application()`), `tactile`
+  et `dispositions` (`Rangee` sert aussi en natif). Ne sont PAS chargés : `travailleur`, `sous_processus`, `bloquant`,
+  `fils`, `stockage`, ni `js`, `pyodide` ou `sqlite3`. Les modules Qt de qtpy6 n'importent les doublures que sous
+  `sys.platform == 'emscripten'`. Non fait : sortir `tactile` et `dispositions` de `qtpy6.web`. Ils servent aussi en natif,
+  mais ce déplacement ne coûtait que des imports à renommer et n'a pas été demandé.
+- *« le tactil n'est pas intégré dans Qt ? »* En partie. Qt fournit les `QTouchEvent`, la conversion d'un toucher en
+  clic, et `QScroller` (défilement au doigt, jamais activé d'office : `tactile.defiler_au_doigt` le branche). Les styles
+  de Qt Widgets n'ont en revanche aucun mode « doigt » : aucun ne grossit les boutons, les cases ou l'ascenseur. C'est ce
+  que fait `tactile.activer`, par une feuille de style ajoutée à celle de l'application.
+- *« ça garderait le meme rendu ? c'est un bonne idée ? »* puis *« le lecteur natif va tourner sur des pc tactiles »*.
+  Sur un PC sans écran tactile, le rendu est identique (capture hors écran). Sur un PC tactile, il change (cibles de 44 px),
+  et c'est voulu. D'où la détection native (§5).
+
+## Le commit de SmartTeacher (révision 134) : les modifications d'une autre session laissées de côté
+
+`QCM/README.md` et `QCM/modele.py` contenaient aussi le travail en cours d'une autre session (la classe `Paresse` et son
+import de `QCoreApplication`, liés à `sonde_fluidite.py` ; deux passages du README). Seuls mes passages ont été commités :
+version d'origine plus mon patch, commit, puis remise du fichier complet. Vérifié ensuite par `hg diff` : il ne reste
+modifié que le travail de l'autre session. Écarté : `hg commit -i` avec les réponses envoyées d'avance, car avec dix
+passages par fichier un décalage d'une seule réponse aurait commité le travail de l'autre session.
 
 ## 6. Niveau de preuve
 
