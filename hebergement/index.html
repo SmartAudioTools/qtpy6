@@ -42,6 +42,9 @@
   qu'écrite pour le bureau : un <code>.py</code>, ou un <code>.zip</code> dont le point d'entrée est
   <code>__main__.py</code>, <code>paquet/__main__.py</code>, le script du nom du paquet, ou le seul <code>.py</code>.
   Le fichier facultatif lui est passé en argument, comme <code>python script.py fichier</code>.</p>
+  <p>Le script peut importer la bibliothèque standard, PyQt6 (par qtpy6), qtpy6 et
+  <a href="https://github.com/SmartAudioTools/serializejson">serializejson</a>, ainsi que tout module en Python pur
+  livré dans son <code>.zip</code>. Aucune autre bibliothèque ne s'installe : il n'y a pas de <code>pip</code>.</p>
   <p>Par l'adresse : <code>?script=URL&amp;fichier=URL</code> (adresses encodées ; <code>fichier</code> peut se répéter).
   Le site qui sert ces fichiers doit autoriser leur lecture depuis une autre page (CORS) : c'est le cas de
   <code>raw.githubusercontent.com</code> et des gists.</p>

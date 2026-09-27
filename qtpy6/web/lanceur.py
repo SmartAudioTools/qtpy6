@@ -9,7 +9,8 @@ Dans un zip, le point d'entrée est cherché dans cet ordre (``point_d_entree``)
     un seul .py à la racine            le script                          python script.py
 
 Un zip dont la racine n'est qu'un dossier sans ``__init__.py`` (le « Download ZIP » de GitHub : ``depot-main/``) est
-lu depuis ce dossier."""
+lu depuis ce dossier, et une bibliothèque livrée dans le zip avec son ``*.dist-info`` (``qtpy6.web.assembler``,
+``distributions``) n'est jamais prise pour le point d'entrée."""
 
 import os
 import zipfile
@@ -26,7 +27,11 @@ def point_d_entree(dossier, nom):
         return point_d_entree(entrees[0], nom)
     if (racine / "__main__.py").is_file():
         return racine / "__main__.py", None
-    dossiers = sorted(p for p in entrees if p.is_dir())
+    # une bibliothèque livrée avec l'application (son *.dist-info à côté, dont le RECORD la nomme) n'est pas l'application,
+    # même quand elle a un __main__.py (markdown, pygments)
+    livrees = {ligne.split("/")[0] for info in racine.glob("*.dist-info") if (info / "RECORD").is_file()
+               for ligne in (info / "RECORD").read_text().splitlines()}
+    dossiers = sorted(p for p in entrees if p.is_dir() and p.name not in livrees)
     for regle in ((lambda d: d / "__main__.py", True), (lambda d: d / f"{d.name}.py", False)):
         trouves = [d for d in dossiers if regle[0](d).is_file()]
         if len(trouves) > 1:

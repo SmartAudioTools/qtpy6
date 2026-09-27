@@ -18,9 +18,11 @@ const envoyer = m => parent.postMessage(m, "*");  // à qui intègre ce cadre : 
 let etat = "en cours";
 const poser = e => { etat = e; envoyer({ etat, journal }); };
 try {
+  const roues = await (await fetch("./roues.json")).json();  // serializejson et apply : construire_site.py
   const py = await preparer(qt, {
     indexURL: "./pyodide-qt/",
     archives: [{ url: "./qtpy6.zip", dossier: "/home/pyodide/qtpy6" }],
+    roues: roues.map(r => "./roues/" + r),
     sur_ligne: ligne => envoyer({ ligne }),
   });
   const { script, fichiers } = await new Promise(r => {

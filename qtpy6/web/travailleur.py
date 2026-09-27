@@ -11,12 +11,12 @@ compris (quelques secondes).
                                               ``expire(numero)`` (rien au bout de ``delai`` secondes) ; ce que la fonction
                                               imprime arrive au fil de l'eau par ``sortie(numero, texte)``
         tuer()                                termine le worker ; le prochain ``appeler`` en démarre un autre
-    ProcessusWeb                              la surface de ``QProcess`` (start, write, readAllStandardOutput, kill,
-                                              readyReadStandardOutput, finished) sur un Travailleur : chaque ligne écrite
-                                              est passée à ``module.fonction(ligne)``, ce qu'il imprime est la sortie ;
-                                              c'est lui que ``qtpy6.QtCore.QProcess`` désigne dans le navigateur
-    configurer(indexURL, archives, module, fonction, cwd)   ce que ProcessusWeb, construit sans argument comme QProcess,
-                                              utilise : à appeler une fois, par la page ou le pont de l'application
+    ProcessusWeb                              ``QProcess`` dans le navigateur (``qtpy6.QtCore.QProcess`` le désigne) :
+                                              ``start(sys.executable, ["-u", "script.py", …])`` lance le script en
+                                              ``__main__`` dans un worker neuf, ``write`` est son stdin (JSPI)
+    configurer(indexURL, …)                   le Pyodide du worker, s'il ne vient pas de ``versions.json`` ; avec un
+                                              ``module``, l'ancien contrat : chaque ligne écrite est passée à
+                                              ``module.fonction(ligne)`` d'un Travailleur
 
 Les arguments et les retours sont convertis entre Python et JavaScript (dict, list, str, nombres, None) : une fonction
 du worker reçoit des listes et des dicts ordinaires et rend de même. Elle peut être ``async``.
@@ -25,7 +25,11 @@ Le worker est lu dans ce paquet (``js/travailleur.js``) et lancé depuis une URL
 archives sont rendues absolues ici, un worker né d'un blob n'ayant pas d'adresse à laquelle les rapporter."""
 
 import importlib.resources
+import io
 import itertools
+import json
+import os
+import zipfile
 
 from qtpy6.QtCore import QObject, QTimer, Signal  # QtCore en cours de chargement : il importe ce module pour QProcess
 
@@ -33,10 +37,11 @@ REGLAGES = {}  # configurer() : indexURL, archives, module, fonction, cwd
 _URL_WORKER = None
 
 
-def configurer(indexURL, archives, module, fonction="ligne", cwd="/home/pyodide"):
-    """Ce que ``ProcessusWeb()`` utilise : le Pyodide du worker (``indexURL``), ``archives`` = ``[(url_du_zip, dossier)]``
-    dépaquetées dans le worker, ``module`` importé après (avec ``cwd`` pour dossier courant et chaque dossier d'archive dans
-    ``sys.path``), ``fonction`` celle qui reçoit chaque ligne écrite."""
+def configurer(indexURL, archives=(), module=None, fonction="ligne", cwd="/home/pyodide"):
+    """Ce que ``ProcessusWeb()`` utilise : le Pyodide du worker (``indexURL`` ; sans appel, celui de ``versions.json``). Avec
+    un ``module``, l'ancien contrat : ``archives`` = ``[(url_du_zip, dossier)]`` dépaquetées dans le worker, ``module``
+    importé après (avec ``cwd`` pour dossier courant et chaque dossier d'archive dans ``sys.path``), ``fonction`` celle qui
+    reçoit chaque ligne écrite, au lieu du script que ``start`` demande."""
     REGLAGES.update(indexURL=indexURL, archives=list(archives), module=module, fonction=fonction, cwd=cwd)
 
 
@@ -140,10 +145,16 @@ class Travailleur(QObject):
 
 
 class ProcessusWeb(QObject):
-    """La surface de ``QProcess`` qu'un code écrit pour un sous-processus utilise, sur un ``Travailleur`` : ``write`` passe
-    chaque ligne à ``module.fonction(ligne)`` (les ``REGLAGES`` de ``configurer``), ce que le worker imprime se lit par
-    ``readAllStandardOutput`` après ``readyReadStandardOutput``, ``kill`` termine le worker et émet ``finished``. Un
-    ``start`` après ``kill`` en relance un neuf, comme un vrai processus."""
+    """La surface de ``QProcess`` dans le navigateur : ``start(sys.executable, ["-u", "enfant.py", ...])`` lance vraiment
+    ``enfant.py`` dans un Web Worker, sous le Pyodide ordinaire (``versions.json``), avec une copie du dossier du script
+    (au même chemin : ses imports et son ``__file__`` sont ceux du bureau) et ``sys.argv``. Ce que ``write`` envoie est
+    son stdin, qu'il lit comme sur le bureau (``input()``, ``sys.stdin.readline()`` attendent : JSPI, ``run_sync``) ;
+    ``closeWriteChannel`` lui donne la fin de fichier ; ce qu'il imprime (stdout et stderr fusionnés) se lit par
+    ``readAllStandardOutput`` après ``readyReadStandardOutput`` ; ``finished(code)`` quand il se termine, ou après ``kill``.
+    Un ``start`` après ``kill`` en relance un neuf, comme un vrai processus.
+
+    Si ``configurer`` a donné un ``module``, c'est l'ancien contrat : le programme lancé est ignoré, et chaque ligne
+    écrite est passée à ``module.fonction(ligne)`` d'un ``Travailleur``."""
 
     readyReadStandardOutput = Signal()
     finished = Signal(int)
@@ -153,22 +164,42 @@ class ProcessusWeb(QObject):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.travailleur, self.tampon = None, b""
+        self.travailleur, self.worker, self.tampon, self.dossier_travail = None, None, b"", None
 
     def setProcessChannelMode(self, *_):
         pass
 
-    def start(self, *_):
-        r = REGLAGES
-        self.travailleur = Travailleur(r["indexURL"], r["archives"], r["module"], r["cwd"], parent=self)
-        self.travailleur.sortie.connect(lambda _, texte: self._arrive(texte.encode("utf-8")))
-        self.travailleur.erreur.connect(self._erreur)
-        self.travailleur.demarrer()
+    def setWorkingDirectory(self, dossier):
+        self.dossier_travail = dossier
+
+    def start(self, programme="", arguments=(), *_):
+        if REGLAGES.get("module"):
+            return self._demarrer_module()
+        import js  # noqa: PLC0415
+        from pyodide.ffi import create_proxy, to_js  # noqa: PLC0415
+
+        cible, argv = _commande(arguments)
+        dossier = os.path.dirname(os.path.abspath(cible)) if argv[0] != "-m" else os.getcwd()
+        self.worker = js.Worker.new(_url_worker(), type="module")
+        self._recepteur = create_proxy(self._recevoir)
+        self.worker.onmessage = self._recepteur
+        zip_ = to_js(_zipper(dossier))
+        self.worker.postMessage(_objet({"lancer": {
+            "indexURL": js.URL.new(REGLAGES.get("indexURL") or _pyodide(), js.location.href).href, "zip": zip_,
+            "dossier": dossier, "argv": argv, "cwd": self.dossier_travail or os.getcwd()}}), [zip_.buffer])
 
     def write(self, octets):
-        for ligne in bytes(octets).decode("utf-8").splitlines():
-            if ligne:
-                self.travailleur.appeler(REGLAGES["fonction"], ligne)
+        if self.travailleur is not None:
+            for ligne in bytes(octets).decode("utf-8").splitlines():
+                if ligne:
+                    self.travailleur.appeler(REGLAGES["fonction"], ligne)
+        elif self.worker is not None:
+            self.worker.postMessage(_objet({"entree": bytes(octets).decode("utf-8")}))
+        return len(octets)
+
+    def closeWriteChannel(self):
+        if self.worker is not None:
+            self.worker.postMessage(_objet({"entree": None}))
 
     def readAllStandardOutput(self):
         octets, self.tampon = self.tampon, b""
@@ -178,7 +209,30 @@ class ProcessusWeb(QObject):
         if self.travailleur is not None:
             self.travailleur.tuer()
             self.travailleur = None
-            QTimer.singleShot(0, lambda: self.finished.emit(0))  # comme QProcess : ``finished`` après le retour de ``kill``
+        elif self.worker is not None:
+            self.worker.terminate()
+            self.worker = None
+        else:
+            return
+        QTimer.singleShot(0, lambda: self.finished.emit(0))  # comme QProcess : ``finished`` après le retour de ``kill``
+
+    def _demarrer_module(self):
+        r = REGLAGES
+        self.travailleur = Travailleur(r["indexURL"], r["archives"], r["module"], r["cwd"], parent=self)
+        self.travailleur.sortie.connect(lambda _, texte: self._arrive(texte.encode("utf-8")))
+        self.travailleur.erreur.connect(self._erreur)
+        self.travailleur.demarrer()
+
+    def _recevoir(self, evenement):
+        m = evenement.data.to_py()
+        if m.get("sortie"):  # le décodeur au fil de l'eau rend "" sur un caractère coupé
+            self._arrive(m["sortie"].encode("utf-8"))
+        elif "fin" in m:
+            self.worker.terminate()
+            self.worker = None
+            self.finished.emit(m["fin"])
+        elif "erreur" in m:  # Pyodide injoignable, JSPI absent : le processus n'a pas pu naître
+            self._erreur(0, m["erreur"])
 
     def _arrive(self, octets):
         self.tampon += octets
@@ -188,3 +242,40 @@ class ProcessusWeb(QObject):
         self._arrive(f"\n■ {texte}\n".encode("utf-8"))
         self.kill()  # le worker ne servira plus : le prochain ``start`` en relance un
 
+
+def _commande(arguments):
+    """``(chemin du script ou nom du module, argv)`` d'une ligne de commande Python : les options d'une lettre sans
+    argument (``-u``, ``-B``…) sont sans objet dans le worker ; ``-m module`` donne ``argv[0] == "-m"``."""
+    args = list(arguments)
+    while args and args[0].startswith("-") and args[0] != "-m":
+        if args[0] in ("-c", "-X", "-W"):
+            raise ValueError(f"ProcessusWeb : l'option {args[0]} n'est pas prise en charge")
+        args.pop(0)
+    if not args:
+        raise ValueError("ProcessusWeb : ni script ni -m module à lancer")
+    if args[0] == "-m":
+        return args[1], args
+    return args[0], [os.path.abspath(args[0]), *args[1:]]
+
+
+def _zipper(dossier):
+    """Le dossier du script, zippé sans compression (le worker le dépaquette au même chemin)."""
+    tampon = io.BytesIO()
+    with zipfile.ZipFile(tampon, "w", zipfile.ZIP_STORED) as z:
+        for racine, dossiers, fichiers in os.walk(dossier):
+            dossiers[:] = [d for d in dossiers if d != "__pycache__"]
+            for f in fichiers:
+                chemin = os.path.join(racine, f)
+                z.write(chemin, os.path.relpath(chemin, dossier))
+    return tampon.getvalue()
+
+
+def _pyodide():
+    return json.loads(importlib.resources.files(__package__).joinpath("versions.json").read_text())["pyodide"]["url"]
+
+
+def _objet(message):
+    import js  # noqa: PLC0415
+    from pyodide.ffi import to_js  # noqa: PLC0415
+
+    return to_js(message, dict_converter=js.Object.fromEntries)

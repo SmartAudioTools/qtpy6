@@ -1,6 +1,6 @@
 # Publie le site de qtpy6 sur GitHub Pages (https://smartaudiotools.github.io/qtpy6/) : la page de lancement d'un script
-# quelconque et Pyodide-Qt (pyodide-qt/), que hebergement/construire_site.py assemble. Le binaire n'est jamais dans le
-# dépôt, hebergement/telecharger.sh le rapporte de la release épinglée dans qtpy6/web/versions.json (empreinte vérifiée).
+# quelconque, ses roues (hebergement/roues/) et Pyodide-Qt (pyodide-qt/), que hebergement/construire_site.py assemble.
+# Pyodide-Qt n'est jamais dans le dépôt, hebergement/telecharger.sh le rapporte de la release épinglée dans qtpy6/web/versions.json (empreinte vérifiée).
 # Ne tourne que si l'un de ces fichiers change (qtpy6/ : le site en sert une copie, qtpy6.zip), ou à la main. Le site Pages doit exister AVANT (web.md, « Hébergement ») :
 # le jeton de l'action ne peut pas le créer (« enablement: true » de configure-pages échoue en « Resource not accessible
 # by integration », mesuré le 26/09/2026), et sans lui configure-pages s'arrête sur « Get Pages site failed ».

@@ -122,13 +122,34 @@ numero = w.appeler("echo", "bonjour", delai=60)
 w.tuer()                                       # le seul « Arrêter » qu'un navigateur connaisse ; le prochain appel relance
 ```
 
-`ProcessusWeb` pose sur un `Travailleur` la surface de `QProcess` qu'un code écrit pour un sous-processus utilise
-(`start`, `write`, `readAllStandardOutput`, `kill`, `readyReadStandardOutput`, `finished`) : chaque ligne écrite est passée
-à `module.fonction(ligne)`, ce qu'il imprime est la sortie. `configurer(indexURL, archives, module, fonction, cwd)` lui
-donne ses réglages une fois pour toutes, et dans le navigateur `qtpy6.QtCore.QProcess` EST `ProcessusWeb` (alias
-snake_case compris) : le code de l'application écrit `QProcess(self)` et ne voit pas la différence. Les URL passées au worker sont relatives à la
-**page** (le worker naît d'un `blob:` et n'a pas d'adresse propre : elles sont rendues absolues côté Python). Un
-`import()` de `pyodide.mjs` depuis un autre hôte exige CORS.
+Dans le navigateur, `qtpy6.QtCore.QProcess` EST `ProcessusWeb` (alias snake_case compris) : le code écrit pour le
+bureau, `QProcess(self).start(sys.executable, ["-u", "enfant.py", …])`, tourne sans une ligne changée. Le script (ou
+`-m module`) est lancé en `__main__` dans un Web Worker neuf, avec un Pyodide ordinaire : son dossier y est recopié au
+même chemin (zip, sans `__pycache__`), `sys.argv` et le dossier de travail sont ceux du bureau. Ce que `write` envoie
+est son stdin, qu'il lit comme sur le bureau (`input()`, `sys.stdin.readline()`, `for ligne in sys.stdin` attendent la
+prochaine écriture), `closeWriteChannel` lui donne la fin de fichier ; stdout et stderr arrivent fusionnés par
+`readyReadStandardOutput`, et `finished(code)` porte le code de `sys.exit`. Les options d'une lettre (`-u`, `-B`) sont
+sans objet ; `-c`, `-X`, `-W` lèvent `ValueError`.
+
+L'attente sur stdin tient à **JSPI** (`pyodide.ffi.run_sync`, le code tournant sous `runPythonAsync`), sans
+`SharedArrayBuffer` : elle marche donc dans le cadre isolé du site, sans COOP/COEP (Firefox 155, mesuré le 27/09/2026 :
+l'essai ci-dessous rend dans le cadre exactement ce qu'il rend sur le bureau). Un navigateur sans JSPI (Safari ?
+non mesuré) refuse le lancement, le message arrive sur la sortie du processus. Chaque `start` coûte un Pyodide (~1,4 s) :
+c'est un processus, pas un fil. Le Pyodide du worker vient de `versions.json` (jsdelivr), ou de
+`travailleur.configurer(indexURL)`. Les URL passées au worker sont relatives à la **page** (le worker naît d'un `blob:`
+et n'a pas d'adresse propre : elles sont rendues absolues côté Python) ; un `import()` de `pyodide.mjs` depuis un autre
+hôte exige CORS.
+
+```python
+p = QProcess()                                   # le même code sur le bureau et dans le navigateur
+p.readyReadStandardOutput.connect(lambda: print(bytes(p.readAllStandardOutput()).decode(), end=""))
+p.finished.connect(lambda code, *_: app.quit())  # enfant.py : input(), puis sum(int(l) for l in sys.stdin), sys.exit(3)
+p.start(sys.executable, ["-u", "enfant.py", "arg1"])
+p.write(b"Alice\n2\n3\n"); p.closeWriteChannel()
+```
+
+L'ancien contrat reste pour qui le demande : `configurer(indexURL, archives, module, fonction, cwd)` avec un `module`
+ignore le programme lancé, et passe chaque ligne écrite à `module.fonction(ligne)` d'un `Travailleur`.
 
 ## Rendre une application qtpy6 compatible
 
@@ -146,8 +167,8 @@ Le plus souvent rien : `construire` et le script tel quel. Ce qui reste différe
    statique nu suffit). Un `run()` qui calcule sans jamais appeler `time.sleep`, `msleep`, un verrou ou `wait()` garde la
    main jusqu'au bout et fige l'écran pendant ce temps ; `threading.Thread` et `multiprocessing` ne sont pas doublés. Un
    vrai calcul long va dans un `Travailleur`.
-4. **`QProcess` reste `QProcess`** (qtpy6 le double), mais ce qui tournait dans le sous-processus devient un module
-   importé par le worker, dont une fonction reçoit chaque ligne (`travailleur.configurer`).
+4. **`QProcess` lance un script Python, pas un exécutable quelconque** : `sys.executable` et un `.py` (ou `-m`) de
+   l'application, dans un worker (section « Le worker »). `subprocess.run` n'est pas doublé.
 5. **Les fichiers** vivent dans le système de fichiers de Pyodide (en mémoire, perdu au rechargement) : ce qui doit
    survivre passe par `stockage.ecrire`. `QFileDialog.getOpenFileName` ouvre le sélecteur du navigateur et y dépose le
    fichier choisi ; `getSaveFileName` demande un nom, et le fichier est téléchargé dès que l'application l'a écrit
@@ -364,13 +385,24 @@ Changer de version : `versions.json` seul (`archive`, `sha256`, `version`, `abi`
 chargée à celle du fichier et l'écrit au journal si elles diffèrent. L'ABI des roues change avec le Python embarqué :
 toute roue compilée pour la page est à reconstruire.
 
-### La page de lancement : n'importe quel script, isolé du reste du site
+### La page de lancement : un script qtpy6, isolé du reste du site
 
 La racine du site, `https://smartaudiotools.github.io/qtpy6/`, lance un script qtpy6 quelconque : ouvert depuis le disque
 (un `.py` ou un `.zip`), ou désigné par l'adresse, `?script=URL&fichier=URL` (`fichier`, facultatif et répétable, est
 passé en argument comme `python script.py fichier`). Une adresse `github.com/…/blob/…` est ramenée à
 `raw.githubusercontent.com` ; le site qui sert le script doit ouvrir CORS (raw.githubusercontent.com et les gists le
 font).
+
+**Ce que le script peut importer** : la bibliothèque standard, PyQt6 (par qtpy6), qtpy6, serializejson et sa dépendance
+apply, plus tout module en Python pur livré dans son `.zip` (le dossier du script est en tête de `sys.path`). Rien
+d'autre ne s'installe : Pyodide-Qt n'a ni `pip`, ni `micropip`, ni catalogue de paquets, et une extension compilée
+n'existe que si l'on en construit la roue WebAssembly. serializejson est la seule fournie : sa roue
+(`serializejson/scripts/construit_wasm.sh`, ABI `pyemscripten_2025_0` de Pyodide-Qt 0.29.3, donc à reconstruire à
+chaque changement de `versions.json`) et celle d'apply sont versionnées dans `hebergement/roues/`, et le cadre charge
+toutes les roues de ce dossier avant le script (`roues.json`, écrit par `construire_site.py`). Coût mesuré le
+27/09/2026 : 0,15 s au chargement, 0,4 s au premier `import serializejson`, payées seulement par qui l'importe pour la
+seconde. Choix de l'utilisateur : serializejson sert à presque toutes ses applications, et la roue n'alourdit plus
+chacun de leurs zip.
 
 **Le script ne tourne pas dans la page, mais dans `cadre.html`, un `<iframe sandbox="allow-scripts allow-downloads">`
 SANS `allow-same-origin`.** `smartaudiotools.github.io` est UNE origine pour toutes les Pages du compte : un script venu
@@ -384,12 +416,14 @@ ses propres fichiers (`qtpy6web.js`, `qtpy6.zip`, Pyodide-Qt) en mode CORS, que 
 fait ; `http.server` non, d'où l'en-tête ajouté pour la sonde) ; et `qtpy6.web.stockage` n'y a pas de stockage, rien ne
 reste d'une visite à l'autre.
 
-`hebergement/construire_site.py [site]` assemble le site (page, cadre, chargeur, `qtpy6.zip`, Pyodide-Qt et sa licence)
+`hebergement/construire_site.py [site]` assemble le site (page, cadre, chargeur, `qtpy6.zip`, roues, Pyodide-Qt et sa licence)
 avec la seule bibliothèque standard : c'est ce que fait l'action, et ce qu'on sert en local pour essayer.
 
 Le site ainsi publié distribue PyQt6, donc du GPL v3 : `hebergement/LICENSE-Pyodide-Qt.txt` est servi à côté, et
 la page de lancement renvoie aux sources de la release (la recette de construction de Qt, PyQt6 et Pyodide). Le
-dépôt lui-même ne contient aucun binaire et reste MIT.
+dépôt ne contient de binaires que les deux roues de `hebergement/roues/`, chacune sous sa propre licence, que sa roue
+embarque : serializejson (Prosperity Public License 3.0.0 pour l'usage non commercial, Patron License sinon) et apply
+(BSD-2-Clause, roue refaite à l'identique des fichiers de la 2.0 installée, faute de réseau). Le code de qtpy6 reste MIT.
 
 ## Licence
 
