@@ -1,7 +1,141 @@
 <!DOCTYPE html>
-<html lang="fr"><head><meta charset="utf-8"><title>qtpy6 : Pyodide-Qt</title></head><body>
-<p>Pyodide-Qt 0.29.3 (Qt 6.10.2, PyQt6 6.10.2, Python 3.13 en WebAssembly), servi pour les pages qui utilisent
-<a href="https://github.com/SmartAudioTools/qtpy6">qtpy6.web</a> : <code>indexURL = "https://smartaudiotools.github.io/qtpy6/pyodide-qt/"</code>.</p>
-<p>Source : <a href="https://github.com/JarrettSJohnson/pyodide-with-pyqt6/releases/tag/v0.29.3.0">pyodide-with-pyqt6 v0.29.3.0</a>
-(<a href="LICENSE-Pyodide-Qt.txt">GPL v3</a>) ; essai : <a href="pyodide-qt/test.html">pyodide-qt/test.html</a>.</p>
-</body></html>
+<html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>qtpy6</title>
+<!-- La page de lancement : un script qtpy6 (PyQt6) quelconque, .py ou .zip, ouvert d'ici ou désigné par l'adresse,
+       index.html?script=URL[&fichier=URL]…
+     Le script tourne dans cadre.html, un <iframe sandbox> SANS allow-same-origin : une origine opaque, sans accès au
+     stockage ni aux cookies de smartaudiotools.github.io, que partagent toutes les pages de ce compte. Cette page-ci,
+     elle, n'exécute jamais le script : elle le télécharge (ou le lit sur le disque) et le passe au cadre par message. -->
+<style>
+  :root { --fond: #efefef; --barre: #fff; --texte: #222; --doux: #666; --bord: #ccc; --accent: #2a6ebb; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --fond: #1e1e1e; --barre: #2a2a2a; --texte: #eee; --doux: #aaa; --bord: #444; --accent: #6aa8f0; }
+  }
+  html, body { margin: 0; height: 100%; }
+  body { display: flex; flex-direction: column; background: var(--fond); color: var(--texte); font: 14px sans-serif; }
+  form { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; padding: 8px 16px; background: var(--barre);
+         border-bottom: 1px solid var(--bord); }
+  form label { display: flex; gap: 6px; align-items: center; flex: 1 1 320px; min-width: 0; }
+  form input[type=text] { flex: 1; min-width: 0; padding: 4px 6px; }
+  form b { white-space: nowrap; }
+  #etat { flex: 1 1 100%; color: var(--doux); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #etat.erreur { color: #c33; }
+  main { flex: 1; position: relative; }
+  iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+  #accueil { padding: 24px 16px; max-width: 46em; color: var(--doux); line-height: 1.5; }
+  #accueil code { color: var(--texte); }
+  details { background: var(--barre); border-top: 1px solid var(--bord); padding: 4px 16px; font-size: 12px; }
+  details pre { max-height: 30vh; overflow: auto; margin: 4px 0; }
+  a { color: var(--accent); }
+</style></head><body>
+<form id="choix">
+  <label><b>Script</b> <input type="file" id="script_local" accept=".py,.zip">
+    <input type="text" inputmode="url" id="script_url" placeholder="ou une adresse (.py, .zip)"></label>
+  <label><b>Fichier</b> <input type="file" id="fichier_local" multiple>
+    <input type="text" inputmode="url" id="fichier_url" placeholder="ou une adresse (facultatif)" title="plusieurs adresses : séparées par des espaces"></label>
+  <button type="submit">Lancer</button>
+  <div id="etat"></div>
+</form>
+<main id="main"><div id="accueil">
+  <p>Lance une application <a href="https://github.com/SmartAudioTools/qtpy6">qtpy6</a> (PyQt6) dans le navigateur, telle
+  qu'écrite pour le bureau : un <code>.py</code>, ou un <code>.zip</code> dont le point d'entrée est
+  <code>__main__.py</code>, <code>paquet/__main__.py</code>, le script du nom du paquet, ou le seul <code>.py</code>.
+  Le fichier facultatif lui est passé en argument, comme <code>python script.py fichier</code>.</p>
+  <p>Par l'adresse : <code>?script=URL&amp;fichier=URL</code> (adresses encodées ; <code>fichier</code> peut se répéter).
+  Le site qui sert ces fichiers doit autoriser leur lecture depuis une autre page (CORS) : c'est le cas de
+  <code>raw.githubusercontent.com</code> et des gists.</p>
+  <p>Le script tourne isolé de ce site : il n'a accès ni au stockage ni aux cookies des autres pages, et rien de ce
+  qu'il écrit ne reste d'une visite à l'autre.</p>
+  <p>Moteur : <a href="https://github.com/JarrettSJohnson/pyodide-with-pyqt6/releases/tag/v0.29.3.0">Pyodide-Qt 0.29.3</a>
+  (Python 3.13, Qt 6.10.2, PyQt6, <a href="LICENSE-Pyodide-Qt.txt">GPL v3</a>), servi dans
+  <a href="pyodide-qt/test.html"><code>pyodide-qt/</code></a>.</p>
+</div></main>
+<details><summary>Journal</summary><pre id="journal"></pre></details>
+<script type="module">
+const $ = id => document.getElementById(id);
+window.etat = "accueil"; window.journal = [];  // ce que lit qtpy6.web.sonde
+let cadre = null, envoi = null;  // le cadre en cours et ce qu'il recevra quand il sera prêt
+
+function afficher(texte, erreur = false) { $("etat").textContent = texte; $("etat").className = erreur ? "erreur" : ""; }
+function noter(ligne) {
+  window.journal.push(ligne); $("journal").textContent += ligne + "\n";
+  const erreur = ligne.includes("ERREUR");
+  afficher(ligne.trim().split("\n").pop(), erreur);  // d'une trace Python, la dernière ligne : l'erreur elle-même
+  if (erreur) $("journal").parentElement.open = true;
+}
+
+// github.com/u/d/blob/b/chemin, l'adresse de la page qu'on copie, sert du HTML : c'est raw.githubusercontent.com qu'il faut
+function brut(url) {
+  const m = url.match(/^https:\/\/github\.com\/([^/]+\/[^/]+)\/blob\/(.+)$/);
+  return m ? `https://raw.githubusercontent.com/${m[1]}/${m[2]}` : url;
+}
+
+async function telecharger(url) {
+  let r;
+  try { r = await fetch(brut(url)); }
+  catch { throw new Error(`${url} : lecture refusée (le site n'autorise pas CORS, ou il est injoignable)`); }
+  if (!r.ok) throw new Error(`${url} : ${r.status}`);
+  const nom = decodeURIComponent(new URL(r.url).pathname.split("/").pop()) || "script";
+  return { nom, octets: await r.arrayBuffer() };
+}
+
+async function local(fichier) { return { nom: fichier.name, octets: await fichier.arrayBuffer() }; }
+
+// Un .py ou un .zip : l'extension, sinon la signature (une adresse sans extension, un gist « raw »)
+function nommer(f) {
+  if (/\.(py|zip)$/i.test(f.nom)) return f;
+  const zip = new Uint8Array(f.octets, 0, 2);
+  return { ...f, nom: f.nom + (zip[0] === 0x50 && zip[1] === 0x4b ? ".zip" : ".py") };
+}
+
+async function demarrer(obtenir_script, obtenir_fichiers) {  // des promesses de {nom, octets}
+  window.etat = "en cours"; window.journal = []; $("journal").textContent = "";
+  afficher("téléchargement…");
+  let script, fichiers;
+  try { [script, ...fichiers] = await Promise.all([obtenir_script, ...obtenir_fichiers]); }
+  catch (e) { noter("ERREUR " + e.message); window.etat = "erreur"; return; }
+  script = nommer(script);
+  document.title = `${script.nom} : qtpy6`;
+  cadre?.remove();
+  $("accueil")?.remove();
+  cadre = document.createElement("iframe");
+  // allow-downloads : stockage.telecharger ; ni allow-same-origin, ni allow-top-navigation, ni allow-popups
+  cadre.sandbox = "allow-scripts allow-downloads";
+  cadre.allow = "clipboard-read; clipboard-write";
+  cadre.src = "cadre.html";
+  envoi = { script, fichiers };
+  $("main").appendChild(cadre);
+}
+
+addEventListener("message", e => {
+  if (!cadre || e.source !== cadre.contentWindow) return;  // seul le cadre en cours parle à cette page
+  const m = e.data || {};
+  if (m.ligne) noter(m.ligne);
+  if (m.pret && envoi) {
+    cadre.contentWindow.postMessage(envoi, "*", [envoi.script.octets, ...envoi.fichiers.map(f => f.octets)]);
+    envoi = null;
+  }
+  if (m.etat) window.etat = m.etat;
+});
+
+$("choix").addEventListener("submit", e => {
+  e.preventDefault();
+  const sl = $("script_local").files[0], su = $("script_url").value.trim();
+  if (!sl && !su) { afficher("choisir un script, sur le disque ou par son adresse", true); return; }
+  const fl = [...$("fichier_local").files], fu = $("fichier_url").value.split(/\s+/).filter(Boolean);
+  const params = new URLSearchParams();
+  if (!sl) params.set("script", su);
+  if (!fl.length) fu.forEach(u => params.append("fichier", u));
+  // l'adresse se partage quand tout vient d'une URL ; un fichier du disque, lui, ne s'y met pas
+  history.replaceState(null, "", sl || fl.length ? location.pathname : "?" + params);
+  demarrer(sl ? local(sl) : telecharger(su), fl.length ? fl.map(local) : fu.map(telecharger));
+});
+
+const params = new URLSearchParams(location.search);
+if (params.get("script")) {
+  $("script_url").value = params.get("script");
+  $("fichier_url").value = params.getAll("fichier").join(" ");
+  demarrer(telecharger(params.get("script")), params.getAll("fichier").map(telecharger));
+}
+</script></body></html>

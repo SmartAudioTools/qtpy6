@@ -33,6 +33,13 @@ def _attendre(condition, delai_ms=-1):
     return condition()
 
 
+def _obtenir(condition, quoi):
+    """Attend ``condition()`` sans échéance ; hors entrée suspendable, rien ne pourrait la rendre vraie : ``RuntimeError``
+    plutôt qu'un verrou pris deux fois en silence."""
+    if not _attendre(condition):
+        raise RuntimeError(f"{quoi} : rien ne pourra le libérer (un seul fil, hors entrée suspendable)")
+
+
 def _delai(deadline):
     """Le délai de ``wait(deadline)`` en ms : un entier, un QDeadlineTimer, ou rien (pour toujours)."""
     if deadline is None:
@@ -244,7 +251,7 @@ def doubler(ns):
             self._pris = 0
 
         def lock(self):
-            _attendre(lambda: not self._pris)
+            _obtenir(lambda: not self._pris, "QMutex.lock")
             self._pris += 1
 
         def tryLock(self, timeout=0):
@@ -299,11 +306,11 @@ def doubler(ns):
             self._lecteurs, self._ecrivain = 0, False
 
         def lockForRead(self):
-            _attendre(lambda: not self._ecrivain)
+            _obtenir(lambda: not self._ecrivain, "QReadWriteLock.lockForRead")
             self._lecteurs += 1
 
         def lockForWrite(self):
-            _attendre(lambda: not self._ecrivain and not self._lecteurs)
+            _obtenir(lambda: not self._ecrivain and not self._lecteurs, "QReadWriteLock.lockForWrite")
             self._ecrivain = True
 
         def tryLockForRead(self, timeout=0):
@@ -354,9 +361,7 @@ def doubler(ns):
             self._n = n
 
         def acquire(self, n=1):
-            if not _attendre(lambda: self._n >= n):
-                raise RuntimeError("QSemaphore.acquire : rien ne pourra libérer ce sémaphore (un seul fil, hors entrée "
-                                   "suspendable)")
+            _obtenir(lambda: self._n >= n, "QSemaphore.acquire")
             self._n -= n
 
         def tryAcquire(self, n=1, timeout=0):

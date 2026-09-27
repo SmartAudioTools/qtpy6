@@ -226,6 +226,43 @@ def test_un_coup_de_minuterie_est_un_slot():
 
 
 @pyqt6_seul
+def test_relais_comme_une_connexion_native():
+    sortie = simule("""
+        import gc, weakref
+        from qtpy6.QtCore import QObject, QTimer, Qt, Signal
+        from qtpy6.QtWidgets import QMenu
+        class O(QObject):
+            s = Signal()
+        class Gros: pass
+        # le relais vit tant que la connexion, pas plus : la lambda meurt avec l'expéditeur
+        g, n = Gros(), []
+        temoin = weakref.ref(g)
+        o = O()
+        o.s.connect(lambda g=g: n.append(1))
+        del g
+        gc.collect()
+        principal(o.s.emit)
+        o.deleteLater(); del o; tourner(); gc.collect()
+        print("vivant puis libere", n, temoin() is None)
+        # un doublon est refusé comme en natif
+        o, f = O(), lambda: None
+        o.s.connect(f, Qt.ConnectionType.UniqueConnection)
+        try:
+            o.s.connect(f, Qt.ConnectionType.UniqueConnection)
+        except TypeError as e:
+            print(e)
+        # un menu qui resert n'empile pas ses connexions
+        m = QMenu(); m.addAction("a")
+        def ouvrir():
+            QTimer.singleShot(30, m.hide); m.exec()
+        for _ in range(3):
+            principal(ouvrir)
+        print("aboutToHide", m.receivers(m.aboutToHide))
+    """)
+    assert sortie.splitlines() == ["vivant puis libere [1] True", "connection is not unique", "aboutToHide 0"]
+
+
+@pyqt6_seul
 def test_boites_suspendues_dans_un_slot():
     sortie = simule("""
         from qtpy6.QtCore import QTimer
@@ -289,6 +326,54 @@ def test_exec_de_l_application_et_lancer(tmp_path):
     assert sortie.splitlines() == ["pret", "aboutToQuit", "code 3", f"[{str(script)!r}, '-v']"]
 
 
+def test_point_d_entree(tmp_path):
+    from qtpy6.web.lanceur import point_d_entree
+
+    def zip_(nom, *fichiers):
+        d = tmp_path / nom
+        for f in fichiers:
+            (d / f).parent.mkdir(parents=True, exist_ok=True)
+            (d / f).write_text("")
+        try:
+            script, module = point_d_entree(d, nom)
+            return str(script.relative_to(d)), module
+        except ValueError as e:
+            return str(e).split(" :")[0]
+
+    assert zip_("a", "__main__.py", "p/__main__.py") == ("__main__.py", None)
+    assert zip_("b", "p/__init__.py", "p/__main__.py", "outil.py") == ("p/__main__.py", "p")
+    assert zip_("c", "depot-main/p/__init__.py", "depot-main/p/__main__.py") == ("depot-main/p/__main__.py", "p")
+    assert zip_("d", "jeu/jeu.py", "jeu/images/fond.png") == ("jeu/jeu.py", None)
+    assert zip_("e", "e.py", "outils.py") == ("e.py", None)
+    assert zip_("f", "seul.py", "LISEZMOI.md") == ("seul.py", None)
+    assert zip_("g", "p/__main__.py", "q/__main__.py") == "plusieurs points d'entrée possibles"
+    assert zip_("p", "p/__main__.py", "q/__main__.py") == ("p/__main__.py", "p")  # le nom du zip départage
+    assert zip_("h", "un.py", "deux.py") == "aucun point d'entrée"
+
+
+@pyqt6_seul
+def test_lanceur_zip_de_paquet(tmp_path):
+    archive = tmp_path / "depot.zip"
+    with zipfile.ZipFile(archive, "w") as z:
+        z.writestr("depot-main/monpaquet/__init__.py", "MESSAGE = 'relatif'\n")
+        z.writestr("depot-main/monpaquet/__main__.py", textwrap.dedent("""
+            import sys
+            from . import MESSAGE
+            from qtpy6.QtCore import QTimer
+            from qtpy6.QtWidgets import QApplication
+            app = QApplication.instance() or QApplication(sys.argv)
+            print(__name__, __package__, MESSAGE, sys.argv[1:], sys.argv[0].endswith("monpaquet/__main__.py"))
+            QTimer.singleShot(0, app.quit)
+            sys.exit(app.exec())
+        """))
+    sortie = simule(f"""
+        from qtpy6.web.lanceur import executer
+        print("code", principal(lambda: executer({str(archive)!r}, ["donnees.txt"])))
+    """)
+    assert sortie.splitlines() == ["point d'entrée : -m monpaquet", "__main__ monpaquet relatif ['donnees.txt'] True",
+                                   "code 0"]
+
+
 @pyqt6_seul
 def test_fils_cooperatifs():
     sortie = simule("""
@@ -335,17 +420,18 @@ def test_fils_cooperatifs():
             QThreadPool.globalInstance().waitForDone(1000)
         principal(main)
         print(journal)
-        try:
-            QSemaphore(0).acquire()
-        except RuntimeError:
-            print("interblocage signalé")
+        for bloque in (QSemaphore(0).acquire, QMutexLocker(QMutex()).mutex().lock):  # le verrou, pris deux fois
+            try:
+                bloque()
+            except RuntimeError:
+                print("interblocage signalé")
     """)
     lignes = sortie.splitlines()
     assert lignes[:2] == ["wait True True", "pool True 0"]
     journal = eval(lignes[2])  # noqa: S307
     assert journal.index("t1") < journal.index("m2") and journal.index("m1") < journal.index("t2")  # entrelacés
     assert {"fini 42", "p0", "p1", "p2", "reveil"} <= set(journal) and journal[-1] == "reveil"
-    assert lignes[3] == "interblocage signalé"
+    assert lignes[3:] == ["interblocage signalé"] * 2
 
 
 def test_accept_du_selecteur_de_fichiers():

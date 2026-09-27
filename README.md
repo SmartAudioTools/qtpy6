@@ -144,7 +144,7 @@ l'application a chargée. Le reste (chargeur de la page, polices, tactile, stock
 
 ## Tests et niveau de preuve
 
-- **PySide6 6.11.1 et PyQt6 6.11 (Qt 6.11.1) : testés** — 73 tests, verts sur
+- **PySide6 6.11.1 et PyQt6 6.11 (Qt 6.11.1) : testés** — 76 tests, verts sur
   les deux (sur Python 3.12, 3.13 et 3.14 avant la fusion du navigateur, 3.13 seul depuis). `tests/test_qtpy6.py` tourne dans le
   processus de test (un binding par lancement) ; `tests/test_process.py` lance
   des interpréteurs neufs et couvre, pour chaque binding installé, la sélection
@@ -153,7 +153,7 @@ l'application a chargée. Le reste (chargeur de la page, polices, tactile, stock
 - **Le navigateur : testé en direct dans Firefox sans interface** (Pyodide-Qt 0.29.3, Qt 6.10.2,
   PyQt6 seul) : une application de bureau construite telle quelle (`construire`) a enchaîné
   `QMessageBox.question`, `QInputDialog`, un `QMenu.exec`, un `QThread` attendu par `wait()`, l'ouverture et
-  l'enregistrement d'un fichier, puis `quit()` jusqu'au code de sortie. `tests/test_web.py` (15 tests)
+  l'enregistrement d'un fichier, puis `quit()` jusqu'au code de sortie. `tests/test_web.py` (18 tests)
   rejoue en natif la mécanique de suspension, `greenlet` y tenant le rôle de JSPI : il prouve la
   logique, pas le comportement de Qt-WASM.
 - **La branche Windows de `_env.py` n'a tourné que contre des doublures**

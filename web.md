@@ -95,7 +95,8 @@ pip install -e . --no-deps --no-build-isolation --config-settings editable_mode=
 | `qtpy6.web.stockage` | `lire(cle)`, `ecrire(cle, texte)`, `effacer(cle)` sur `localStorage` (du texte, quelques Mio, qui survit au rechargement) ; `telecharger(nom, contenu, mime, lien=None)`, le seul chemin vers le disque de l'utilisateur (tout de suite, ou par un `<a>` de la page qu'il clique). |
 | `qtpy6.web.assembler` | `assembler(archive, fichiers, paquets, distributions, polices)` écrit le zip que la page dépaquette : des fichiers, des paquets purs Python pris là où ils sont installés (`qtpy6`, `qtpy6.web` compris, et ceux de l'application), des distributions avec leurs métadonnées, des polices. `polices(*motifs)` : des globs, erreur si aucun fichier. |
 | `qtpy6.web.sonde` | `python -m qtpy6.web.sonde page.html capture.png [--racine DIR] [--delai 120] [--etat fini] [--taille 1000x900] [--zoom 2] [--tactile]` : sert `--racine` en local, ouvre la page dans Firefox sans interface, attend `window.etat`, imprime `window.journal`, capture l'écran et écrit chaque image de `window.captures` (`{suffixe: png en base64}`) en `capture_<suffixe>.png`. Code de retour 0 si l'état attendu est atteint. |
-| `qtpy6.web.lancer(script, args=(), pret=None)` | Exécute un script écrit pour le bureau comme `python script args…` ; `app.exec()` y suspend jusqu'à `quit()`, `sys.exit` est rattrapé et donne le code de retour ; `pret()` quand l'application entre dans `exec()`. À appeler d'une entrée suspendable : `lancer` de `qtpy6web.js`. |
+| `qtpy6.web.lancer(script, args=(), pret=None, module=None)` | Exécute un script écrit pour le bureau comme `python script args…` (avec `module`, `script` est son `__main__.py` et c'est `python -m module` qui est imité : imports relatifs compris) ; `app.exec()` y suspend jusqu'à `quit()`, `sys.exit` est rattrapé et donne le code de retour ; `pret()` quand l'application entre dans `exec()`. À appeler d'une entrée suspendable : `lancer` de `qtpy6web.js`. |
+| `qtpy6.web.lanceur` | `executer(chemin, args, pret)` : un `.py`, ou un `.zip` dont `point_d_entree` trouve le script — `__main__.py` à la racine, `paquet/__main__.py` (par `-m`), `paquet/paquet.py` ou `nom_du_zip.py`, le seul `.py` ; un zip dont la racine n'est qu'un dossier (le « Download ZIP » de GitHub) est lu depuis ce dossier. Ce que fait tourner la page de lancement (section « Hébergement »). |
 | `qtpy6.web.construire` | `python -m qtpy6.web.construire app.py [site] [--pyodide URL] [--paquet p]… [--distribution d]… [--police f]… [--titre t]` : le site complet d'une application de bureau (page, chargeur, archive). |
 | `qtpy6.web.bloquant` | Les `exec()` et boîtes statiques suspendus (première ligne du tableau d'en tête), le report des slots venus de Qt vers une entrée suspendable, et la pompe de la boucle d'événements (section « Pièges »). Posé par `QtCore`/`QtWidgets` de qtpy6 : rien à importer. |
 | `qtpy6.web.fils` | `QThread` (`run()` redéfini, ou un travailleur `moveToThread`), `QThreadPool`, verrous et `time.sleep` coopératifs ; un interblocage lève `RuntimeError` au lieu de figer la page. Posé par `QtCore` de qtpy6. |
@@ -363,8 +364,31 @@ Changer de version : `versions.json` seul (`archive`, `sha256`, `version`, `abi`
 chargée à celle du fichier et l'écrit au journal si elles diffèrent. L'ABI des roues change avec le Python embarqué :
 toute roue compilée pour la page est à reconstruire.
 
+### La page de lancement : n'importe quel script, isolé du reste du site
+
+La racine du site, `https://smartaudiotools.github.io/qtpy6/`, lance un script qtpy6 quelconque : ouvert depuis le disque
+(un `.py` ou un `.zip`), ou désigné par l'adresse, `?script=URL&fichier=URL` (`fichier`, facultatif et répétable, est
+passé en argument comme `python script.py fichier`). Une adresse `github.com/…/blob/…` est ramenée à
+`raw.githubusercontent.com` ; le site qui sert le script doit ouvrir CORS (raw.githubusercontent.com et les gists le
+font).
+
+**Le script ne tourne pas dans la page, mais dans `cadre.html`, un `<iframe sandbox="allow-scripts allow-downloads">`
+SANS `allow-same-origin`.** `smartaudiotools.github.io` est UNE origine pour toutes les Pages du compte : un script venu
+d'une adresse quelconque, exécuté dans la page, lirait le stockage des autres (les copies d'élèves du lecteur de
+SmartTeacher, par exemple). Dans le cadre, son origine est opaque : `localStorage`, cookies et la page parente lui sont
+refusés (`SecurityError`), sans rien casser d'autre — Pyodide-Qt, les `exec()` suspendus, les Workers (créés par
+`Blob`) y marchent. Mesuré dans Firefox le 27/09/2026 : un secret posé par la page parente, illisible du cadre ; la
+même application, pompe comprise (3 µs par passage), qu'en page. La page de confiance télécharge ou lit les fichiers et
+les passe au cadre par `postMessage` quand il se dit prêt ; elle n'écoute que lui. Deux conséquences : le cadre charge
+ses propres fichiers (`qtpy6web.js`, `qtpy6.zip`, Pyodide-Qt) en mode CORS, que l'hôte doit donc ouvrir (Pages le
+fait ; `http.server` non, d'où l'en-tête ajouté pour la sonde) ; et `qtpy6.web.stockage` n'y a pas de stockage, rien ne
+reste d'une visite à l'autre.
+
+`hebergement/construire_site.py [site]` assemble le site (page, cadre, chargeur, `qtpy6.zip`, Pyodide-Qt et sa licence)
+avec la seule bibliothèque standard : c'est ce que fait l'action, et ce qu'on sert en local pour essayer.
+
 Le site ainsi publié distribue PyQt6, donc du GPL v3 : `hebergement/LICENSE-Pyodide-Qt.txt` est servi à côté, et
-`hebergement/index.html` renvoie aux sources de la release (la recette de construction de Qt, PyQt6 et Pyodide). Le
+la page de lancement renvoie aux sources de la release (la recette de construction de Qt, PyQt6 et Pyodide). Le
 dépôt lui-même ne contient aucun binaire et reste MIT.
 
 ## Licence

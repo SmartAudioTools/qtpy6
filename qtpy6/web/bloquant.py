@@ -99,12 +99,15 @@ def _suspendre(brancher):
 
 
 def _plus_tard(f, *args):
-    """``f(*args)`` à la tâche suivante de la boucle asyncio, une entrée où il peut suspendre."""
+    """``f(*args)`` à la tâche suivante de la boucle asyncio, une entrée où il peut suspendre. Une exception va à
+    ``sys.excepthook``, comme celle d'un slot en natif (asyncio, lui, se contenterait de la journaliser)."""
     def tache():
         global _actif
         avant, _actif = _actif, True
         try:
             f(*args)
+        except Exception:  # noqa: BLE001
+            sys.excepthook(*sys.exc_info())
         finally:
             _actif = avant
 
@@ -158,12 +161,24 @@ def doubler_qtcore(ns):
     QObject, QCoreApplication, QEventLoop = ns["QObject"], ns["QCoreApplication"], ns["QEventLoop"]
     signal_lie = ns["SignalInstance"]
     connect, disconnect, sender = signal_lie.connect, signal_lie.disconnect, QObject.sender
-    relais = {}  # clé du slot -> relais connectés, pour disconnect(slot)
-
-    def cle(slot):
-        return (id(slot.__self__), slot.__func__) if isinstance(slot, types.MethodType) else slot
+    # Un seul relais par slot : PyQt reconnaît ainsi un doublon (UniqueConnection) et le retrouve (disconnect(slot)).
+    # Référence faible : c'est PyQt qui le garde en vie, tant qu'une connexion le tient.
+    relais = weakref.WeakValueDictionary()
 
     def relayer(slot, direct):
+        if isinstance(slot, types.MethodType):
+            cle = (id(slot.__self__), slot.__func__, direct)
+        else:
+            cle = (slot, direct)
+        try:
+            r = relais.get(cle)
+        except TypeError:  # un appelable qui ne se hache pas : un relais à chaque connexion
+            return nouveau_relais(slot, direct)
+        if r is None or r.cible() is None:  # ``id`` réutilisé par un autre receveur, l'ancien étant mort
+            r = relais[cle] = nouveau_relais(slot, direct)
+        return r
+
+    def nouveau_relais(slot, direct):
         n = _nb_arguments(slot)
         if isinstance(slot, types.MethodType):  # PyQt ne garde pas le receveur en vie : le relais non plus
             ref, fonction = weakref.ref(slot.__self__), slot.__func__
@@ -200,21 +215,15 @@ def doubler_qtcore(ns):
     def connect_(self, slot, *args, **kwargs):
         if isinstance(slot, (signal_lie, types.BuiltinFunctionType, types.BuiltinMethodType)) or not callable(slot):
             return connect(self, slot, *args, **kwargs)
-        r = relayer(slot, direct=self.signal.startswith("2destroyed("))  # l'objet meurt : après, il serait trop tard
-        relais.setdefault(cle(slot), []).append(r)
-        return connect(self, r, *args, **kwargs)
+        direct = self.signal.startswith("2destroyed(")  # l'objet meurt : après, il serait trop tard
+        return connect(self, relayer(slot, direct), *args, **kwargs)
 
     def disconnect_(self, *args):
         if len(args) == 1 and callable(args[0]) and not isinstance(args[0], signal_lie):
-            vivants = [r for r in relais.get(cle(args[0]), []) if r.cible() is not None]
-            for r in vivants:
-                try:
-                    disconnect(self, r)
-                except TypeError:  # connecté à un autre signal que celui-ci
-                    continue
-                vivants.remove(r)
-                relais[cle(args[0])] = vivants
-                return None
+            try:
+                return disconnect(self, relayer(args[0], self.signal.startswith("2destroyed(")))
+            except TypeError:  # pas connecté par un relais : peut-être par le connect de PyQt (``_connect_qt``)
+                pass
         return disconnect(self, *args)
 
     def sender_(self):
@@ -334,14 +343,16 @@ def doubler_qtwidgets(ns):
             _avertir("QMenu.exec()")
             self.popup(pos, at)
             return None
-        choisie = []
-        connect(self.triggered, choisie.append)
+        choisie, fin = [], []
 
         def brancher(resoudre):  # triggered part APRÈS aboutToHide, dans le même appel : attendre un tour
-            connect(self.aboutToHide, lambda: QTimer.singleShot(0, resoudre))
+            fin.append(lambda: QTimer.singleShot(0, resoudre))
+            connect(self.aboutToHide, fin[0])
+        connect(self.triggered, choisie.append)
         self.popup(pos, at)
         _suspendre(brancher)
         self.triggered.disconnect(choisie.append)
+        self.aboutToHide.disconnect(fin[0])  # un menu gardé resservira : ne pas y empiler les connexions
         return choisie[-1] if choisie else None
 
     for nom, classe in list(ns.items()):

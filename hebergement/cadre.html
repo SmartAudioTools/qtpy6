@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8">
+<title>qtpy6 : application</title>
+<!-- Le cadre où tourne le script, chargé par index.html en <iframe sandbox="allow-scripts …"> SANS allow-same-origin :
+     son origine est opaque, il n'a ni stockage ni cookies, et rien de ce que les autres pages de smartaudiotools.github.io
+     gardent ne lui est lisible. Il ne parle qu'à sa page parente, par messages : il se prépare (Pyodide-Qt, qtpy6), dit
+     « prêt », reçoit le script et les fichiers, les écrit, lance, et renvoie son journal et son état. -->
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #efefef; font-family: sans-serif; }
+  #qt { position: fixed; inset: 0; display: flex; }
+  #qt[hidden] { display: flex !important; visibility: hidden; }
+</style></head><body>
+<div id="qt" hidden></div>
+<script type="module">
+import { preparer, print, rendu, journal } from "./qtpy6web.js";
+const qt = document.getElementById("qt");
+const envoyer = m => parent.postMessage(m, "*");  // à qui intègre ce cadre : c'est lui qui fournit le script
+let etat = "en cours";
+const poser = e => { etat = e; envoyer({ etat, journal }); };
+try {
+  const py = await preparer(qt, {
+    indexURL: "./pyodide-qt/",
+    archives: [{ url: "./qtpy6.zip", dossier: "/home/pyodide/qtpy6" }],
+    sur_ligne: ligne => envoyer({ ligne }),
+  });
+  const { script, fichiers } = await new Promise(r => {
+    addEventListener("message", e => { if (e.source === parent && e.data && e.data.script) r(e.data); });
+    envoyer({ pret: true });
+  });
+  const ecrire = (dossier, f) => {
+    py.FS.mkdirTree(dossier);
+    const chemin = `${dossier}/${f.nom}`;
+    py.FS.writeFile(chemin, new Uint8Array(f.octets));
+    return chemin;
+  };
+  const chemin = ecrire("/home/pyodide/script", script);
+  const args = fichiers.map(f => ecrire("/home/pyodide/fichiers", f));
+  let signaler;
+  const pret = new Promise(r => signaler = r);
+  const fin = py.pyimport("qtpy6.web.lanceur").executer.callPromising(chemin, py.toPy(args), () => signaler());
+  fin.then(code => { print(`application terminée (code ${code})`); poser("termine"); },
+           e => { print("ERREUR " + (e.message || e)); poser("erreur"); })
+     .finally(signaler);  // un zip sans point d'entrée échoue avant exec()
+  await pret;
+  qt.hidden = false;
+  await rendu();
+  if (etat === "en cours") poser("fini");
+} catch (e) { print("ERREUR " + (e.message || e)); console.error(e); poser("erreur"); }
+</script></body></html>

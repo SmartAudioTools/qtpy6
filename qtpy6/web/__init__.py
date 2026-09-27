@@ -16,6 +16,7 @@ Le reste, qui n'a pas d'équivalent Qt, est dans ce paquet :
     dispositions                     des dispositions qui se replient quand la place manque (Disposition, Rangee)
     travailleur                      le Web Worker Pyodide piloté depuis Qt (Travailleur, ProcessusWeb, configurer)
     lancer(script, args, pret)       exécute un script écrit pour le bureau, ``sys.exit(app.exec())`` compris
+    lanceur                          un .py ou un .zip quelconque, dont il trouve le point d'entrée (la page du site)
     bloquant                         exec() des boîtes, menus, boucles et de l'application, et les boîtes statiques
     fils                             QThread, QThreadPool, verrous : des fils coopératifs sur le fil unique de la page
     stockage                         localStorage et téléchargement d'un fichier depuis l'application
@@ -62,9 +63,11 @@ def application(polices=None, defaut=None):
     return QApplication.instance()
 
 
-def lancer(script, args=(), pret=None):
+def lancer(script, args=(), pret=None, module=None):
     """Exécute ``script`` comme ``python script args…`` sur un bureau : ``__name__ == "__main__"``, ``sys.argv``, le
-    dossier du script en tête de ``sys.path`` et comme dossier courant. ``app.exec()`` y suspend jusqu'à ``quit()`` (la
+    dossier du script en tête de ``sys.path`` et comme dossier courant. Avec ``module``, ``script`` est son
+    ``__main__.py`` et c'est ``python -m module`` qui est imité, depuis le dossier qui contient le paquet (ses imports
+    relatifs marchent). ``app.exec()`` y suspend jusqu'à ``quit()`` (la
     page continue), ``sys.exit`` est rattrapé. À appeler depuis une entrée suspendable (``lancer`` de qtpy6web.js,
     ``runPythonAsync``). ``pret()`` est appelé une fois, quand l'application entre dans ``exec()`` ou, à défaut, quand le
     script se termine. Rend le code de sortie."""
@@ -80,13 +83,17 @@ def lancer(script, args=(), pret=None):
             appele.append(True)
             pret()
 
+    dossier = os.path.dirname(os.path.dirname(chemin) if module else chemin)
     sys.argv = [chemin, *args]
-    sys.path.insert(0, os.path.dirname(chemin))
-    os.chdir(os.path.dirname(chemin))
+    sys.path.insert(0, dossier)
+    os.chdir(dossier)
     bloquant._au_demarrage.append(prevenir)
     avant, bloquant._actif = bloquant._actif, True  # une entrée promettante connue (voir bloquant._peut_suspendre)
     try:
-        runpy.run_path(chemin, run_name="__main__")
+        if module:
+            runpy.run_module(module, run_name="__main__", alter_sys=True)
+        else:
+            runpy.run_path(chemin, run_name="__main__")
         return 0
     except SystemExit as e:
         return e.code if isinstance(e.code, int) else int(e.code is not None)

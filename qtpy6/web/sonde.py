@@ -43,6 +43,10 @@ def main(argv=None):
         def log_message(self, *_):
             pass
 
+        def end_headers(self):
+            self.send_header("Access-Control-Allow-Origin", "*")  # comme GitHub Pages : un cadre isolé charge en CORS
+            super().end_headers()
+
     serveur = http.server.ThreadingHTTPServer(("127.0.0.1", 0), lambda *args: Silencieux(*args, directory=str(racine)))
     threading.Thread(target=serveur.serve_forever, daemon=True).start()
 
