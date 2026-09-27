@@ -94,10 +94,10 @@ class Rangee(Disposition):
         """Les lignes, chaque item extensible compté au moins ``large``."""
         lignes, x = [[]], 0
         for item in self.items:
-            if item.isEmpty():
-                continue
             if item.spacerItem() is not None and item.expandingDirections() & Qt.Orientation.Horizontal:
                 lignes[-1].append(None)
+                continue
+            if item.isEmpty() and item.spacerItem() is None:  # un QSpacerItem est toujours « vide » pour Qt
                 continue
             l = max(item.sizeHint().width(), large if self._extensible(item) else 0)
             if x and x + self.spacing() + l > largeur:

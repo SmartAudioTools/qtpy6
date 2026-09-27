@@ -78,6 +78,21 @@ def test_rangee_se_replie(app):
     assert boutons[-1].geometry().right() == 999, "les extensibles n'occupent pas toute la ligne"
 
 
+def test_rangee_ressort_et_espacement(app):
+    """Qt tient tout QSpacerItem pour vide : la rangée ne doit pas les sauter pour autant."""
+    zone = QtWidgets.QWidget()
+    rangee = dispositions.Rangee(6)
+    zone.set_layout(rangee)
+    a, b, c = (QtWidgets.QPushButton(t) for t in "abc")
+    rangee.add_widget(a)
+    rangee.addStretch()
+    rangee.add_widget(b)
+    rangee.addSpacing(20)
+    rangee.add_widget(c)
+    rangee.setGeometry(QtCore.QRect(0, 0, 1000, 100))
+    assert a.geometry().x() == 0 and c.geometry().right() == 999, "le ressort ne pousse pas la suite à droite"
+    assert c.geometry().x() - b.geometry().right() - 1 == 6 + 20 + 6, "l'espacement fixe est ignoré"
+
 
 def test_rangee_recalcule_apres_changement(app):
     """La hauteur par largeur est gardée en cache : un item caché ou qui s'élargit doit la faire recalculer."""
