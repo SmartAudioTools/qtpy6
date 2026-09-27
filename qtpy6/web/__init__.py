@@ -5,6 +5,7 @@ charge ce nom, sans rien à importer d'ici :
     QtCore.QProcess                  un Web Worker Pyodide sous sa surface (``travailleur.ProcessusWeb``)
     QtGui.QFontDatabase.systemFont(FixedFont)   la première police à chasse fixe que l'application a chargée
     QtCore.QThread, QThreadPool, QMutex…      des fils coopératifs (``fils``)
+    subprocess.run (posé par QtCore)           un script Python dans ce même worker, attendu par JSPI (``sous_processus``)
     exec() et boîtes statiques de QtWidgets    suspendus par JSPI jusqu'à leur fin (``bloquant``)
 
 Le reste, qui n'a pas d'équivalent Qt, est dans ce paquet :

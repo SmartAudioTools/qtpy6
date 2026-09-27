@@ -3,6 +3,7 @@ montent à ``CIBLE`` (44 pt chez Apple, 48 dp chez Google) et la zone défilante
 les widgets : la feuille de style s'applique aux widgets à venir comme aux existants, mais les hauteurs déjà calculées
 par les dispositions ne sont pas toutes refaites."""
 
+from qtpy6.QtGui import QInputDevice
 from qtpy6.QtWidgets import QApplication, QScroller
 
 from . import navigateur
@@ -12,10 +13,11 @@ ACTIF = False  # posé par ``activer`` : ``defiler_au_doigt`` et les application
 
 
 def detecte():
-    """Un doigt parmi les pointeurs du navigateur (``any-pointer: coarse`` : téléphone, tablette, mais aussi un portable à
-    écran tactile) ; False en natif, où c'est à l'application de le savoir (une option de ligne de commande)."""
+    """Un écran au doigt : téléphone, tablette, portable tactile. Dans le navigateur, parmi ses pointeurs (``any-pointer:
+    coarse``) ; en natif, parmi les périphériques que Qt a recensés (``QInputDevice``, une ``QApplication`` doit exister).
+    Un écran tactile dont personne ne se sert compte aussi : le navigateur fait de même."""
     if not navigateur():
-        return False
+        return any(d.type() == QInputDevice.DeviceType.TouchScreen for d in QInputDevice.devices())
     import js  # noqa: PLC0415 - le module de Pyodide, qui n'existe que dans le navigateur
 
     return bool(js.window.matchMedia("(any-pointer: coarse)").matches)

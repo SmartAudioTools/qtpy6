@@ -89,7 +89,7 @@ pip install -e . --no-deps --no-build-isolation --config-settings editable_mode=
 |---|---|
 | `qtpy6.web.navigateur()` | `True` sous Pyodide (`sys.platform == "emscripten"`) : l'interrupteur de tout le reste. Une fonction, pas une constante, pour rester forçable par un test. |
 | `qtpy6.web.application(polices=None, defaut=None)` | La `QApplication`, créée au besoin et rendue (idempotente). Sans session graphique (ni `DISPLAY` ni `WAYLAND_DISPLAY`) elle passe en `offscreen` : tests et exports tournent sans écran. Dans le navigateur, où Qt n'a **aucune** police système, les `.ttf`/`.otf` du dossier `polices` sont chargés (la première à chasse fixe devient `systemFont(FixedFont)`) et `defaut` (`QFont` ou `("Noto Sans", 10)`) devient la police de l'interface. Elle garde une référence à l'application : sous PyQt6, une `QApplication` dont la dernière référence Python disparaît est détruite, et toutes ses fenêtres avec. |
-| `qtpy6.web.tactile` | `detecte()` : un doigt parmi les pointeurs du navigateur (`any-pointer: coarse`). `activer(app, cible=44)` : boutons, listes, champs, cases montent à la taille d'une cible au doigt par une feuille de style **ajoutée** à celle de l'application, à appeler avant de construire les widgets. `marge()` : l'espace à mettre autour d'un widget d'une ligne pour en faire une cible. `defiler_au_doigt(zone)` : une `QScrollArea` que le doigt fait défiler (`QScroller` ; sans lui, un glisser fait 0 px). |
+| `qtpy6.web.tactile` | `detecte()` : un doigt parmi les pointeurs du navigateur (`any-pointer: coarse`), ou en natif parmi les périphériques de Qt (`QInputDevice`, écran tactile). `activer(app, cible=44)` : boutons, listes, champs, cases montent à la taille d'une cible au doigt par une feuille de style **ajoutée** à celle de l'application, à appeler avant de construire les widgets. `marge()` : l'espace à mettre autour d'un widget d'une ligne pour en faire une cible. `defiler_au_doigt(zone)` : une `QScrollArea` que le doigt fait défiler (`QScroller` ; sans lui, un glisser fait 0 px). |
 | `qtpy6.web.dispositions` | `Disposition`, `Rangee` : des dispositions qui se **replient** quand la place manque. `QHBoxLayout` impose la somme de ses colonnes comme largeur minimale (mesuré : une barre de boutons à 574 px, une fenêtre à 451 px au minimum) ; `Rangee` passe à la ligne comme du texte. |
 | `qtpy6.web.travailleur` | Un Web Worker Pyodide piloté depuis l'application (`Travailleur`), et `ProcessusWeb`, le `QProcess` du navigateur (section suivante). |
 | `qtpy6.web.stockage` | `lire(cle)`, `ecrire(cle, texte)`, `effacer(cle)` sur `localStorage` (du texte, quelques Mio, qui survit au rechargement) ; `telecharger(nom, contenu, mime, lien=None)`, le seul chemin vers le disque de l'utilisateur (tout de suite, ou par un `<a>` de la page qu'il clique). |
@@ -124,17 +124,22 @@ w.tuer()                                       # le seul « Arrêter » qu'un na
 
 Dans le navigateur, `qtpy6.QtCore.QProcess` EST `ProcessusWeb` (alias snake_case compris) : le code écrit pour le
 bureau, `QProcess(self).start(sys.executable, ["-u", "enfant.py", …])`, tourne sans une ligne changée. Le script (ou
-`-m module`) est lancé en `__main__` dans un Web Worker neuf, avec un Pyodide ordinaire : son dossier y est recopié au
-même chemin (zip, sans `__pycache__`), `sys.argv` et le dossier de travail sont ceux du bureau. Ce que `write` envoie
+`-m module`) est lancé en `__main__` dans un Web Worker neuf, avec un Pyodide ordinaire : son dossier, le dossier de
+travail et le dossier temporaire (`tempfile.gettempdir()`, où un parent dépose souvent ce qu'il passe à l'enfant) y sont
+recopiés au même chemin (zip, sans `__pycache__`) ; `sys.argv` et le dossier de travail sont ceux du bureau. Ce que
+l'enfant écrit sur disque ne revient pas au parent. Ce que `write` envoie
 est son stdin, qu'il lit comme sur le bureau (`input()`, `sys.stdin.readline()`, `for ligne in sys.stdin` attendent la
-prochaine écriture), `closeWriteChannel` lui donne la fin de fichier ; stdout et stderr arrivent fusionnés par
-`readyReadStandardOutput`, et `finished(code)` porte le code de `sys.exit`. Les options d'une lettre (`-u`, `-B`) sont
+prochaine écriture), `closeWriteChannel` lui donne la fin de fichier ; stdout arrive par `readyReadStandardOutput`, stderr par
+`readyReadStandardError` (les deux par le premier avec `setProcessChannelMode(MergedChannels)`), et `finished(code)`
+porte le code de `sys.exit`. Les options d'une lettre (`-u`, `-B`) sont
 sans objet ; `-c`, `-X`, `-W` lèvent `ValueError`.
 
 L'attente sur stdin tient à **JSPI** (`pyodide.ffi.run_sync`, le code tournant sous `runPythonAsync`), sans
 `SharedArrayBuffer` : elle marche donc dans le cadre isolé du site, sans COOP/COEP (Firefox 155, mesuré le 27/09/2026 :
-l'essai ci-dessous rend dans le cadre exactement ce qu'il rend sur le bureau). Un navigateur sans JSPI (Safari ?
-non mesuré) refuse le lancement, le message arrive sur la sortie du processus. Chaque `start` coûte un Pyodide (~1,4 s) :
+l'essai ci-dessous rend dans le cadre exactement ce qu'il rend sur le bureau). JSPI n'ajoute aucune exigence : la
+page elle-même en a besoin (Pyodide-Qt, mesuré Firefox avec `javascript.options.wasm_js_promise_integration` à faux :
+« WebAssembly stack switching not supported », rien ne démarre). Safari ne l'a qu'à partir de la 27 (bêta à la WWDC
+de juin 2026, non essayé ici) : un iPad en 26 ne lance aucune application qtpy6. Chaque `start` coûte un Pyodide (~1,4 s) :
 c'est un processus, pas un fil. Le Pyodide du worker vient de `versions.json` (jsdelivr), ou de
 `travailleur.configurer(indexURL)`. Les URL passées au worker sont relatives à la **page** (le worker naît d'un `blob:`
 et n'a pas d'adresse propre : elles sont rendues absolues côté Python) ; un `import()` de `pyodide.mjs` depuis un autre
@@ -148,8 +153,11 @@ p.start(sys.executable, ["-u", "enfant.py", "arg1"])
 p.write(b"Alice\n2\n3\n"); p.closeWriteChannel()
 ```
 
-L'ancien contrat reste pour qui le demande : `configurer(indexURL, archives, module, fonction, cwd)` avec un `module`
-ignore le programme lancé, et passe chaque ligne écrite à `module.fonction(ligne)` d'un `Travailleur`.
+`subprocess.run` et `subprocess.call` (donc `check_output`, `check_call`) sont doublés de même (`sous_processus`) : le programme tourne dans
+un `ProcessusWeb`, et l'appel attend sa fin suspendu par JSPI, la page continuant pendant ce temps. `input`,
+`capture_output`, `stdout`/`stderr` (`PIPE`, `DEVNULL`, `STDOUT`, fichier), `text`, `timeout`, `check`, `cwd` sont
+tenus. Comme un `exec()`, il n'attend que dans une entrée suspendable (script principal, slot) : ailleurs,
+`RuntimeError`. Un autre programme que Python lève `FileNotFoundError`, comme un exécutable absent du bureau.
 
 ## Rendre une application qtpy6 compatible
 
@@ -168,7 +176,8 @@ Le plus souvent rien : `construire` et le script tel quel. Ce qui reste différe
    main jusqu'au bout et fige l'écran pendant ce temps ; `threading.Thread` et `multiprocessing` ne sont pas doublés. Un
    vrai calcul long va dans un `Travailleur`.
 4. **`QProcess` lance un script Python, pas un exécutable quelconque** : `sys.executable` et un `.py` (ou `-m`) de
-   l'application, dans un worker (section « Le worker »). `subprocess.run` n'est pas doublé.
+   l'application, dans un worker (section « Le worker ») ; `subprocess.run` aussi, dans une entrée suspendable. Tout
+   autre programme lève `FileNotFoundError`.
 5. **Les fichiers** vivent dans le système de fichiers de Pyodide (en mémoire, perdu au rechargement) : ce qui doit
    survivre passe par `stockage.ecrire`. `QFileDialog.getOpenFileName` ouvre le sélecteur du navigateur et y dépose le
    fichier choisi ; `getSaveFileName` demande un nom, et le fichier est téléchargé dès que l'application l'a écrit
@@ -343,7 +352,7 @@ postes visés ; (5) le temps de chargement à froid derrière le bandeau, avec l
 - **Lecteur d'écran** : Qt-WASM n'expose que « boutons et cases à cocher » ; une vue complexe ne produit rien. Un usage
   accessible reste au DOM.
 - **Ce que le navigateur ne fait plus** dans la fenêtre Qt : sélection et recherche dans le texte, traduction
-  automatique, clic droit. Safari (iPad, iPhone) : déclaré pris en charge par Qt, non essayé ici.
+  automatique, clic droit. Safari (iPad, iPhone) : pas avant la 27, la première à avoir JSPI (section « Le worker ») ; non essayé.
 - **Deux Pyodide** : la page (Pyodide-Qt, roues par URL seulement, ABI `cp313-cp313-pyemscripten_2025_0_wasm32`) et le
   worker (Pyodide ordinaire, Python 3.14) ; les deux versions sont dans `versions.json`.
 - **`import js`** n'existe que dans le navigateur : jamais au niveau d'un module qui doit s'importer en natif (un test le

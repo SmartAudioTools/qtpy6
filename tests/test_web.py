@@ -3,6 +3,7 @@ feuille tactile ne remplace rien, les dispositions se replient. Les doublures du
 ``sys.platform`` dans un interpréteur neuf ; ce que le navigateur fait vraiment se mesure avec ``python -m qtpy6.web.sonde``
 sur ``exemple/`` (web.md)."""
 
+import io
 import json
 import os
 import subprocess
@@ -33,6 +34,17 @@ def test_inerte_en_natif():
 def test_application_offscreen(app):
     assert QtWidgets.QApplication.instance() is app
     assert web.application() is app  # idempotente
+
+
+def test_tactile_detecte_en_natif(app, monkeypatch):
+    """Un écran tactile parmi les périphériques de Qt : détecté ; une souris et un pavé tactile : non (sans écran branché ici,
+    les périphériques sont simulés)."""
+    D = QtGui.QInputDevice.DeviceType
+    appareils = lambda *types: [type("Appareil", (), {"type": lambda _, t=t: t})() for t in types]  # noqa: E731
+    monkeypatch.setattr(QtGui.QInputDevice, "devices", lambda: appareils(D.Mouse, D.TouchPad))
+    assert not tactile.detecte()
+    monkeypatch.setattr(QtGui.QInputDevice, "devices", lambda: appareils(D.Mouse, D.TouchScreen))
+    assert tactile.detecte()
 
 
 def test_feuille_tactile_concatenee(app):
@@ -121,6 +133,37 @@ def test_qprocess_doublé_dans_le_navigateur():
         print(QProcess is ProcessusWeb, hasattr(QProcess, "read_all_standard_output"))
     """)
     assert sortie == "True True"  # et le snake_case de qtpy6 lui est donné comme au vrai
+
+
+def test_subprocess_run_doublé_dans_le_navigateur():
+    sortie = en_navigateur("""
+        import subprocess
+        from qtpy6 import QtCore
+        from qtpy6.web import sous_processus
+        for lancer in (subprocess.run, subprocess.check_call):  # check_call passe par call, doublé aussi
+            try:
+                lancer(["hg", "id"])
+            except FileNotFoundError as e:
+                print(e.filename, end=" ")
+        print(subprocess.run is sous_processus.run)
+    """)
+    assert sortie == "hg hg True"  # seul Python se lance ; un autre programme est « absent », comme sur un bureau
+
+
+def test_zipper_chemins_depuis_la_racine_sans_doublon(tmp_path):
+    import zipfile  # noqa: PLC0415
+
+    from qtpy6.web.travailleur import _zipper  # noqa: PLC0415
+
+    (tmp_path / "__pycache__").mkdir()
+    (tmp_path / "__pycache__" / "x.pyc").write_bytes(b"")
+    (tmp_path / "sous").mkdir()
+    (tmp_path / "vide").mkdir()  # le dossier temporaire que le parent crée pour l'enfant
+    (tmp_path / "a.py").write_text("")
+    (tmp_path / "sous" / "b.txt").write_text("")
+    noms = zipfile.ZipFile(io.BytesIO(_zipper([tmp_path, tmp_path / "sous"]))).namelist()
+    racine = os.path.relpath(tmp_path, "/")
+    assert sorted(noms) == [f"{racine}/", f"{racine}/a.py", f"{racine}/sous/", f"{racine}/sous/b.txt", f"{racine}/vide/"]
 
 
 @pytest.mark.skipif(not POLICE_FIXE.exists(), reason="Liberation Mono absente")

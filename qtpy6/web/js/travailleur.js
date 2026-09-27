@@ -4,8 +4,9 @@
 //   reçus : {init: {indexURL, archives: [{url, dossier}], module, cwd}}, {appel: {id, fonction, args}}
 //   émis :  {pret}, {id, sortie} (ce que l'appel imprime, au fil de l'eau), {id, retour}, {id, erreur}, {erreur} (init)
 // Ou bien un processus (ProcessusWeb) : un script lancé en __main__, qui lit son stdin comme sur le bureau.
-//   reçus : {lancer: {indexURL, zip, dossier, argv, cwd}}, {entree: texte} (stdin), {entree: null} (fin de fichier)
-//   émis :  {sortie}, {fin: code}, {erreur} (Pyodide injoignable, JSPI absent)
+//   reçus : {lancer: {indexURL, zip, dossier, argv, cwd}}, {entree: texte} (stdin), {entree: null} (fin de fichier) ;
+//           le zip porte ses chemins depuis la racine du système de fichiers, où il est dépaqueté
+//   émis :  {sortie} (stdout), {sortie_erreur} (stderr), {fin: code}, {erreur} (Pyodide injoignable, JSPI absent)
 let py, module, appeler, courant = 0, file = Promise.resolve();  // courant : le numéro de l'appel en cours, 0 hors de tout appel (l'import du module)
 const decodeur = new TextDecoder();
 
@@ -50,9 +51,9 @@ self.prochaine_entree = () => entrees.length ? Promise.resolve(entrees.shift()) 
 async function lancer({ indexURL, zip, dossier, argv, cwd }) {
   const { loadPyodide } = await import(indexURL + "pyodide.mjs");
   py = await loadPyodide({ indexURL });
-  const sortie = { write: octets => { postMessage({ sortie: decodeur.decode(octets, { stream: true }) }); return octets.length; } };
-  py.setStdout(sortie); py.setStderr(sortie);
-  py.unpackArchive(zip, "zip", { extractDir: dossier });
+  const canal = cle => { const d = new TextDecoder(); return { write: o => { postMessage({ [cle]: d.decode(o, { stream: true }) }); return o.length; } }; };
+  py.setStdout(canal("sortie")); py.setStderr(canal("sortie_erreur"));
+  py.unpackArchive(zip, "zip", { extractDir: "/" });
   py.globals.set("_lancement", py.toPy({ argv, cwd, dossier }));
   const code = await py.runPythonAsync(`
 import io, js, os, runpy, sys, traceback
@@ -76,7 +77,9 @@ class _Entree(io.RawIOBase):  # stdin : chaque lecture attend la prochaine écri
 def _executer(argv, cwd, dossier):
     if not can_run_sync():
         raise RuntimeError("ce navigateur ne sait pas suspendre Python (JSPI) : pas de sous-processus")
-    sys.stdin = io.TextIOWrapper(io.BufferedReader(_Entree()), encoding="utf-8")
+    # __stdin__ aussi, comme sur un bureau : un script qui enveloppe sys.stdin.buffer puis remplace sys.stdin ne doit pas
+    # voir l'ancien objet ramassé, ce qui fermerait le tampon partagé (console_enfant.py de SmartTeacher)
+    sys.stdin = sys.__stdin__ = io.TextIOWrapper(io.BufferedReader(_Entree()), encoding="utf-8")
     sys.stdout.reconfigure(line_buffering=True); sys.stderr.reconfigure(line_buffering=True)
     os.makedirs(cwd, exist_ok=True); os.chdir(cwd)
     try:
