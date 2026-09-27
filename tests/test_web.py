@@ -66,6 +66,23 @@ def test_rangee_se_replie(app):
     assert boutons[-1].geometry().right() == 999, "les extensibles n'occupent pas toute la ligne"
 
 
+
+def test_rangee_recalcule_apres_changement(app):
+    """La hauteur par largeur est gardée en cache : un item caché ou qui s'élargit doit la faire recalculer."""
+    zone = QtWidgets.QWidget()
+    rangee = dispositions.Rangee(6)
+    zone.set_layout(rangee)
+    boutons = [QtWidgets.QPushButton("B") for _ in range(4)]
+    for b in boutons:
+        rangee.add_widget(b)
+    une_ligne = rangee.heightForWidth(400)
+    for b in boutons:
+        b.set_text("Un bouton bien plus large")
+    assert rangee.heightForWidth(400) > une_ligne, "le texte élargi ne replie pas la rangée : cache périmé"
+    for b in boutons[1:]:
+        b.hide()
+    assert rangee.heightForWidth(400) == une_ligne, "les boutons cachés comptent encore : cache périmé"
+
 def test_versions_json():
     v = json.loads((RACINE / "qtpy6" / "web" / "versions.json").read_text())
     assert {"pyodide_qt", "pyodide"} <= set(v) and v["pyodide_qt"]["abi"].startswith("cp")

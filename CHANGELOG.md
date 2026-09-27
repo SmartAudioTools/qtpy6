@@ -17,6 +17,8 @@
   `QTimer.singleShot` ; `QThread`, `QThreadPool`, `QMutex`,
   `QWaitCondition`, `QSemaphore` et `time.sleep` sont coopératifs (`qtpy6.web.fils`) ; une pompe
   fait tourner la boucle d'événements de Qt-WASM, dont les minuteries s'arrêtaient sinon.
+- `Rangee` et les autres `Disposition` gardent `heightForWidth` en cache jusqu'au prochain
+  `invalidate()` : Qt la redemandait des centaines de fois par redimensionnement.
 - Extras `sonde` (selenium) et, dans `test`, `greenlet`.
 
 ## 0.1.0 — 2026-09-19

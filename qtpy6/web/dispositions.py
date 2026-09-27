@@ -14,6 +14,7 @@ class Disposition(QLayout):
 
     def __init__(self, espacement):
         super().__init__()
+        self.hauteurs = {}  # heightForWidth par largeur : Qt la redemande des centaines de fois par redimensionnement
         self.setContentsMargins(0, 0, 0, 0)
         self.setSpacing(espacement)
         self.items = []
@@ -37,7 +38,14 @@ class Disposition(QLayout):
         return True
 
     def heightForWidth(self, largeur):
-        return self._disposer(QRect(0, 0, largeur, 0), False)
+        if largeur not in self.hauteurs:
+            self.hauteurs[largeur] = self._disposer(QRect(0, 0, largeur, 0), False)
+        return self.hauteurs[largeur]
+
+    def invalidate(self):
+        """Un item ajouté, montré, caché ou dont la taille change : Qt appelle ceci, les hauteurs sont à recalculer."""
+        self.hauteurs.clear()
+        super().invalidate()
 
     def sizeHint(self):
         return self.minimumSize()
