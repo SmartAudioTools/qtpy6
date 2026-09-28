@@ -62,7 +62,30 @@ def application(polices=None, defaut=None):
                 QFontDatabase.addApplicationFont(str(police))
             if defaut is not None:
                 app.setFont(defaut if isinstance(defaut, QFont) else QFont(*defaut))
+            _coller()
     return QApplication.instance()
+
+
+def _coller():
+    """Ctrl+V colle le texte du presse-papiers du système dans le champ qui a le focus. Qt-WASM laisse passer Ctrl+V au
+    navigateur pour recevoir son événement ``paste``, mais n'en fait rien : ni texte, ni touche (mesuré dans Firefox,
+    28/09/2026, sur un QLineEdit ; ``paste()`` depuis le presse-papiers interne de Qt marche). L'événement est pris ici,
+    avant Qt (phase de capture, sur le document) et arrêté : si Qt apprend à coller, le texte n'arrivera pas deux fois."""
+    import js  # noqa: PLC0415 - voir la docstring du module
+    from pyodide.ffi import create_proxy  # noqa: PLC0415
+    from qtpy6.QtWidgets import QApplication  # noqa: PLC0415
+
+    def coller(evenement):
+        champ = QApplication.focusWidget()
+        texte = evenement.clipboardData and evenement.clipboardData.getData("text/plain")
+        inserer = getattr(champ, "insert", None) or getattr(champ, "insertPlainText", None)  # QLineEdit, éditeurs de texte
+        if not texte or inserer is None or champ.isReadOnly():
+            return
+        evenement.preventDefault()
+        evenement.stopPropagation()
+        inserer(texte)
+
+    js.document.addEventListener("paste", create_proxy(coller), True)
 
 
 def lancer(script, args=(), pret=None, module=None):
