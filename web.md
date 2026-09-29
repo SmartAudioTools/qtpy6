@@ -15,6 +15,7 @@ Une application écrite avec **qtpy6** tourne **telle quelle dans le navigateur*
 | `QtGui.QFontDatabase.systemFont(FixedFont)` | la première police à chasse fixe que l'application a chargée (`addApplicationFont`), à la taille de celle de l'interface |
 | `exec()` de `QApplication`, `QDialog`, `QMenu`, `QEventLoop` ; `QMessageBox.question`, `QInputDialog.getText`, `QFileDialog.getOpenFileName`… | suspendus par JSPI jusqu'à leur fin, puis rendent leur valeur comme en natif (`qtpy6.web.bloquant`) ; les sélecteurs de fichiers passent par ceux du navigateur (téléverser, télécharger) |
 | `QThread`, `QThreadPool`, `QRunnable`, `QMutex`, `QWaitCondition`, `QSemaphore`, `time.sleep` | des fils coopératifs sur le fil unique de la page : un `sleep`, un `wait()`, un verrou pris cèdent la main (`qtpy6.web.fils`) |
+| `QtPdf.QPdfDocument`, `QtPdfWidgets.QPdfView` | le PDF dessiné par pdf.js (vendu, `js/pdfjs/`) dans un `<div>` de la page calé sur le widget, texte sélectionnable et copiable (`qtpy6.web.pdf`) ; Qt-WASM n'a pas QtPdf |
 
 Le reste n'a pas d'équivalent Qt et vit dans le sous-paquet **`qtpy6.web`** : le chargeur de la page, la `QApplication`
 et ses polices, les cibles au doigt, le stockage du navigateur, l'assemblage de l'archive et une sonde Firefox sans
@@ -98,9 +99,11 @@ pip install -e . --no-deps --no-build-isolation --config-settings editable_mode=
 | `qtpy6.web.lancer(script, args=(), pret=None, module=None)` | Exécute un script écrit pour le bureau comme `python script args…` (avec `module`, `script` est son `__main__.py` et c'est `python -m module` qui est imité : imports relatifs compris) ; `app.exec()` y suspend jusqu'à `quit()`, `sys.exit` est rattrapé et donne le code de retour ; `pret()` quand l'application entre dans `exec()`. À appeler d'une entrée suspendable : `lancer` de `qtpy6web.js`. |
 | `qtpy6.web.lanceur` | `executer(chemin, args, pret)` : un `.py`, ou un `.zip` dont `point_d_entree` trouve le script — `__main__.py` à la racine, `paquet/__main__.py` (par `-m`), `paquet/paquet.py` ou `nom_du_zip.py`, le seul `.py` ; un zip dont la racine n'est qu'un dossier (le « Download ZIP » de GitHub) est lu depuis ce dossier. Ce que fait tourner la page de lancement (section « Hébergement »). |
 | `qtpy6.web.construire` | `python -m qtpy6.web.construire app.py [site] [--pyodide URL] [--paquet p]… [--distribution d]… [--police f]… [--titre t]` : le site complet d'une application de bureau (page, chargeur, archive). |
+| `qtpy6.web.pdf` | Les doublures de `QPdfDocument` (`load` d'un chemin ou d'un `QIODevice`, `status`, `pageCount`, `close`, leurs signaux) et `QPdfView` (`setDocument`, modes gardés sans effet : toujours ajusté à la largeur, pages les unes sous les autres). Posé par `qtpy6.QtPdf` et `qtpy6.QtPdfWidgets`. En natif, ces deux modules sont les vrais, et `QPdfView` y gagne la sélection à la souris et Ctrl+C (le `QPdfView` de Qt n'en a pas). |
 | `qtpy6.web.bloquant` | Les `exec()` et boîtes statiques suspendus (première ligne du tableau d'en tête), le report des slots venus de Qt vers une entrée suspendable, et la pompe de la boucle d'événements (section « Pièges »). Posé par `QtCore`/`QtWidgets` de qtpy6 : rien à importer. |
 | `qtpy6.web.fils` | `QThread` (`run()` redéfini, ou un travailleur `moveToThread`), `QThreadPool`, verrous et `time.sleep` coopératifs ; un interblocage lève `RuntimeError` au lieu de figer la page. Posé par `QtCore` de qtpy6. |
 | `js/qtpy6web.js` | `preparer(conteneur, {indexURL, archives, roues, env, sur_ligne})` : charge Pyodide-Qt et les archives en parallèle, dépaquette, charge les roues WebAssembly par URL (`roues`, pour une extension compilée : le lock de Pyodide-Qt est vide, ni `loadPackage("nom")` ni micropip ; une adresse qui finit par `.whl`, sans requête `?v=` : Pyodide y lit le nom du paquet), pose `env` (`QT_API=pyqt6` par défaut) et met chaque dossier d'archive dans `sys.path` ; rend l'objet Pyodide. `lancer(py, script, args)` : `qtpy6.web.lancer` dans une entrée suspendable, rend `{pret, fin}` (deux promesses : l'application est dans `exec()`, le script est fini avec son code). `print` et `journal` : le journal horodaté (console, `window.journal`, `sur_ligne`) que lit la sonde. `rendu()` : attend quelques images pour qu'une capture voie la fenêtre. |
+| `js/pdf_vue.js`, `js/pdfjs/` | La vue PDF de la page (rendu paresseux, couche de texte de pdf.js) et pdf.js 6.2.108 (`versions.json`, licence Apache 2 en tête des fichiers), chargés par URL `blob:` au premier `QPdfView`. |
 | `js/travailleur.js` | Le Worker (lu par `importlib.resources`, lancé depuis une URL `blob:`). |
 | `js/gabarit.html` | La page minimale, que `construire` remplit (sinon à copier) : conteneur `position: fixed; inset: 0` qui **a sa taille dès le chargement** (Qt la prend au démarrage ; `display: none` donne une fenêtre de 0 px, cacher par `visibility`), message d'attente, `window.etat`. |
 
@@ -357,6 +360,26 @@ postes visés ; (5) le temps de chargement à froid derrière le bandeau, avec l
   worker (Pyodide ordinaire, Python 3.14) ; les deux versions sont dans `versions.json`.
 - **`import js`** n'existe que dans le navigateur : jamais au niveau d'un module qui doit s'importer en natif (un test le
   garantit ici) ; dans le worker, `js` existe mais ni `document` ni `localStorage`.
+- **Un PDF par-dessus le canevas** : un `<div>` de la page, pas un `<iframe>` — cliquer dans un iframe fait perdre le
+  focus à la page (`blur`), ce qu'une surveillance d'épreuve compte comme une sortie ; un `<div>` non. Le `<div>` est
+  au-dessus de Qt : il n'est montré que si le widget est visible, **activé** (un rideau posé par `setEnabled(False)` le
+  cache sans code dédié) et qu'aucun menu ni boîte modale d'une autre fenêtre n'est ouvert — Qt les dessinerait dessous.
+  Sa place suit le widget à chaque événement de taille ou de visibilité, et toutes les 100 ms pour ce qu'aucun
+  événement ne signale (un séparateur déplacé). Le chargement est asynchrone (`status() == Loading`, puis `Ready`).
+  Ctrl+C et Ctrl+F sont ceux du navigateur tant que le `<div>` a le focus.
+- **La sélection en natif** : `QPdfDocument.getSelection(page, a, b)` ne rend rien si un point tombe hors d'un
+  caractère (une marge, un interligne) ; `QPdfView` accroche donc chaque point à la ligne de texte la plus proche, les
+  lignes étant regroupées depuis `getAllText().bounds()`, qui rend parfois un rectangle par glyphe (PDF de
+  `QPdfWriter`). Sans cet accrochage, le test de copie échoue. Une sélection reste dans une page.
+- **Un document enfant de sa vue plante Qt (6.11 : PySide6 6.11.1, PyQt6 6.11.0)** : `QPdfDocument(vue)` puis `vue.setDocument(...)`
+  fait planter la destruction de la vue (code 139, souvent à la sortie du programme). Pile relevée sous gdb :
+  `~QWidget` détruit ses enfants → `~QPdfDocument` → `close()` émet `statusChanged` → le slot de la vue s'exécute sur un
+  objet à moitié détruit (`~QPdfView` ne s'est pas désabonné). Aucun rapport trouvé sur bugreports.qt.io au 29/09/2026 ;
+  les exemples de Qt donnent au document la fenêtre principale pour parent, jamais la vue. Contournement, dans le
+  `QPdfView` natif de qtpy6 : `setDocument` détache de la vue un document qui en est l'enfant (`setParent(None)`) et le
+  garde dans un attribut Python, si bien qu'il survit à la vue. Écarté : exiger un document sans parent, piège silencieux
+  pour le cas le plus naturel. Test : `test_pdf_document_enfant_de_la_vue` (dans un processus à part, le plantage
+  emportant pytest), qui échoue sans le contournement.
 - **La sonde** : Firefox ne descend pas sous 500 px de large (une largeur de téléphone se mesure en natif hors écran, ou
   avec `--zoom`) ; Chromium n'ouvre pas sans socket Unix, ce qu'un bac à sable peut interdire. Selenium Manager tente de
   télécharger geckodriver avant de prendre celui du système : sans réseau, ses messages sont du bruit, pas une panne.
@@ -436,4 +459,4 @@ embarque : serializejson (Prosperity Public License 3.0.0 pour l'usage non comme
 
 ## Licence
 
-MIT (`LICENSE.txt`). Pyodide-Qt, que la page charge et que l'hébergement distribue, est GPL v3 (`hebergement/LICENSE-Pyodide-Qt.txt`) ; Pyodide est MPL 2.0 ; Qt est LGPL v3.
+MIT (`LICENSE.txt`). Pyodide-Qt, que la page charge et que l'hébergement distribue, est GPL v3 (`hebergement/LICENSE-Pyodide-Qt.txt`) ; Pyodide est MPL 2.0 ; Qt est LGPL v3 ; pdf.js (`qtpy6/web/js/pdfjs/`) est Apache 2.0.

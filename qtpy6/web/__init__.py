@@ -7,6 +7,7 @@ charge ce nom, sans rien à importer d'ici :
     QtCore.QThread, QThreadPool, QMutex…      des fils coopératifs (``fils``)
     subprocess.run (posé par QtCore)           un script Python dans ce même worker, attendu par JSPI (``sous_processus``)
     exec() et boîtes statiques de QtWidgets    suspendus par JSPI jusqu'à leur fin (``bloquant``)
+    QtPdf.QPdfDocument, QtPdfWidgets.QPdfView  pdf.js dans un <div> de la page calé sur le widget (``pdf``)
 
 Le reste, qui n'a pas d'équivalent Qt, est dans ce paquet :
 

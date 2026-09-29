@@ -1,5 +1,13 @@
 # Changelog
 
+## Non publié
+
+- `qtpy6.QtPdf` et `qtpy6.QtPdfWidgets`. Dans le navigateur, où Qt-WASM n'a pas QtPdf,
+  `QPdfDocument` et `QPdfView` sont doublés par pdf.js 6.2.108 (vendu, Apache 2) dans un `<div>`
+  de la page calé sur le widget, texte sélectionnable et copiable (`qtpy6.web.pdf`). En natif,
+  `QPdfView` gagne la sélection à la souris et Ctrl+C, et contourne un plantage de Qt 6.11 quand le
+  document est enfant de la vue (`web.md`, « Pièges »).
+
 ## 0.2.0 — 2026-09-27
 
 - `qtpy6.web` : l'application dans le navigateur, sous Pyodide-Qt (fusion de l'ancien

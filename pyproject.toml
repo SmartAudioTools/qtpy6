@@ -47,7 +47,7 @@ version = {attr = "qtpy6.__version__"}
 
 [tool.setuptools.package-data]
 qtpy6 = ["*.svg"]
-"qtpy6.web" = ["js/*", "versions.json"]
+"qtpy6.web" = ["js/*", "js/pdfjs/*", "versions.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

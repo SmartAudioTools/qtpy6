@@ -121,6 +121,7 @@ def test_assembler(tmp_path):
     assembler.assembler(zip_, fichiers={"a.py": tmp_path / "a.py"}, paquets=("qtpy6",))
     noms = zipfile.ZipFile(zip_).namelist()
     assert "a.py" in noms and "qtpy6/web/js/travailleur.js" in noms and "qtpy6/web/versions.json" in noms
+    assert "qtpy6/web/js/pdfjs/pdf.min.mjs" in noms and "qtpy6/web/js/pdfjs/pdf.worker.min.mjs" in noms
     assert not any("__pycache__" in n for n in noms)
 
 
@@ -148,6 +149,73 @@ def test_qprocess_doublé_dans_le_navigateur():
         print(QProcess is ProcessusWeb, hasattr(QProcess, "read_all_standard_output"))
     """)
     assert sortie == "True True"  # et le snake_case de qtpy6 lui est donné comme au vrai
+
+
+def test_pdf_doublé_dans_le_navigateur():
+    sortie = en_navigateur("""
+        from qtpy6.QtPdf import QPdfDocument
+        from qtpy6.QtPdfWidgets import QPdfView
+        print(QPdfDocument.__module__, QPdfView.__module__, hasattr(QPdfView, "set_document"), "js" in sys.modules)
+    """)
+    assert sortie == "qtpy6.web.pdf qtpy6.web.pdf True False"  # js n'est chargé qu'à la première vue
+
+
+def test_pdf_selection_en_natif(app, tmp_path):
+    """Le QPdfView de qtpy6 sélectionne au glisser et copie par Ctrl+C, même en partant de la marge (le point est
+    accroché à la ligne la plus proche : QPdfDocument.getSelection ne sélectionne rien entre deux points hors texte)."""
+    from qtpy6.QtPdf import QPdfDocument
+    from qtpy6.QtPdfWidgets import QPdfView
+    from qtpy6.QtTest import QTest
+
+    chemin = str(tmp_path / "cours.pdf")
+    ecrivain = QtGui.QPdfWriter(chemin)
+    peintre = QtGui.QPainter(ecrivain)
+    peintre.setFont(QtGui.QFont("DejaVu Sans", 14))
+    for i, ligne in enumerate(("Premiere ligne du cours", "Deuxieme ligne du cours")):
+        peintre.drawText(600, 1200 + 600 * i, ligne)
+    peintre.end()
+    document = QPdfDocument(None)
+    document.load(chemin)
+    vue = QPdfView(None)
+    vue.setDocument(document)
+    vue.setZoomMode(QPdfView.ZoomMode.FitToWidth)
+    vue.resize(400, 600)
+    vue.show()
+    page = vue._pages()[0]
+    Bouton = QtCore.Qt.MouseButton
+    QTest.mousePress(vue.viewport(), Bouton.LeftButton, QtCore.Qt.KeyboardModifier.NoModifier, page.topLeft() + QtCore.QPoint(2, 2))
+    QTest.mouseMove(vue.viewport(), page.topLeft() + QtCore.QPoint(page.width() - 2, page.height() // 3))
+    QTest.mouseRelease(vue.viewport(), Bouton.LeftButton, QtCore.Qt.KeyboardModifier.NoModifier, page.topLeft() + QtCore.QPoint(page.width() - 2, page.height() // 3))
+    QTest.keyClick(vue, QtCore.Qt.Key.Key_C, QtCore.Qt.KeyboardModifier.ControlModifier)
+    assert QtWidgets.QApplication.clipboard().text().split() == "Premiere ligne du cours Deuxieme ligne du cours".split()
+    vue.close()
+
+
+def test_pdf_document_enfant_de_la_vue(tmp_path):
+    """Un document enfant de sa vue ne fait plus planter la sortie (Qt 6.10 : ~QPdfView atteint le document déjà
+    détruit) ; dans un processus à part, le plantage emportant tout."""
+    chemin = tmp_path / "cours.pdf"
+    code = f"""
+        from qtpy6 import QtGui, QtWidgets
+        app = QtWidgets.QApplication([])
+        from qtpy6.QtPdf import QPdfDocument
+        from qtpy6.QtPdfWidgets import QPdfView
+        ecrivain = QtGui.QPdfWriter({str(chemin)!r})
+        peintre = QtGui.QPainter(ecrivain)
+        peintre.drawText(600, 1200, "Cours")
+        peintre.end()
+        vue = QPdfView()
+        document = QPdfDocument(vue)
+        document.load({str(chemin)!r})
+        vue.setDocument(document)
+        vue.show()
+        app.processEvents()
+        print(document.pageCount())
+    """
+    env = dict(os.environ, QT_QPA_PLATFORM="offscreen")
+    r = subprocess.run([sys.executable, "-c", textwrap.dedent(code)], env=env, capture_output=True, text=True,
+                       timeout=60)
+    assert (r.returncode, r.stdout.strip()) == (0, "1"), r.stderr
 
 
 def test_subprocess_run_doublé_dans_le_navigateur():
