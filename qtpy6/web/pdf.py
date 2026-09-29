@@ -7,13 +7,15 @@ Le ``<div>`` est au-dessus du canevas de Qt : il n'est montré que quand le widg
 désactivé cache son PDF : un rideau posé par ``setEnabled(False)`` le couvre) et qu'aucune boîte modale ni menu
 n'est ouvert, que Qt dessinerait dessous. Seul le sous-ensemble utile de l'API est doublé : ``QPdfDocument.load``
 (chemin ou QIODevice), ``status``, ``pageCount`` et leurs signaux ; ``QPdfView.setDocument`` et les modes, la page
-étant toujours ajustée à la largeur, les pages les unes sous les autres. Le chargement est asynchrone : ``load`` rend
+étant toujours ajustée à la largeur, les pages les unes sous les autres, ``setDocumentMargins`` et ``setPageSpacing`` ; les
+liens internes du PDF (un sommaire) suivis au clic, comme sur ordinateur ; et ``setPageLimit``, l'ajout de qtpy6 (les
+premières pages seules), comme sur ordinateur. Le chargement est asynchrone : ``load`` rend
 ``Error.None_`` avec ``status() == Loading``, puis ``statusChanged(Ready)``."""
 
 import enum
 import importlib.resources
 
-from qtpy6.QtCore import QObject, QPoint, QTimer, Signal
+from qtpy6.QtCore import QMargins, QObject, QPoint, QTimer, Signal
 from qtpy6.QtWidgets import QApplication, QWidget
 
 _JS = None
@@ -119,7 +121,8 @@ class QPdfView(QWidget):
         super().__init__(parent)
         self._document, self._mode_page, self._mode_zoom = None, self.PageMode.SinglePage, self.ZoomMode.Custom
         self._vue = vue = _js().vue()
-        self._place = None
+        self._place, self._limite = None, None
+        self._marges, self._ecart = QMargins(6, 6, 6, 6), 3  # les défauts de QPdfView
         self.destroyed.connect(lambda *_: vue.detruire())
         # Le filet : ce qu'aucun événement du widget ne signale (un ancêtre qui bouge, une boîte modale, un menu)
         self._minuterie = QTimer(self, interval=100, timeout=self._synchroniser)
@@ -140,6 +143,31 @@ class QPdfView(QWidget):
     def _afficher(self, *_):
         prete = self._document is not None and self._document.status() == QPdfDocument.Status.Ready
         self._vue.afficher(self._document._promesse if prete else None)
+
+    def setPageLimit(self, nombre):
+        self._limite = nombre
+        self._vue.limiter(nombre)
+
+    def pageLimit(self):
+        return self._limite
+
+    def documentMargins(self):
+        return QMargins(self._marges)
+
+    def setDocumentMargins(self, marges):
+        self._marges = QMargins(marges)
+        self._espacer()
+
+    def pageSpacing(self):
+        return self._ecart
+
+    def setPageSpacing(self, ecart):
+        self._ecart = ecart
+        self._espacer()
+
+    def _espacer(self):
+        m = self._marges
+        self._vue.espacer(m.left(), m.top(), m.right(), m.bottom(), self._ecart)
 
     def pageMode(self):
         return self._mode_page

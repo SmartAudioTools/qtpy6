@@ -191,6 +191,57 @@ def test_pdf_selection_en_natif(app, tmp_path):
     vue.close()
 
 
+def test_pdf_limite_de_pages_en_natif(app, tmp_path):
+    """``setPageLimit`` : la barre de défilement s'arrête au bas de la dernière page montrée, et quand les pages
+    montrées finissent plus haut que la vue, la suite est recouverte du fond."""
+    from qtpy6.QtPdf import QPdfDocument
+    from qtpy6.QtPdfWidgets import QPdfView
+
+    chemin = str(tmp_path / "cours.pdf")
+    ecrivain = QtGui.QPdfWriter(chemin)
+    peintre = QtGui.QPainter(ecrivain)
+    for i in range(4):
+        if i:
+            ecrivain.newPage()
+        peintre.fillRect(0, 0, 9000, 13000, QtGui.QColor("red"))  # des pages rouges : un pixel rouge est une page vue
+    peintre.end()
+    document = QPdfDocument(None)
+    document.load(chemin)
+    vue = QPdfView(None)
+    vue.setDocument(document)
+    vue.setPageMode(QPdfView.PageMode.MultiPage)
+    vue.setZoomMode(QPdfView.ZoomMode.FitToWidth)
+    vue.resize(300, 400)
+    vue.show()
+    app.processEvents()
+    barre = vue.verticalScrollBar()
+    toutes = barre.maximum()
+    vue.setPageLimit(2)
+    app.processEvents()
+    assert 0 < barre.maximum() < toutes
+    barre.setValue(barre.maximum())
+    assert vue._pages()[1].bottom() + 1 + vue.documentMargins().bottom() == vue.viewport().height()
+    vue.resize(300, 390)  # Qt refait la mise en page, et la plage de la barre : elle reste bornée
+    app.processEvents()
+    barre.setValue(barre.maximum())
+    assert vue._pages()[1].bottom() + 1 + vue.documentMargins().bottom() == vue.viewport().height()
+    vue.setPageLimit(1)
+    vue.resize(300, 1000)  # la première page finit plus haut que la vue : la deuxième, dessous, est recouverte
+    app.processEvents()
+    bas, attente = vue._pages()[0].bottom(), QtCore.QDeadlineTimer(10000)
+    while not attente.hasExpired():  # les pages se dessinent dans un fil à part : on attend la première
+        app.processEvents()
+        image = vue.viewport().grab().toImage()
+        rouges = [y for y in range(image.height()) if image.pixelColor(150, y).red() > 200 and image.pixelColor(150, y).green() < 80]
+        if rouges:
+            break
+    assert rouges and max(rouges) <= bas  # la première page est dessinée, la suivante recouverte
+    vue.setPageLimit(None)
+    app.processEvents()
+    assert barre.maximum() == 0 or barre.maximum() >= toutes - 1
+    vue.close()
+
+
 def test_pdf_document_enfant_de_la_vue(tmp_path):
     """Un document enfant de sa vue ne fait plus planter la sortie (Qt 6.10 : ~QPdfView atteint le document déjà
     détruit) ; dans un processus à part, le plantage emportant tout."""

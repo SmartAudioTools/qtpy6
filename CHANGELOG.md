@@ -7,6 +7,9 @@
   de la page calé sur le widget, texte sélectionnable et copiable (`qtpy6.web.pdf`). En natif,
   `QPdfView` gagne la sélection à la souris et Ctrl+C, et contourne un plantage de Qt 6.11 quand le
   document est enfant de la vue (`web.md`, « Pièges »).
+- `QPdfView.setPageLimit(n)` / `pageLimit()` (ajout de qtpy6, natif et navigateur) : seules les `n`
+  premières pages se voient et défilent. Les liens internes du PDF (un sommaire) se suivent au clic,
+  des deux côtés ; dans le navigateur, `setDocumentMargins` et `setPageSpacing` sont doublés.
 
 ## 0.2.0 — 2026-09-27
 

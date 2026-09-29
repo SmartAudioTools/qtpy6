@@ -1,4 +1,5 @@
-"""The binding's QtPdfWidgets, whose QPdfView selects text on the desktop (drag, Ctrl+C: Qt's own has no selection);
+"""The binding's QtPdfWidgets, whose QPdfView selects text on the desktop (drag, Ctrl+C: Qt's own has no selection)
+and follows the document's internal links (a table of contents: Qt's own does not);
 in the browser, where Qt-WASM has no QtPdf, qtpy6.web.pdf's QPdfView, drawn by pdf.js, whose text selects and copies
 as in the browser's PDF viewer."""
 import sys
@@ -11,18 +12,50 @@ else:
     _binding.load(globals(), 'QtPdfWidgets')
     from .QtCore import QPoint, QPointF, QRect, QSize, QSizeF, Qt
     from .QtGui import QColor, QGuiApplication, QKeySequence, QPainter, QPolygonF
+    from .QtPdf import QPdfLinkModel
 
     _QPdfView = QPdfView  # noqa: F821
 
     class QPdfView(_QPdfView):
-        """QPdfView, plus a selection within one page: drag with the left button, Ctrl+C copies it."""
+        """QPdfView, plus a selection within one page (drag with the left button, Ctrl+C copies it), internal links
+        followed on click, and ``setPageLimit``: only the first pages are shown."""
 
         def __init__(self, parent=None):
             super().__init__(parent)  # PyQt6 wants the parent, even None
             self._anchor = None  # (page, point in the page's points) where the drag started
             self._selection = None  # (page, QPdfSelection)
             self._lines = {}  # {page: [QRectF of each text line]}, read once per page
+            self._limit = None  # setPageLimit
+            self._links = QPdfLinkModel(self)  # those of one page at a time (setPage), read under the mouse
             self.viewport().setCursor(Qt.CursorShape.IBeamCursor)
+            self.viewport().setMouseTracking(True)  # the pointing hand over a link
+            self.verticalScrollBar().rangeChanged.connect(self._clamp)
+
+        def setPageLimit(self, count):
+            """Shows only the first ``count`` pages (None: all), in MultiPage mode: the scroll bar stops at the bottom
+            of the last one, and what the viewport shows below it is painted over. Not Qt's: a qtpy6 addition, also
+            in the browser's QPdfView."""
+            self._limit = count
+            self._clamp()
+            self.viewport().update()
+
+        def pageLimit(self):
+            return self._limit
+
+        def _last(self):
+            """The viewport rectangle of the last page shown, None when every page is."""
+            if self._limit is None or self.pageMode() != self.PageMode.MultiPage:
+                return None
+            return self._pages().get(self._limit - 1)
+
+        def _clamp(self, *_):
+            """Qt sets the scroll bar's range at each layout (document, size, zoom): brought back to the last page."""
+            last, bar = self._last(), self.verticalScrollBar()
+            if last is not None:
+                bottom = last.bottom() + 1 + bar.value() + self.documentMargins().bottom()
+                maximum = max(0, bottom - self.viewport().height())
+                if bar.maximum() > maximum:
+                    bar.setMaximum(maximum)
 
         def _pages(self):
             """{page: QRect in the viewport}: QPdfViewPrivate::calculateDocumentLayout (Qt 6.10), moved by the scroll bars."""
@@ -56,14 +89,18 @@ else:
                 y += size.height() + spacing
             return geometries
 
-        def _point(self, position, page=None):
-            """(page, point in that page's points) under ``position`` (viewport); with ``page``, clamped to it."""
+        def _point(self, position, page=None, snap=True):
+            """(page, point in that page's points) under ``position`` (viewport); with ``page``, clamped to it; with
+            ``snap``, moved onto the nearest text line."""
             for number, rectangle in self._pages().items():
+                if self._limit is not None and number >= self._limit:
+                    break
                 if page in (None, number) and (page is not None or rectangle.contains(position)):
                     scale = self.document().pagePointSize(number).width() / rectangle.width()
                     x = min(max(position.x(), rectangle.left()), rectangle.right() + 1) - rectangle.left()
                     y = min(max(position.y(), rectangle.top()), rectangle.bottom() + 1) - rectangle.top()
-                    return number, self._snap(number, QPointF(x * scale, y * scale))
+                    point = QPointF(x * scale, y * scale)
+                    return number, self._snap(number, point) if snap else point
             return None, None
 
         def _snap(self, page, point):
@@ -95,7 +132,32 @@ else:
                     lines.append(rectangle)
             return lines
 
+        def _link(self, position):
+            """The link under ``position`` (viewport) leading to a page shown, None elsewhere."""
+            page, point = self._point(position, snap=False)
+            if page is None:
+                return None
+            if self._links.page() != page:
+                self._links.setPage(page)
+            link = self._links.linkAt(point)
+            if not link.isValid() or not link.url().isEmpty() or (self._limit is not None and link.page() >= self._limit):
+                return None
+            return link
+
+        def _follow(self, link):
+            """Scrolls to the link's destination: the top of the viewport on its location in the target page."""
+            target = self._pages().get(link.page())
+            if target is not None:
+                scale = target.width() / self.document().pagePointSize(link.page()).width()
+                bar = self.verticalScrollBar()
+                bar.setValue(bar.value() + target.top() + round(link.location().y() * scale))
+
         def mousePressEvent(self, event):
+            link = self._link(event.position().toPoint()) if event.button() == Qt.MouseButton.LeftButton else None
+            if link is not None:
+                self._follow(link)
+                event.accept()
+                return
             if event.button() == Qt.MouseButton.LeftButton:
                 page, point = self._point(event.position().toPoint())
                 self._anchor = (page, point) if page is not None else None
@@ -110,6 +172,9 @@ else:
                 selection = self.document().getSelection(page, start, end)
                 self._selection = (page, selection) if selection.isValid() else None
                 self.viewport().update()
+            else:
+                link = self._link(event.position().toPoint())
+                self.viewport().setCursor(Qt.CursorShape.PointingHandCursor if link is not None else Qt.CursorShape.IBeamCursor)
             super().mouseMoveEvent(event)
 
         def mouseReleaseEvent(self, event):
@@ -126,6 +191,12 @@ else:
 
         def paintEvent(self, event):
             super().paintEvent(event)
+            last = self._last()
+            if last is not None and last.bottom() < self.viewport().height():  # the next pages, when the shown ones end above
+                painter = QPainter(self.viewport())
+                painter.fillRect(QRect(0, last.bottom() + 1, self.viewport().width(), self.viewport().height()),
+                                 self.palette().dark())
+                painter.end()
             rectangle = self._selection and self._pages().get(self._selection[0])
             if rectangle:
                 page, selection = self._selection
@@ -143,6 +214,7 @@ else:
         def setDocument(self, document):
             self._anchor = self._selection = None
             self._lines = {}
+            self._links.setDocument(document)
             if document is not None and document.parent() is self:
                 # Qt 6.11 crashes destroying a view whose document is its child (both bindings): the child dies
                 # first and ~QPdfView still reaches it. Held by Python instead, it outlives the view.
