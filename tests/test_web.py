@@ -303,6 +303,10 @@ def test_zipper_chemins_depuis_la_racine_sans_doublon(tmp_path):
 @pytest.mark.skipif(not POLICE_FIXE.exists(), reason="Liberation Mono absente")
 def test_police_fixe_dans_le_navigateur():
     sortie = en_navigateur(f"""
+        import types
+        # application() branche Ctrl+V sur la page (_coller) : js et pyodide.ffi réduits à ce qu'il en touche
+        sys.modules["js"] = types.SimpleNamespace(document=types.SimpleNamespace(addEventListener=lambda *a: None))
+        sys.modules["pyodide"], sys.modules["pyodide.ffi"] = types.ModuleType("pyodide"), types.SimpleNamespace(create_proxy=lambda f: f)
         from qtpy6.QtGui import QFontDatabase
         from qtpy6.web import application
         app = application(defaut=("Noto Sans", 9))  # sans dossier : aucune police chargée
