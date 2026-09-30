@@ -140,7 +140,7 @@
         if (!dest) continue;
         const cible = typeof dest[0] === "number" ? dest[0] : await this.doc.getPageIndex(dest[0]);
         if (cible >= this.montrees()) continue;
-        const [x1, y1, x2, y2] = viewport.convertToViewportRectangle(a.rect);
+        const [[x1, y1], [x2, y2]] = [a.rect.slice(0, 2), a.rect.slice(2)].map(([x, y]) => viewport.convertToViewportPoint(x, y));  // pdf.js 6 n'a plus convertToViewportRectangle
         const lien = document.createElement("a");
         Object.assign(lien.style, { left: `${Math.min(x1, x2)}px`, top: `${Math.min(y1, y2)}px`,
                                     width: `${Math.abs(x2 - x1)}px`, height: `${Math.abs(y2 - y1)}px` });
