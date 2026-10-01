@@ -73,8 +73,12 @@ def _pyodide_pomper(periode=10):
             app.processEvents()
             # les deleteLater : processEvents ne les fait jamais hors d'une boucle exec() (doc de Qt), et il n'y en a pas.
             # Mesuré (01/10/2026) : sans cela, rien de ce qui est détruit par deleteLater ne l'était, et un widget
-            # resté à l'écran, son objet Python libéré, s'y peignait en widget natif (la case de SmartTeacher)
-            app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+            # resté à l'écran, son objet Python libéré, s'y peignait en widget natif (la case de SmartTeacher).
+            # Jamais pendant qu'une pile est suspendue (exec() d'un dialogue) : le bureau ne détruit qu'au retour dans
+            # la boucle qui a appelé deleteLater, et un slot qui a fait deleteLater avant exec() retrouve son objet
+            # vivant au retour. Mesuré (01/10/2026, scénario « suspendu ») : sans cette garde, RuntimeError au retour
+            if _suspendus == 0:
+                app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
     _pompe.append(js.setInterval(create_proxy(tour), periode))
 
