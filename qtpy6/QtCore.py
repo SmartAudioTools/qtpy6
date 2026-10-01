@@ -32,6 +32,9 @@ if PYQT6:
 
     QTimer.singleShot = staticmethod(_singleShot_with_receiver)
 
+from . import animation
+animation.doubler(globals())  # QPropertyAnimation menée par les images de l'écran (``par_image``)
+
 if sys.platform == 'emscripten':
     # Qt-WASM has no QProcess (a browser has no processes): a Pyodide Web Worker under its surface.
     from .web.travailleur import ProcessusWeb as QProcess  # noqa: F401

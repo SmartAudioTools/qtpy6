@@ -2,13 +2,17 @@
 
 ## Non publié
 
-- `qtpy6.animation.AnimationParImage` : une `QPropertyAnimation` menée par les images de l'écran. Qt Widgets
-  avance ses animations à une minuterie de 16 ms que rien ne cale sur le rafraîchissement : une image reçoit
-  parfois deux pas (le premier jamais affiché), la suivante aucun. Ici la propriété prend, à chaque
-  `UpdateRequest` de la fenêtre (`QWindow.requestUpdate` : rappel d'image du compositeur sur Wayland,
-  `requestAnimationFrame` dans le navigateur), la valeur de l'heure de l'image. Mesuré en natif (Wayland, 60 Hz,
-  défilement de 1833 ms) : peintures perdues 4 → 0 ou 1, pas réguliers de 8 px au lieu d'alterner 7 et 8.
-  Dans le navigateur, mécanique identique, pas encore mesurée.
+- `qtpy6.QtCore.QPropertyAnimation` est menée par les images de l'écran, sans rien changer à son API ni au
+  code des applications. Qt Widgets avance ses animations à une minuterie de 16 ms que rien ne cale sur le
+  rafraîchissement : une image reçoit parfois deux pas (le premier jamais affiché), la suivante aucun. Dès que la
+  cible est un widget dont la fenêtre existe, `start()` retire l'animation de cette minuterie et la propriété
+  prend, à chaque `UpdateRequest` de la fenêtre (`QWindow.requestUpdate` : rappel d'image du compositeur sur
+  Wayland, `requestAnimationFrame` dans le navigateur), la valeur de l'heure de l'image ; `finished`, `stop`,
+  `pause`/`resume`, `state` se comportent comme en natif. `par_image = False` (classe ou instance) rend celle de
+  Qt. Mesuré en natif avec le même mécanisme (Wayland, 60 Hz, défilement de 1833 ms) : peintures perdues 4 → 0 ou 1,
+  pas réguliers de 8 px au lieu d'alterner 7 et 8. Dans le navigateur (Firefox hors écran, 60 Hz, même défilement,
+  trois passes par mode) : chaque image reçoit un envoi au canevas, pas de 8 px, contre 25 à 29 images sans envoi sur
+  109 et des pas doublés de 14-17 px avec la minuterie de Qt (`qtpy6.animation`).
 - Dans le navigateur : ce qui change à l'écran est envoyé au canevas dans l'image où cela change
   (`qtpy6.web._dessiner_aussitot` ; pendant un défilement, une image sur deux restait sans envoi) ; la molette
   défile autant qu'en natif (`qtpy6web.js`, `molette`) ; `preparer` reçoit `progres` et `tailles`, l'avancement
