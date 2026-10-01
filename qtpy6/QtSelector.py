@@ -24,7 +24,10 @@ class _SettingComboBox(QtWidgets.QComboBox):
         self.add_items(choices)
         self.set_max_visible_items(self.count())
         self.set_current_index(lower.index(current.lower()))
-        self.current_text_changed.connect(lambda value: set_env(self.key, value))
+        self.current_text_changed.connect(self._write)
+
+    def _write(self, value):
+        set_env(self.key, value)
 
 
 class QtApiSelector(_SettingComboBox):
@@ -51,7 +54,10 @@ class QtFontSelector(QtWidgets.QFontComboBox):
             self.add_item(current)
         self.set_current_text(current)
         self.set_max_visible_items(self.count())
-        self.current_text_changed.connect(lambda value: set_env('QT_FONT', value))
+        self.current_text_changed.connect(self._write)
+
+    def _write(self, value):
+        set_env('QT_FONT', value)
 
 
 class QtSelector(QtWidgets.QWidget):

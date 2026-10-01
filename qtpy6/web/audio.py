@@ -3,6 +3,8 @@ lit qu'un fichier, d'où le passage par un temporaire — l'élément ``<audio>`
 données (aucun fichier n'y existe). ``qtpy6.QtMultimedia`` est le module de la liaison choisie, pris tel quel par le
 mécanisme générique de ``qtpy6._binding`` : rien à écrire pour l'avoir."""
 
+import functools
+
 _GARDES = {}  # nom -> QSoundEffect ou <audio>, gardé en vie tant qu'il peut rejouer
 
 
@@ -19,16 +21,33 @@ def _jouer_natif(nom, octets, extension, fini):
     from pathlib import Path
 
     from qtpy6.QtCore import QUrl
-    from qtpy6.QtMultimedia import QSoundEffect
 
     chemin = Path(tempfile.gettempdir()) / f"qtpy6-audio-{nom}.{extension}"
     if not chemin.exists() or chemin.stat().st_size != len(octets):
         chemin.write_bytes(bytes(octets))
-    effet = _GARDES[nom] = QSoundEffect()
+    effet = _GARDES[nom] = _effet()(fini)
     effet.setSource(QUrl.fromLocalFile(str(chemin)))
-    if fini is not None:
-        effet.playingChanged.connect(lambda: None if effet.isPlaying() else fini())
     effet.play()
+
+
+@functools.cache
+def _effet():
+    """La classe ``QSoundEffect`` qui appelle ``fini()`` quand la lecture s'arrête : une méthode branchée sur le signal, pas
+    une lambda, qui garderait l'effet en vie par un cycle (PySide ne tient une méthode liée que faiblement)."""
+    from qtpy6.QtMultimedia import QSoundEffect  # noqa: PLC0415 - en natif seulement, au premier son
+
+    class Effet(QSoundEffect):
+        def __init__(self, fini):
+            super().__init__()
+            self.fini = fini
+            if fini is not None:
+                self.playingChanged.connect(self._arret)
+
+        def _arret(self):
+            if not self.isPlaying():
+                self.fini()
+
+    return Effet
 
 
 def _jouer_navigateur(nom, octets, extension, fini):

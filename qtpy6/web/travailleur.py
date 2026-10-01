@@ -89,7 +89,8 @@ class Travailleur(QObject):
         self.en_cours[numero] = None
         if delai:
             minuteur = self.en_cours[numero] = QTimer(self, singleShot=True, interval=int(delai * 1000))
-            minuteur.timeout.connect(lambda: self._expirer(numero))
+            minuteur.setProperty("numero", numero)
+            minuteur.timeout.connect(self._expirer)
             minuteur.start()
         self._poster({"appel": {"id": numero, "fonction": fonction, "args": list(args)}})
         return numero
@@ -117,7 +118,8 @@ class Travailleur(QObject):
             minuteur.stop()
         return True
 
-    def _expirer(self, numero):
+    def _expirer(self):
+        numero = self.sender().property("numero")
         if self._clore(numero):
             self.expire.emit(numero)
 

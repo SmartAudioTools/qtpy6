@@ -197,6 +197,13 @@ Le plus souvent rien : `construire` et le script tel quel. Ce qui reste différe
 9. **PyQt6 sous le capot** : qtpy6 traduit l'API, mais pas ce que PyQt6 ne fait pas. Pas d'arguments nommés de propriétés
    dans les constructeurs (`QPlainTextEdit(read_only=True)` échoue : setters), et une méthode redéfinie en Python se
    teste en camelCase (`heightForWidth`) — l'appel snake_case tombe sur la méthode de base C++.
+10. **Une méthode, pas une lambda, branchée sur un signal** (vaut aussi en natif). Le binding ne tient une méthode liée
+   que faiblement, mais garde en vie tout ce qu'une lambda ou une fonction locale capture : un widget qui capture son
+   parent le tient alors en vie, et quand Qt détruit ce widget, la lambda libérée emporte la dernière référence au
+   parent, détruit au milieu de la destruction de son enfant (segmentation fault, mesuré sous PySide6 le 01/10/2026).
+   Un argument du signal à jeter : une méthode sans ce paramètre (le binding n'en passe pas plus que la méthode n'en
+   prend) ; une valeur à fixer : un attribut, ou `self.sender()` et sa `property()`. Seule exception, `destroyed` : son
+   slot ne peut pas être une méthode de l'objet détruit (`pdf.py`).
 
 Puis `construire` (ou, pour une page à soi, `assembler` l'archive et copier `js/gabarit.html`), et vérifier par la
 sonde : `python -m qtpy6.web.sonde --racine site site/index.html capture.png`, en lisant la capture.
