@@ -13,7 +13,8 @@ il peut suspendre. Appelé depuis du Python déjà suspendable (``emit`` du code
 Hors slot, dans une méthode virtuelle (``contextMenuEvent``, ``mousePressEvent``…) que Qt appelle directement, rien ne
 peut suspendre : ``exec()`` y ouvre sans bloquer et rend la valeur d'un abandon (``Rejected``, None), avec un
 avertissement. Les doublures sont posées par ``QtCore``, ``QtGui`` et ``QtWidgets`` de qtpy6 sous Pyodide, sur les
-classes de PyQt6 elles-mêmes (``PyQt6.QtWidgets.QDialog.exec`` compris)."""
+classes de la liaison elle-même (``PyQt6.QtWidgets.QDialog.exec`` compris), PyQt6 ou PySide6 : rien ici ne dépend de
+l'une ou de l'autre, hors les deux lignes de ``_mort``."""
 
 import inspect
 import os
@@ -52,7 +53,7 @@ def _pyodide_plus_tard(f):
 _pompe = []
 
 
-def _pyodide_pomper(periode=10):
+def _pyodide_pomper(ns, periode=10):
     """Fait tourner la boucle d'événements de Qt : compilé avec JSPI, Qt-WASM n'envoie ni minuteries ni événements postés
     de lui-même, il attend qu'on reprenne SA boucle ``exec()`` suspendue (``onTimer`` : ``if (useAsyncify()) return;``,
     qeventdispatcher_wasm.cpp) — celle qu'on ne peut pas lancer, imbriquée elle arrête tout. Mesuré : sans pompe, un
@@ -65,7 +66,7 @@ def _pyodide_pomper(periode=10):
         from pyodide.ffi import create_proxy  # noqa: PLC0415
     except ImportError:  # tests/test_web.py, qui simule le navigateur sans Pyodide : sa boucle native fait tourner Qt
         return
-    from PyQt6.QtCore import QCoreApplication, QEvent  # noqa: PLC0415
+    QCoreApplication, QEvent = ns["QCoreApplication"], ns["QEvent"]
 
     def tour():
         app = QCoreApplication.instance()
@@ -144,12 +145,30 @@ def attendre_signal(signal, _connect=None):
 
 # --- connect : les slots venus de Qt passent par la boucle asyncio ---------------------------------------------------
 
-_connect_qt = []  # le connect de PyQt, avant la doublure
+_connect_qt = []  # le connect de la liaison, avant la doublure
 _expediteur = []  # l'expéditeur d'un slot reporté, que ``QObject.sender()`` rend pendant son exécution
 
 
+def _est_destroyed(signal):
+    """``signal`` est-il ``destroyed`` ? Son nom n'a pas la même porte : ``signal.signal`` sous PyQt6 (``"2destroyed(QObject*)"``),
+    ``str()`` seulement sous PySide6 (``"<PySide6.QtCore.SignalInstance destroyed() at 0x…>"``)."""
+    nom = getattr(signal, "signal", None) or str(signal).split(" ")[1]
+    return nom.lstrip("2").startswith("destroyed(")
+
+
+def _mort():
+    """Rend la fonction qui dit si l'objet C++ d'un receveur a été détruit (la seule chose que chaque liaison nomme autrement)."""
+    from .. import PYQT6  # noqa: PLC0415
+
+    if PYQT6:
+        from PyQt6 import sip  # noqa: PLC0415
+        return lambda objet: isinstance(objet, sip.simplewrapper) and sip.isdeleted(objet)
+    import shiboken6  # noqa: PLC0415
+    return lambda objet: not shiboken6.isValid(objet)  # True pour un objet Python ordinaire
+
+
 def _nb_arguments(slot):
-    """Combien d'arguments positionnels ``slot`` accepte (None : autant qu'on veut). PyQt tronque ceux du signal à ce
+    """Combien d'arguments positionnels ``slot`` accepte (None : autant qu'on veut). La liaison tronque ceux du signal à ce
     nombre ; le relais doit faire de même."""
     try:
         parametres = inspect.signature(slot).parameters.values()
@@ -161,77 +180,110 @@ def _nb_arguments(slot):
 
 
 def doubler_qtcore(ns):
-    """Pose les doublures dans l'espace de noms de ``qtpy6.QtCore`` (PyQt6 ; ses noms PySide6 y sont déjà)."""
+    """Pose les doublures dans l'espace de noms de ``qtpy6.QtCore`` (la liaison ; ses noms PySide6 y sont déjà)."""
     import weakref  # noqa: PLC0415
-
-    from PyQt6 import sip  # noqa: PLC0415
 
     QObject, QCoreApplication, QEventLoop = ns["QObject"], ns["QCoreApplication"], ns["QEventLoop"]
     signal_lie = ns["SignalInstance"]
     connect, disconnect, sender = signal_lie.connect, signal_lie.disconnect, QObject.sender
-    # Un seul relais par slot : PyQt reconnaît ainsi un doublon (UniqueConnection) et le retrouve (disconnect(slot)).
-    # Référence faible : c'est PyQt qui le garde en vie, tant qu'une connexion le tient.
+    mort = _mort()
+    # Un seul relais par slot : la liaison reconnaît ainsi un doublon (UniqueConnection) et le retrouve (disconnect(slot)).
+    # Référence faible : c'est la connexion qui le garde en vie, comme le slot qu'il remplace.
     relais = weakref.WeakValueDictionary()
 
-    def relayer(slot, direct):
-        if isinstance(slot, types.MethodType):
-            cle = (id(slot.__self__), slot.__func__, direct)
-        else:
-            cle = (slot, direct)
+    def cle(slot, direct):
+        return (id(slot.__self__), slot.__func__, direct) if isinstance(slot, types.MethodType) else (slot, direct)
+
+    def existant(slot, direct):
+        """Le relais déjà posé pour ``slot`` (None sinon, ou si ``slot`` ne se hache pas)."""
         try:
-            r = relais.get(cle)
-        except TypeError:  # un appelable qui ne se hache pas : un relais à chaque connexion
-            return nouveau_relais(slot, direct)
-        if r is None or r.cible() is None:  # ``id`` réutilisé par un autre receveur, l'ancien étant mort
-            r = relais[cle] = nouveau_relais(slot, direct)
-        return r
+            r = relais.get(cle(slot, direct))
+        except TypeError:
+            return None
+        return r if r is not None and r.cible() is not None else None  # ``id`` réutilisé par un autre receveur, l'ancien étant mort
+
+    def relayer(slot, direct):
+        """Ce qui est connecté à la place de ``slot`` : l'appelable du relais, un par slot."""
+        r = existant(slot, direct)
+        if r is None:
+            r = nouveau_relais(slot, direct)
+            try:
+                relais[cle(slot, direct)] = r
+            except TypeError:  # un appelable qui ne se hache pas : un relais à chaque connexion
+                pass
+        return r.appel
+
+    class Relais(QObject):
+        """Le relais d'une méthode d'un QObject : lui-même un QObject, enfant du receveur. Il meurt avec lui, comme la
+        connexion native (aucune liaison ne garde un receveur en vie), et c'est le seul moyen, sous PySide6, de connaître
+        l'expéditeur depuis un slot Python : ``sender()`` n'y vaut que sur le receveur Qt lui-même."""
+
+        def __init__(self, slot, direct):
+            super().__init__(slot.__self__)
+            self.ref, self.fonction, self.direct, self.n = weakref.ref(slot.__self__), slot.__func__, direct, _nb_arguments(slot)
+            self.appel = self.relais
+
+        def cible(self):
+            objet = self.ref()
+            return None if objet is None or mort(objet) else types.MethodType(self.fonction, objet)
+
+        def relais(self, *args):
+            return _relayer(self, args, self.sender())
+
+    class RelaisFonction:
+        """Le relais d'un autre appelable (fonction, lambda, méthode d'un objet qui n'est pas un QObject) : un appelable
+        ordinaire, que la connexion garde en vie et libère avec l'expéditeur, comme elle le ferait du slot."""
+
+        def __init__(self, slot, direct):
+            self.direct, self.n = direct, _nb_arguments(slot)
+            if isinstance(slot, types.MethodType):  # le receveur n'est pas gardé en vie par la connexion : ni par le relais
+                self.ref, self.fonction = weakref.ref(slot.__self__), slot.__func__
+            else:
+                self.ref, self.fonction = None, slot
+
+        def cible(self):
+            if self.ref is None:
+                return self.fonction
+            objet = self.ref()
+            return None if objet is None or mort(objet) else types.MethodType(self.fonction, objet)
+
+        def __call__(self, *args):
+            app = QCoreApplication.instance()  # PyQt6 : l'expéditeur est celui du slot en cours, quel que soit l'objet
+            return _relayer(self, args, sender(app) if app is not None else None)
+
+        appel = property(lambda self: self)
 
     def nouveau_relais(slot, direct):
-        n = _nb_arguments(slot)
-        if isinstance(slot, types.MethodType):  # PyQt ne garde pas le receveur en vie : le relais non plus
-            ref, fonction = weakref.ref(slot.__self__), slot.__func__
+        if isinstance(slot, types.MethodType) and isinstance(slot.__self__, QObject) and not mort(slot.__self__):
+            return Relais(slot, direct)
+        return RelaisFonction(slot, direct)
 
-            def cible():
-                objet = ref()
-                if objet is None or (isinstance(objet, sip.simplewrapper) and sip.isdeleted(objet)):
-                    return None
-                return types.MethodType(fonction, objet)
-        else:
-            def cible():
-                return slot
+    def _relayer(r, args, exp):
+        if r.direct or _peut_suspendre():
+            f = r.cible()
+            return f(*args[:r.n] if r.n is not None else args) if f is not None else None
+        _plus_tard(executer, r, exp, args)
+        return None
 
-        def executer(exp, args):
-            f = cible()
-            if f is not None:
-                _expediteur.append(exp)
-                try:
-                    f(*args[:n] if n is not None else args)
-                finally:
-                    _expediteur.pop()
-
-        def relais_(*args):
-            if direct or _peut_suspendre():
-                f = cible()
-                return f(*args[:n] if n is not None else args) if f is not None else None
-            app = QCoreApplication.instance()
-            _plus_tard(executer, sender(app) if app is not None else None, args)
-            return None
-
-        relais_.cible = cible
-        return relais_
+    def executer(r, exp, args):
+        f = r.cible()
+        if f is not None:
+            _expediteur.append(exp)
+            try:
+                f(*args[:r.n] if r.n is not None else args)
+            finally:
+                _expediteur.pop()
 
     def connect_(self, slot, *args, **kwargs):
         if isinstance(slot, (signal_lie, types.BuiltinFunctionType, types.BuiltinMethodType)) or not callable(slot):
             return connect(self, slot, *args, **kwargs)
-        direct = self.signal.startswith("2destroyed(")  # l'objet meurt : après, il serait trop tard
-        return connect(self, relayer(slot, direct), *args, **kwargs)
+        return connect(self, relayer(slot, _est_destroyed(self)), *args, **kwargs)  # destroyed : après, trop tard
 
     def disconnect_(self, *args):
         if len(args) == 1 and callable(args[0]) and not isinstance(args[0], signal_lie):
-            try:
-                return disconnect(self, relayer(args[0], self.signal.startswith("2destroyed(")))
-            except TypeError:  # pas connecté par un relais : peut-être par le connect de PyQt (``_connect_qt``)
-                pass
+            r = existant(args[0], _est_destroyed(self))
+            if r is not None:  # sinon, connecté sans relais (le connect de la liaison, ``_connect_qt``), ou pas du tout
+                return disconnect(self, r.appel)
         return disconnect(self, *args)
 
     def sender_(self):
@@ -281,7 +333,7 @@ def doubler_qtcore(ns):
     doubler_exec_application(QCoreApplication)
     QCoreApplication.quit = staticmethod(lambda: _quitter(0))
     QCoreApplication.exit = staticmethod(lambda code=0: _quitter(code))
-    _pyodide_pomper()  # dès le chargement de QtCore : avec ou sans exec(), c'est elle qui fait tourner Qt
+    _pyodide_pomper(ns)  # dès le chargement de QtCore : avec ou sans exec(), c'est elle qui fait tourner Qt
 
 
 _fin_application = []
@@ -318,12 +370,12 @@ def doubler_exec_application(classe):
 # --- QtWidgets ------------------------------------------------------------------------------------------------------
 
 def doubler_qtwidgets(ns):
-    from PyQt6.QtCore import QTimer, Qt, pyqtBoundSignal  # noqa: PLC0415
-    from PyQt6.QtGui import QColor, QCursor, QFont  # noqa: PLC0415
+    from ..QtCore import Qt, QTimer  # noqa: PLC0415  (QtCore de qtpy6 : ses doublures d'abord, ``_connect_qt`` avec)
+    from ..QtGui import QColor, QCursor, QFont  # noqa: PLC0415
 
     QDialog, QMenu, QMessageBox, QInputDialog = ns["QDialog"], ns["QMenu"], ns["QMessageBox"], ns["QInputDialog"]
     QFileDialog, QColorDialog, QFontDialog = ns["QFileDialog"], ns["QColorDialog"], ns["QFontDialog"]
-    connect = _connect_qt[0] if _connect_qt else pyqtBoundSignal.connect  # l'original : ``resoudre`` pose une valeur
+    connect = _connect_qt[0]  # l'original : ``resoudre`` pose une valeur
 
     doubler_exec_application(ns["QApplication"])
 
@@ -363,12 +415,24 @@ def doubler_qtwidgets(ns):
         self.aboutToHide.disconnect(fin[0])  # un menu gardé resservira : ne pas y empiler les connexions
         return choisie[-1] if choisie else None
 
+    def par_instance(classe, remplacant):
+        # PySide6 : ``exec`` a une forme statique (``QMenu.exec(actions, pos)``), et sur une instance le getattro que
+        # shiboken génère pour ces méthodes à deux formes rend la native quoi que porte le dictionnaire de la classe
+        # (mesuré : même posé en descripteur de données, même après ``del``). Seul ``__getattribute__`` passe devant.
+        getattro = classe.__getattribute__
+
+        def __getattribute__(self, name):
+            return types.MethodType(remplacant, self) if name == "exec" else getattro(self, name)
+        classe.__getattribute__ = __getattribute__
+
     for nom, classe in list(ns.items()):
         if isinstance(classe, type) and "exec" in vars(classe):
-            if issubclass(classe, QDialog):
-                classe.exec = dialogue_exec
-            elif issubclass(classe, QMenu):
-                classe.exec = menu_exec
+            remplacant = dialogue_exec if issubclass(classe, QDialog) else menu_exec if issubclass(classe, QMenu) else None
+            if remplacant is None:
+                continue
+            if isinstance(vars(classe)["exec"], staticmethod):
+                par_instance(classe, remplacant)
+            classe.exec = remplacant
 
     # QMessageBox : les boîtes statiques, sur une instance.
     B = QMessageBox.StandardButton
@@ -395,8 +459,8 @@ def doubler_qtwidgets(ns):
         b.exec()
 
     def about_qt(parent, title=""):
-        from PyQt6.QtCore import QT_VERSION_STR  # noqa: PLC0415
-        about(parent, title or "À propos de Qt", f"Qt {QT_VERSION_STR}")
+        from .. import QT_VERSION  # noqa: PLC0415
+        about(parent, title or "À propos de Qt", f"Qt {QT_VERSION}")
 
     QMessageBox.about, QMessageBox.aboutQt = staticmethod(about), staticmethod(about_qt)
 

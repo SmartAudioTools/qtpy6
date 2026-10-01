@@ -134,7 +134,7 @@ def en_navigateur(code):
     """``code`` dans un interpréteur neuf où ``sys.platform`` est celui de Pyodide AVANT l'import de qtpy6 : ce que voient
     les doublures de QtCore et QtGui (le reste de Qt est celui de la machine). Rend la sortie."""
     entete = "import sys\nsys.platform = 'emscripten'\n"
-    env = dict(os.environ, QT_QPA_PLATFORM="offscreen",
+    env = dict(os.environ, QT_QPA_PLATFORM="offscreen", QT_API=qtpy6.API,  # la liaison des tests, dans le sous-processus aussi
                PYTHONPATH=os.pathsep.join(filter(None, [str(RACINE), os.environ.get("PYTHONPATH")])))
     r = subprocess.run([sys.executable, "-c", entete + textwrap.dedent(code)], env=env, capture_output=True, text=True,
                        timeout=120)
@@ -305,7 +305,9 @@ def test_police_fixe_dans_le_navigateur():
     sortie = en_navigateur(f"""
         import types
         # application() branche Ctrl+V sur la page (_coller) : js et pyodide.ffi réduits à ce qu'il en touche
-        sys.modules["js"] = types.SimpleNamespace(document=types.SimpleNamespace(addEventListener=lambda *a: None))
+        sys.modules["js"] = types.SimpleNamespace(document=types.SimpleNamespace(addEventListener=lambda *a: None),
+                                                  setInterval=lambda *a: 0,  # la pompe de QtCore, inerte ici
+                                                  Function=types.SimpleNamespace(new=lambda *a: lambda *b: None))  # _dessiner_aussitot
         sys.modules["pyodide"], sys.modules["pyodide.ffi"] = types.ModuleType("pyodide"), types.SimpleNamespace(create_proxy=lambda f: f)
         from qtpy6.QtGui import QFontDatabase
         from qtpy6.web import application
@@ -327,13 +329,10 @@ def test_police_fixe_dans_le_navigateur():
 # True partout dès qu'une pile est suspendue.
 
 SIMULATION = """
-    import os
-    os.environ["QT_API"] = "pyqt6"  # quelle que soit la liaison des tests : Pyodide-Qt est PyQt6
-    import greenlet
-    from PyQt6.QtCore import QEventLoop as _Boucle, QTimer as _Minuteur, QCoreApplication as _App
-    _exec, _quit, _un_coup = _Boucle.exec, _Boucle.quit, _Minuteur.singleShot  # avant les doublures de qtpy6
+    import greenlet, time
+    from %s.QtCore import QEventLoop as _Boucle, QCoreApplication as _App, QEvent as _Evt  # la liaison des tests, avant les doublures de qtpy6
     from qtpy6.web import bloquant
-    _page, _en_attente = greenlet.getcurrent(), []
+    _page, _en_attente, _taches = greenlet.getcurrent(), [], []
 
     def _entree(f):
         g = greenlet.greenlet(f, parent=_page)
@@ -347,7 +346,7 @@ SIMULATION = """
         def resoudre(v=None):
             if not fait:
                 fait.append(v)
-                _un_coup(0, lambda: g.switch(v))
+                _taches.append(lambda: g.switch(v))
         brancher(resoudre)
         _en_attente.append(g)
         try:
@@ -357,18 +356,27 @@ SIMULATION = """
 
     bloquant._pyodide_peut = lambda: greenlet.getcurrent() is not _page or bool(_en_attente)
     bloquant._pyodide_suspendre = _pyodide_suspendre
-    bloquant._pyodide_plus_tard = lambda f: _un_coup(0, lambda: _entree(f))
+    bloquant._pyodide_plus_tard = _taches.append
+
+    def _vivre(fin):  # la page qui vit, comme la pompe du navigateur (_pyodide_pomper) : Qt tourne par processEvents,
+        # les deleteLater passent hors de toute pile suspendue, et les tâches asyncio (reprise d'une entrée suspendue,
+        # _plus_tard) passent ENTRE deux tours de Qt, jamais depuis un de ses rappels : c'est là que JSPI les reprend
+        while not fin():
+            _App.processEvents(_Boucle.ProcessEventsFlag.AllEvents, 10)
+            if not _en_attente:  # comme la pompe du navigateur (_pyodide_pomper) : les deleteLater, hors de toute boucle exec()
+                _App.sendPostedEvents(None, _Evt.Type.DeferredDelete)
+            while _taches:
+                _entree(_taches.pop(0))
+            time.sleep(0.001)
 
     def tourner(ms=100):  # la page qui vit, hors de toute entrée promettante
-        boucle = _Boucle()
-        _un_coup(ms, lambda: _quit(boucle))
-        _exec(boucle)
+        fin = time.monotonic() + ms / 1000
+        _vivre(lambda: time.monotonic() >= fin)
 
     def principal(f):  # le script principal, lancé par runPythonAsync : la page vit jusqu'à ce qu'il rende
         retour = []
         g = _entree(lambda: retour.append(f()))
-        while not g.dead:
-            _App.processEvents(_Boucle.ProcessEventsFlag.WaitForMoreEvents)
+        _vivre(lambda: g.dead)
         return retour[0]
 
     from qtpy6.QtWidgets import QApplication
@@ -376,15 +384,14 @@ SIMULATION = """
 """
 
 
-pyqt6_seul = pytest.mark.skipif(not all(__import__("importlib.util").util.find_spec(m) for m in ("PyQt6", "greenlet")),
-                                reason="Pyodide-Qt est PyQt6 : les doublures ne sont posées que là ; greenlet imite JSPI")
+greenlet_seul = pytest.mark.skipif(not __import__("importlib.util").util.find_spec("greenlet"), reason="greenlet imite JSPI")
 
 
 def simule(code):
-    return en_navigateur(textwrap.dedent(SIMULATION) + textwrap.dedent(code))
+    return en_navigateur(textwrap.dedent(SIMULATION % qtpy6.API_NAME) + textwrap.dedent(code))
 
 
-@pyqt6_seul
+@greenlet_seul
 def test_slot_reporte_garde_expediteur_et_arguments():
     sortie = simule("""
         from qtpy6.QtCore import QObject, Signal
@@ -408,7 +415,7 @@ def test_slot_reporte_garde_expediteur_et_arguments():
     assert sortie.splitlines() == ["apres emit []", "recu 1 True", "[(1, 'x')]"]
 
 
-@pyqt6_seul
+@greenlet_seul
 def test_un_coup_de_minuterie_est_un_slot():
     sortie = simule("""
         from qtpy6.QtCore import QTimer
@@ -423,7 +430,7 @@ def test_un_coup_de_minuterie_est_un_slot():
     assert sortie.strip() == "rendu 7"
 
 
-@pyqt6_seul
+@greenlet_seul
 def test_relais_comme_une_connexion_native():
     sortie = simule("""
         import gc, weakref
@@ -442,25 +449,37 @@ def test_relais_comme_une_connexion_native():
         principal(o.s.emit)
         o.deleteLater(); del o; tourner(); gc.collect()
         print("vivant puis libere", n, temoin() is None)
-        # un doublon est refusé comme en natif
-        o, f = O(), lambda: None
-        o.s.connect(f, Qt.ConnectionType.UniqueConnection)
-        try:
-            o.s.connect(f, Qt.ConnectionType.UniqueConnection)
-        except TypeError as e:
-            print(e)
+        # un doublon (UniqueConnection) a le sort que la liaison lui fait en natif : refusé (PyQt6 : TypeError),
+        # ou ignoré (PySide6 : une seule connexion, et aucune pour une fonction), pour une méthode comme pour une lambda
+        from qtpy6.web import bloquant
+        class R(QObject):
+            def g(self): n.append(2)
+        def doublon(connecter, slot):
+            o, n[:] = O(), []
+            try:
+                for _ in range(2):
+                    connecter(o.s, slot, Qt.ConnectionType.UniqueConnection)
+            except TypeError as e:
+                return str(e)
+            o.s.emit(); tourner(10)  # le relais diffère l'appel
+            return len(n)
+        natif, relaye, r = bloquant._connect_qt[0], type(O().s).connect, R()
+        print("doublon comme en natif", [doublon(relaye, s) == doublon(natif, s) for s in (lambda: n.append(1), r.g)],
+              repr(doublon(natif, lambda: n.append(1))), repr(doublon(natif, r.g)))
         # un menu qui resert n'empile pas ses connexions
         m = QMenu(); m.addAction("a")
         def ouvrir():
             QTimer.singleShot(30, m.hide); m.exec()
         for _ in range(3):
             principal(ouvrir)
-        print("aboutToHide", m.receivers(m.aboutToHide))
+        from qtpy6 import PYQT6
+        print("aboutToHide", m.receivers(m.aboutToHide if PYQT6 else "2aboutToHide()"))
     """)
-    assert sortie.splitlines() == ["vivant puis libere [1] True", "connection is not unique", "aboutToHide 0"]
+    doublons = {"pyqt6": "'connection is not unique' 'connection is not unique'", "pyside6": "0 1"}[qtpy6.API]
+    assert sortie.splitlines() == ["vivant puis libere [1] True", f"doublon comme en natif [True, True] {doublons}", "aboutToHide 0"]
 
 
-@pyqt6_seul
+@greenlet_seul
 def test_boites_suspendues_dans_un_slot():
     sortie = simule("""
         from qtpy6.QtCore import QTimer
@@ -501,7 +520,7 @@ def test_boites_suspendues_dans_un_slot():
                                    "menu True", "hors slot 0"]
 
 
-@pyqt6_seul
+@greenlet_seul
 def test_exec_de_l_application_et_lancer(tmp_path):
     script = tmp_path / "app.py"
     script.write_text(textwrap.dedent("""
@@ -549,7 +568,7 @@ def test_point_d_entree(tmp_path):
     assert zip_("h", "un.py", "deux.py") == "aucun point d'entrée"
 
 
-@pyqt6_seul
+@greenlet_seul
 def test_lanceur_zip_de_paquet(tmp_path):
     archive = tmp_path / "depot.zip"
     with zipfile.ZipFile(archive, "w") as z:
@@ -572,7 +591,7 @@ def test_lanceur_zip_de_paquet(tmp_path):
                                    "code 0"]
 
 
-@pyqt6_seul
+@greenlet_seul
 def test_fils_cooperatifs():
     sortie = simule("""
         from qtpy6.QtCore import QObject, Signal

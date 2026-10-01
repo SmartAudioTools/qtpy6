@@ -11,7 +11,7 @@ _binding.load(globals(), 'QtWidgets')
 if PYQT6:
     from PyQt6.QtGui import QFileSystemModel  # noqa: F401
 
-if sys.platform == 'emscripten' and PYQT6:
+if sys.platform == 'emscripten':
     from .web.bloquant import doubler_qtwidgets
     doubler_qtwidgets(globals())
 

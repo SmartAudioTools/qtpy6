@@ -37,8 +37,6 @@ if sys.platform == 'emscripten':
     from .web.travailleur import ProcessusWeb as QProcess  # noqa: F401
     from .web import sous_processus
     sous_processus.doubler()  # subprocess.run : le même worker, attendu par JSPI
-
-if sys.platform == 'emscripten' and PYQT6:  # Pyodide-Qt is PyQt6
     # One thread, and no nested event loop: cooperative threads, and exec() suspended by JSPI.
     from .web import bloquant, fils
     fils.doubler(globals())

@@ -42,8 +42,7 @@ if sys.platform == 'emscripten':
     QFontDatabase.addApplicationFont = staticmethod(addApplicationFont)  # noqa: F821
     QFontDatabase.systemFont = staticmethod(systemFont)  # noqa: F821
 
-    if not PYSIDE6:
-        from .web.bloquant import doubler_exec_application
-        doubler_exec_application(QGuiApplication)  # noqa: F821
+    from .web.bloquant import doubler_exec_application
+    doubler_exec_application(QGuiApplication)  # noqa: F821
 
 _binding.finish(globals())

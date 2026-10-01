@@ -20,7 +20,7 @@ def _pause(ms):
     """Rend la main ``ms`` millisecondes si l'appel peut suspendre ; sinon, rien (jamais d'attente active sur le fil de
     la page)."""
     if bloquant._peut_suspendre():
-        from PyQt6.QtCore import QTimer  # noqa: PLC0415
+        from ..QtCore import QTimer  # noqa: PLC0415
         bloquant._suspendre(lambda resoudre: QTimer.singleShot(max(0, int(ms)), resoudre))
 
 

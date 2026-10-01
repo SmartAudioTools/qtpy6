@@ -1,4 +1,5 @@
-// qtpy6web.js (qtpy6.web) : une application qtpy6 (PyQt6) dans le navigateur, sous Pyodide-Qt (Qt 6 et PyQt6 en WebAssembly).
+// qtpy6web.js (qtpy6.web) : une application qtpy6 dans le navigateur, sous un Pyodide où Qt 6 et sa liaison Python (PyQt6 pour
+// Pyodide-Qt, PySide6 sinon) sont liés en WebAssembly.
 //
 //   const py = await preparer(conteneur, { indexURL, archives, roues, env, sur_ligne });
 //   py.pyimport("mon_application").demarrer();
@@ -10,7 +11,7 @@
 // de l'application, qtpy6, ses données, ses polices : qtpy6.web.assembler les construit). `roues` : des roues
 // WebAssembly (.whl) chargées par URL, pour les extensions compilées (le lock de Pyodide-Qt est vide : ni loadPackage("nom")
 // ni micropip) ; une adresse qui FINIT par .whl, sans requête « ?v=… » : Pyodide y lit le nom du paquet (uriToPackageData),
-// et répond « No known package with name » sinon. `env` : des variables d'environnement, QT_API=pyqt6 par défaut. `sur_ligne` : reçoit chaque ligne du
+// et répond « No known package with name » sinon. `env` : des variables d'environnement (QT_API : la liaison, celle du Pyodide chargé par défaut). `sur_ligne` : reçoit chaque ligne du
 // journal (print), qui va aussi dans window.journal (ce que lit qtpy6.web.sonde) et la console. `progres(fraction)` : reçoit
 // l'avancement de 0 à 1, les octets reçus de chaque fichier jusqu'à 0,9 (une copie de la réponse est lue à côté : celle que
 // Pyodide reçoit reste intacte, et le navigateur garde son cache de code compilé), puis dépaquetage, roues, 1 rendue. Le total
@@ -78,7 +79,6 @@ export async function preparer(conteneur, { indexURL, archives = [], roues = [],
                                             tailles = {} } = {}) {
   if (sur_ligne) ecouter = sur_ligne;
   const retablir = compter(tailles, f => progres(0.9 * f));
-  env = { QT_API: "pyqt6", ...env };  // qtpy6 prendrait PySide6 sinon, absent de Pyodide-Qt
   window.journal = journal;
   indexURL = new URL(indexURL.endsWith("/") ? indexURL : indexURL + "/", location.href).href;
   const attendu = fetch(new URL("../versions.json", import.meta.url)).then(r => r.ok ? r.json() : null).catch(() => null);
