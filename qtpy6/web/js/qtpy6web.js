@@ -11,7 +11,11 @@
 // WebAssembly (.whl) chargées par URL, pour les extensions compilées (le lock de Pyodide-Qt est vide : ni loadPackage("nom")
 // ni micropip) ; une adresse qui FINIT par .whl, sans requête « ?v=… » : Pyodide y lit le nom du paquet (uriToPackageData),
 // et répond « No known package with name » sinon. `env` : des variables d'environnement, QT_API=pyqt6 par défaut. `sur_ligne` : reçoit chaque ligne du
-// journal (print), qui va aussi dans window.journal (ce que lit qtpy6.web.sonde) et la console.
+// journal (print), qui va aussi dans window.journal (ce que lit qtpy6.web.sonde) et la console. `progres(fraction)` : reçoit
+// l'avancement de 0 à 1, les octets reçus de chaque fichier jusqu'à 0,9 (une copie de la réponse est lue à côté : celle que
+// Pyodide reçoit reste intacte, et le navigateur garde son cache de code compilé), puis dépaquetage, roues, 1 rendue. Le total
+// attendu : `tailles` ({nom: octets décompressés}, que la page connaît), compté dès le départ ; un fichier hors de `tailles` pèse
+// son Content-Length (juste s'il n'est pas compressé) une fois commencé. L'avancement ne recule jamais.
 const t0 = performance.now();
 export const journal = [];
 let ecouter = () => {};
@@ -25,8 +29,55 @@ function telecharger(url) {
   return fetch(url).then(r => { if (!r.ok) throw new Error(`${url} : ${r.status}`); return r.arrayBuffer(); });
 }
 
-export async function preparer(conteneur, { indexURL, archives = [], roues = [], env = {}, sur_ligne } = {}) {
+// Les octets reçus pendant `preparer` : chaque réponse de fetch lue en double (clone), son nom (dernier segment de l'adresse)
+// pesé par `tailles`. Rend la fonction qui remet le fetch d'origine.
+function compter(tailles, signaler) {
+  const fetch_origine = window.fetch;
+  const fichiers = Object.fromEntries(Object.entries(tailles).map(([nom, total]) => [nom, { recu: 0, total }]));
+  let haut = 0;
+  const avancer = () => {
+    const f = Object.values(fichiers);
+    haut = Math.max(haut, f.reduce((s, x) => s + Math.min(x.recu, x.total), 0) / Math.max(1, f.reduce((s, x) => s + x.total, 0)));
+    signaler(haut);
+  };
+  window.fetch = async (...args) => {
+    const reponse = await fetch_origine(...args);
+    if (!reponse.ok || !reponse.body) return reponse;
+    const nom = new URL(reponse.url || String(args[0]?.url ?? args[0]), location.href).pathname.split("/").pop();
+    const fichier = fichiers[nom] = { recu: 0, total: tailles[nom] || +reponse.headers.get("Content-Length") || 1 };
+    const lecteur = reponse.clone().body.getReader();
+    (async () => {
+      for (let r; !(r = await lecteur.read()).done;) { fichier.recu += r.value.byteLength; avancer(); }
+      fichier.total = fichier.recu; avancer();
+    })().catch(() => {});
+    return reponse;
+  };
+  return () => { window.fetch = fetch_origine; };
+}
+
+// La molette à la mesure du bureau. Qt-WASM fait d'un pixel du navigateur un angleDelta de 1 et d'une ligne 12 ; or un
+// QScrollArea défile de 60 px pour 120 (un cran, 3 lignes de 20 px) : un pixel du navigateur n'en faisait qu'un demi, et un
+// cran de Firefox (3 lignes) 18 px au lieu de 60. Chaque roulement sur le conteneur est donc rejoué sur la même cible
+// (le canevas, dans l'ombre de Qt) en pixels doublés : le défilement suit le doigt sur le pavé tactile comme une page web,
+// une ligne vaut 20 px comme sur le bureau. Un roulement en pages (rare) passe tel quel.
+function molette(conteneur) {
+  const rejoues = new WeakSet();
+  addEventListener("wheel", e => {
+    if (rejoues.has(e) || e.deltaMode === WheelEvent.DOM_DELTA_PAGE || !e.composedPath().includes(conteneur)) return;
+    const k = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? 40 : 2;
+    const copie = new WheelEvent("wheel", { deltaX: e.deltaX * k, deltaY: e.deltaY * k, deltaMode: WheelEvent.DOM_DELTA_PIXEL,
+      clientX: e.clientX, clientY: e.clientY, screenX: e.screenX, screenY: e.screenY, buttons: e.buttons, ctrlKey: e.ctrlKey,
+      shiftKey: e.shiftKey, altKey: e.altKey, metaKey: e.metaKey, bubbles: true, composed: true, cancelable: true });
+    rejoues.add(copie);
+    e.stopImmediatePropagation(); e.preventDefault();
+    e.composedPath()[0].dispatchEvent(copie);
+  }, { capture: true, passive: false });
+}
+
+export async function preparer(conteneur, { indexURL, archives = [], roues = [], env = {}, sur_ligne, progres = () => {},
+                                            tailles = {} } = {}) {
   if (sur_ligne) ecouter = sur_ligne;
+  const retablir = compter(tailles, f => progres(0.9 * f));
   env = { QT_API: "pyqt6", ...env };  // qtpy6 prendrait PySide6 sinon, absent de Pyodide-Qt
   window.journal = journal;
   indexURL = new URL(indexURL.endsWith("/") ? indexURL : indexURL + "/", location.href).href;
@@ -38,17 +89,22 @@ export async function preparer(conteneur, { indexURL, archives = [], roues = [],
   const versions = await attendu;
   if (versions && versions.pyodide_qt.version !== py.version)
     print(`attention : Pyodide-Qt ${py.version} là où qtpy6.web attend ${versions.pyodide_qt.version} (roues ${versions.pyodide_qt.abi})`);
+  retablir();
   archives.forEach((a, i) => py.unpackArchive(donnees[i], "zip", { extractDir: a.dossier }));
+  progres(0.93);
   // loadPackage, et non unpackArchive, pour une roue : il précharge ses .so de façon asynchrone
   for (const roue of roues) {
     if (!roue.endsWith(".whl")) throw new Error(`roue ${roue} : l'adresse doit finir par .whl (pas de requête), Pyodide y lit le nom du paquet`);
     await py.loadPackage(new URL(roue, location.href).href);
   }
+  progres(0.97);
   py._module.qtContainerElements = [conteneur];  // l'API privée de Qt-WASM, isolée ici : l'élément qui sert d'écran à Qt
+  molette(conteneur);
   window.qtpy6Conteneur = conteneur;  // ce que qtpy6.web.pdf lit pour caler ses <div> sur les widgets
   py.runPython(`import json, os, sys
 os.environ.update(json.loads(${JSON.stringify(JSON.stringify(env))}))
 sys.path[:0] = json.loads(${JSON.stringify(JSON.stringify(archives.map(a => a.dossier)))})`);
+  progres(1);
   return py;
 }
 

@@ -67,6 +67,7 @@ def application(polices=None, defaut=None):
             if defaut is not None:
                 app.setFont(defaut if isinstance(defaut, QFont) else QFont(*defaut))
             _coller()
+            _dessiner_aussitot()
     return QApplication.instance()
 
 
@@ -114,6 +115,35 @@ def _coller():
         inserer(texte)
 
     js.document.addEventListener("paste", create_proxy(coller), True)
+
+
+def _dessiner_aussitot():
+    """Ce qui change à l'écran est envoyé au canevas dans l'image où cela change, pas une sur deux. Un widget ne se
+    redessine pas tout de suite : Qt poste un ``UpdateRequest``, traité plus tard par la boucle d'événements, et
+    Qt-WASM n'envoie le dessin au canevas qu'au ``requestAnimationFrame`` que demande ce dessin : l'image SUIVANTE.
+    Pendant un défilement, une image sur deux restait ainsi sans envoi (56 envois pour 110 roulements, un par image ;
+    86 à 89 pour 110 pas d'une minuterie de 16 ms : Firefox, 01/10/2026). Deux moments, chacun nécessaire (mesuré en
+    retirant l'autre) :
+      - au début de chaque image, avant le rappel qu'elle exécute, les ``UpdateRequest`` en attente sont traités, et
+        les images que leur dessin demande sont servies DANS celle-ci : animations, minuteries, défilement au doigt
+        (minuterie : 103 à 104 envois, le plafond étant les ~105 images de la durée) ;
+      - sitôt une entrée traitée par Qt (molette, souris, clavier ; bouillonnement sur ``window``, donc après Qt) :
+        une entrée qui arrive pendant la phase des rappels d'image serait sinon dessinée après (molette : 110 sur 110,
+        57 sans ces écouteurs)."""
+    import js  # noqa: PLC0415 - voir la docstring du module
+    from pyodide.ffi import create_proxy  # noqa: PLC0415
+    from qtpy6.QtCore import QEvent  # noqa: PLC0415
+    from qtpy6.QtWidgets import QApplication  # noqa: PLC0415
+
+    vider = create_proxy(lambda: QApplication.sendPostedEvents(None, QEvent.Type.UpdateRequest))
+    js.Function.new("vider", """const raf = window.requestAnimationFrame.bind(window);
+        let pendant = null;
+        window.requestAnimationFrame = rappel => {
+          if (pendant) { pendant.push(rappel); return 0; }
+          return raf(t => { pendant = []; try { vider(); } finally { const p = pendant; pendant = null; p.forEach(r => r(t)); } rappel(t); });
+        };
+        for (const nom of ["wheel", "pointerdown", "pointermove", "pointerup", "keydown", "keyup"])
+          window.addEventListener(nom, () => vider());""")(vider)
 
 
 def lancer(script, args=(), pret=None, module=None):

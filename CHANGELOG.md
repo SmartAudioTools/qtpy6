@@ -2,6 +2,18 @@
 
 ## Non publié
 
+- `qtpy6.animation.AnimationParImage` : une `QPropertyAnimation` menée par les images de l'écran. Qt Widgets
+  avance ses animations à une minuterie de 16 ms que rien ne cale sur le rafraîchissement : une image reçoit
+  parfois deux pas (le premier jamais affiché), la suivante aucun. Ici la propriété prend, à chaque
+  `UpdateRequest` de la fenêtre (`QWindow.requestUpdate` : rappel d'image du compositeur sur Wayland,
+  `requestAnimationFrame` dans le navigateur), la valeur de l'heure de l'image. Mesuré en natif (Wayland, 60 Hz,
+  défilement de 1833 ms) : peintures perdues 4 → 0 ou 1, pas réguliers de 8 px au lieu d'alterner 7 et 8.
+  Dans le navigateur, mécanique identique, pas encore mesurée.
+- Dans le navigateur : ce qui change à l'écran est envoyé au canevas dans l'image où cela change
+  (`qtpy6.web._dessiner_aussitot` ; pendant un défilement, une image sur deux restait sans envoi) ; la molette
+  défile autant qu'en natif (`qtpy6web.js`, `molette`) ; `preparer` reçoit `progres` et `tailles`, l'avancement
+  du chargement de 0 à 1 ; `tactile.activer_au_doigt` active le tactile au premier doigt posé quand le navigateur
+  ne dit rien de son écran (Firefox sous Linux), et `tactile.detecte` lit aussi `navigator.maxTouchPoints`.
 - Dans le navigateur, `deleteLater` détruit enfin : la pompe (`qtpy6.web.bloquant`) n'appelait
   que `processEvents`, qui ne traite jamais `DeferredDelete` hors d'une boucle `exec()`. Un widget
   ainsi « détruit » restait à l'écran et, son objet Python libéré, se peignait en widget natif.

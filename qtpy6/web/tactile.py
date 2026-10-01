@@ -15,13 +15,35 @@ ACTIF = False  # posé par ``activer`` : ``defiler_au_doigt`` et les application
 
 def detecte():
     """Un écran au doigt : téléphone, tablette, portable tactile. Dans le navigateur, parmi ses pointeurs (``any-pointer:
-    coarse``) ; en natif, parmi les périphériques que Qt a recensés (``QInputDevice``, une ``QApplication`` doit exister).
-    Un écran tactile dont personne ne se sert compte aussi : le navigateur fait de même."""
+    coarse``) ou par le nombre de doigts qu'il sait suivre (``navigator.maxTouchPoints`` : un portable tactile dont la
+    souris est le pointeur principal ne se dit pas toujours « coarse ») ; en natif, parmi les périphériques que Qt a
+    recensés (``QInputDevice``, une ``QApplication`` doit exister). Un écran tactile dont personne ne se sert compte aussi :
+    le navigateur fait de même. Certains navigateurs ne disent rien (Firefox sous Linux) : ``activer_au_doigt``."""
     if not navigateur():
         return any(d.type() == QInputDevice.DeviceType.TouchScreen for d in QInputDevice.devices())
     import js  # noqa: PLC0415 - le module de Pyodide, qui n'existe que dans le navigateur
 
-    return bool(js.window.matchMedia("(any-pointer: coarse)").matches)
+    return bool(js.window.matchMedia("(any-pointer: coarse)").matches) or (js.navigator.maxTouchPoints or 0) > 0
+
+
+def activer_au_doigt(app=None):
+    """``activer`` tout de suite si l'écran se dit tactile (``detecte``) ; sinon, dans le navigateur, au premier doigt posé
+    sur la page (``pointerdown`` de type ``touch``, écouté avant Qt) : le seul signe sûr quand le navigateur ne dit rien
+    de son écran. Les widgets construits APRÈS ce doigt sont faits pour lui (sur un écran d'accueil, c'est l'application
+    qui suit), ceux d'avant reçoivent la feuille de style sans toutes leurs hauteurs refaites (``activer``)."""
+    if detecte():
+        activer(app)
+    elif navigateur():
+        import js  # noqa: PLC0415
+        from pyodide.ffi import create_proxy  # noqa: PLC0415
+
+        def doigt(evenement):
+            if evenement.pointerType == "touch" and not ACTIF:
+                activer(app)
+                js.window.removeEventListener("pointerdown", ecouteur, True)
+
+        ecouteur = create_proxy(doigt)
+        js.window.addEventListener("pointerdown", ecouteur, True)  # en capture : avant le canevas de Qt
 
 
 def activer(app=None, cible=CIBLE, case=None):

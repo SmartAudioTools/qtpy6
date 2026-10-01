@@ -140,6 +140,7 @@ l'application a chargée. Le reste (chargeur de la page, polices, tactile, stock
 | `QT_SCALE`, `QT_FONT`, `QT_FONT_SIZE` | valeurs lues à l'import (`QT_SCALE` : flottant, ou `None` tant que `auto` n'est pas résolu) |
 | `scaled(obj, *more)` | `obj × QT_SCALE`, résout `auto` au premier appel (il faut une `QApplication`) |
 | `qtpy6.QtSelector` | les widgets de réglage et `main()` (point d'entrée `qtselector`) |
+| `qtpy6.animation.AnimationParImage(cible, propriete, parent, duree, courbe)` | une `QPropertyAnimation` menée par les images de l'écran (`QWindow.requestUpdate` : rappel du compositeur sur Wayland, `requestAnimationFrame` dans le navigateur) au lieu de la minuterie de 16 ms de Qt ; `setStartValue`, `setEndValue`, `start`, `stop`, `finished` |
 | `qtpy6.web` | le navigateur : `navigateur()`, `application()`, `lancer()`, `construire`, `bloquant`, `fils`, `tactile`, `dispositions`, `travailleur`, `stockage`, `assembler`, `sonde` ([web.md](web.md)) |
 
 ## Tests et niveau de preuve
