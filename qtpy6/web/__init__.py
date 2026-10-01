@@ -13,7 +13,8 @@ Le reste, qui n'a pas d'équivalent Qt, est dans ce paquet :
 
     navigateur()                     True sous Pyodide (``sys.platform == "emscripten"``) : l'interrupteur de tout le reste
     application(polices, defaut)     la QApplication, créée au besoin ; hors écran sans session graphique ; les polices
-                                     livrées avec l'application dans le navigateur, qui n'en a aucune
+                                     livrées avec l'application dans le navigateur, qui n'en a aucune ;
+                                     le ramasse-miettes entre deux événements, jamais au milieu d'un appel de Qt
     tactile                          détecter un écran au doigt, grossir les cibles, faire défiler au doigt
     dispositions                     des dispositions qui se replient quand la place manque (Disposition, Rangee)
     travailleur                      le Web Worker Pyodide piloté depuis Qt (Travailleur, ProcessusWeb, configurer)
@@ -48,7 +49,8 @@ def application(polices=None, defaut=None):
     ``QT_QPA_PLATFORM`` passe à ``offscreen`` : les tests et les exports tournent sans écran. Dans le navigateur, Qt n'a
     AUCUNE police système : les fichiers ``.ttf``/``.otf`` du dossier ``polices`` y sont chargés (la première à chasse
     fixe devient ``systemFont(FixedFont)``), et ``defaut`` (un QFont, ou ``("Noto Sans", 9)``) devient la police de
-    l'interface. En natif, ni l'un ni l'autre ne s'appliquent : le système a les siennes."""
+    l'interface. En natif, ni l'un ni l'autre ne s'appliquent : le système a les siennes. Partout, le ramasse-miettes
+    ne passe plus qu'entre deux événements (``_ramasser``)."""
     from qtpy6.QtGui import QFont, QFontDatabase  # noqa: PLC0415 - voir la docstring du module
     from qtpy6.QtWidgets import QApplication  # noqa: PLC0415
 
@@ -58,6 +60,7 @@ def application(polices=None, defaut=None):
             os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         _APP = app = QApplication(sys.argv[:1])  # gardée : sous PyQt6, une
         # QApplication dont la dernière référence Python disparaît est détruite, et toutes ses fenêtres avec elle
+        _ramasser(app)
         if navigateur():
             for police in sorted(Path(polices).glob("*.[to]tf")) if polices else ():
                 QFontDatabase.addApplicationFont(str(police))
@@ -65,6 +68,30 @@ def application(polices=None, defaut=None):
                 app.setFont(defaut if isinstance(defaut, QFont) else QFont(*defaut))
             _coller()
     return QApplication.instance()
+
+
+def _ramasser(app):
+    """Le ramasse-miettes de Python ne passe plus n'importe quand, mais entre deux événements de Qt. Livré à lui-même,
+    il se déclenche au hasard d'une allocation, parfois au milieu d'un appel de Qt : s'il libère alors un cycle qui tient
+    un widget sans parent (un enfant qui garde son widget, une lambda branchée sur un signal), le widget est
+    détruit sous les pieds de Qt, qui plante (segmentation fault, mesuré sur les tests de SmartTeacher le 01/10/2026).
+    Ici, une minuterie regarde toutes les demi-secondes les compteurs du ramasse-miettes, et ramasse la génération qu'il
+    aurait ramassée lui-même : le même travail, à un moment où aucun appel de Qt n'est en cours."""
+    import gc  # noqa: PLC0415
+
+    from qtpy6.QtCore import QTimer  # noqa: PLC0415
+
+    gc.disable()
+    seuils = gc.get_threshold()
+
+    def passer():
+        n0, n1, n2 = gc.get_count()
+        if n0 > seuils[0]:
+            gc.collect(2 if n2 > seuils[2] else 1 if n1 > seuils[1] else 0)
+
+    minuterie = QTimer(app)
+    minuterie.timeout.connect(passer)
+    minuterie.start(500)
 
 
 def _coller():
