@@ -65,12 +65,16 @@ def _pyodide_pomper(periode=10):
         from pyodide.ffi import create_proxy  # noqa: PLC0415
     except ImportError:  # tests/test_web.py, qui simule le navigateur sans Pyodide : sa boucle native fait tourner Qt
         return
-    from PyQt6.QtCore import QCoreApplication  # noqa: PLC0415
+    from PyQt6.QtCore import QCoreApplication, QEvent  # noqa: PLC0415
 
     def tour():
         app = QCoreApplication.instance()
         if app is not None:
             app.processEvents()
+            # les deleteLater : processEvents ne les fait jamais hors d'une boucle exec() (doc de Qt), et il n'y en a pas.
+            # Mesuré (01/10/2026) : sans cela, rien de ce qui est détruit par deleteLater ne l'était, et un widget
+            # resté à l'écran, son objet Python libéré, s'y peignait en widget natif (la case de SmartTeacher)
+            app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
     _pompe.append(js.setInterval(create_proxy(tour), periode))
 

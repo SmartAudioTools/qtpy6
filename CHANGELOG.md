@@ -2,6 +2,9 @@
 
 ## Non publié
 
+- Dans le navigateur, `deleteLater` détruit enfin : la pompe (`qtpy6.web.bloquant`) n'appelait
+  que `processEvents`, qui ne traite jamais `DeferredDelete` hors d'une boucle `exec()`. Un widget
+  ainsi « détruit » restait à l'écran et, son objet Python libéré, se peignait en widget natif.
 - `qtpy6.QtPdf` et `qtpy6.QtPdfWidgets`. Dans le navigateur, où Qt-WASM n'a pas QtPdf,
   `QPdfDocument` et `QPdfView` sont doublés par pdf.js 6.2.108 (vendu, Apache 2) dans un `<div>`
   de la page calé sur le widget, texte sélectionnable et copiable (`qtpy6.web.pdf`). En natif,
