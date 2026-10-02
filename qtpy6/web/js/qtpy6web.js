@@ -16,7 +16,9 @@
 // l'avancement de 0 à 1, les octets reçus de chaque fichier jusqu'à 0,9 (une copie de la réponse est lue à côté : celle que
 // Pyodide reçoit reste intacte, et le navigateur garde son cache de code compilé), puis dépaquetage, roues, 1 rendue. Le total
 // attendu : `tailles` ({nom: octets décompressés}, que la page connaît), compté dès le départ ; un fichier hors de `tailles` pèse
-// son Content-Length (juste s'il n'est pas compressé) une fois commencé. L'avancement ne recule jamais.
+// son Content-Length (juste s'il n'est pas compressé) une fois commencé. L'avancement ne recule jamais. `brotli` : les noms
+// (dernier segment de l'adresse) d'autres fichiers servis aussi compressés en Brotli (NOM.br), comme pyodide.asm.wasm et
+// python_stdlib.zip de Pyodide-Qt (hebergement/telecharger.sh) : voir `en_brotli`.
 const t0 = performance.now();
 export const journal = [];
 let ecouter = () => {};
@@ -42,9 +44,28 @@ function telecharger(url) {
   return fetch(url).then(r => { if (!r.ok) throw new Error(`${url} : ${r.status}`); return r.arrayBuffer(); });
 }
 
+// Un fichier dont l'hôte sert un jumeau Brotli (NOM.br) : celui-ci est demandé d'abord, décompressé dans la page en flux
+// (DecompressionStream, qui ne retarde pas la compilation en flux du moteur). GitHub Pages ne compresse qu'en gzip : 11,3 Mo du
+// moteur, 8,0 en Brotli, soit 0,5 s de moins à 50 Mbit/s (mesuré le 02/10/2026 sous Firefox). Rend undefined, d'où la demande
+// du fichier lui-même, sans Brotli dans le navigateur (Firefox 155 l'a, sous le nom "brotli") ou sans jumeau (en
+// développement). Une réponse marquée DECOMPRESSE vient du service worker d'une page (celui de SmartTeacher), qui la range
+// décompressée : la décompresser à chaque ouverture coûterait 0,15 à 0,3 s de calcul.
+export const DECOMPRESSE = "X-Qtpy6-Decompresse";
+const BROTLI = (() => { try { new DecompressionStream("brotli"); return true; } catch { return false; } })();
+async function en_brotli(fetch_origine, adresse) {
+  if (!BROTLI) return;
+  const br = new URL(adresse);
+  br.pathname += ".br";
+  const reponse = await fetch_origine(br).catch(() => undefined);
+  if (!reponse?.ok) return;
+  if (reponse.headers.has(DECOMPRESSE)) return reponse;
+  return new Response(reponse.body.pipeThrough(new DecompressionStream("brotli")),  // application/wasm : compileStreaming l'exige
+    { headers: { "Content-Type": adresse.pathname.endsWith(".wasm") ? "application/wasm" : "application/octet-stream" } });
+}
+
 // Les octets reçus pendant `preparer` : chaque réponse de fetch lue en double (clone), son nom (dernier segment de l'adresse)
-// pesé par `tailles`. Rend la fonction qui remet le fetch d'origine.
-function compter(tailles, signaler) {
+// pesé par `tailles` ; et ceux de `brotli` demandés par en_brotli. Rend la fonction qui remet le fetch d'origine.
+function compter(tailles, brotli, signaler) {
   const fetch_origine = window.fetch;
   const fichiers = Object.fromEntries(Object.entries(tailles).map(([nom, total]) => [nom, { recu: 0, total }]));
   let haut = 0;
@@ -54,9 +75,9 @@ function compter(tailles, signaler) {
     signaler(haut);
   };
   window.fetch = async (...args) => {
-    const reponse = await fetch_origine(...args);
+    const adresse = new URL(String(args[0]?.url ?? args[0]), location.href), nom = adresse.pathname.split("/").pop();
+    const reponse = brotli.includes(nom) && await en_brotli(fetch_origine, adresse) || await fetch_origine(...args);
     if (!reponse.ok || !reponse.body) return reponse;
-    const nom = new URL(reponse.url || String(args[0]?.url ?? args[0]), location.href).pathname.split("/").pop();
     const fichier = fichiers[nom] = { recu: 0, total: tailles[nom] || +reponse.headers.get("Content-Length") || 1 };
     const lecteur = reponse.clone().body.getReader();
     (async () => {
@@ -88,9 +109,9 @@ function molette(conteneur) {
 }
 
 export async function preparer(conteneur, { indexURL, archives = [], roues = [], env = {}, sur_ligne, progres = () => {},
-                                            tailles = {} } = {}) {
+                                            tailles = {}, brotli = [] } = {}) {
   if (sur_ligne) ecouter = sur_ligne;
-  const retablir = compter(tailles, f => progres(0.9 * f));
+  const retablir = compter(tailles, ["pyodide.asm.wasm", "python_stdlib.zip", ...brotli], f => progres(0.9 * f));
   window.journal = journal;
   indexURL = new URL(indexURL.endsWith("/") ? indexURL : indexURL + "/", location.href).href;
   const attendu = fetch(new URL("../versions.json", import.meta.url)).then(r => r.ok ? r.json() : null).catch(() => null);

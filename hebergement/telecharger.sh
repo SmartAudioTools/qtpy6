@@ -2,6 +2,10 @@
 # Le Pyodide où Qt 6.10.2 et sa liaison Python sont liés en WebAssembly (Python 3.13), la release épinglée dans
 # qtpy6/web/versions.json : téléchargée si elle n'est pas déjà là, empreinte vérifiée, dépaquetée dans exemple/pyodide-qt/
 # avec sa licence (pyodide-qt/LICENSE.txt) : ce que sert l'exemple en local, et ce que l'action Pages publie.
+# Puis les deux gros fichiers doublés d'un jumeau Brotli (NOM.br), que qtpy6web.js demande d'abord : GitHub Pages ne sert
+# qu'en gzip, et Brotli fait 8,0 Mo du moteur au lieu de 11,3, 2,7 Mo de la bibliothèque standard au lieu de 4,2 (mesuré le
+# 02/10/2026 : −0,5 s sur le seul moteur à 50 Mbit/s). La bibliothèque standard est d'abord réécrite sans compression (ZIP_STORED,
+# 9,8 Mo en mémoire au lieu de 4,2) : déjà dégonflée, Brotli n'en tirait rien (4,1 Mo).
 #   hebergement/telecharger.sh [pyside6|pyqt6] [/chemin/du/meme.zip]
 # pyside6 (défaut) : Pyodide-PySide6, construit par wasm/construire.sh (phase paquet), LGPL v3.
 # pyqt6 : Pyodide-Qt de JarrettSJohnson, GPL v3, le repli.
@@ -21,4 +25,12 @@ rm -rf exemple/pyodide-qt
 unzip -q "$ZIP" -d exemple  # le zip contient le dossier pyodide-qt/
 # La release de Pyodide-Qt n'a pas sa licence : celle du dépôt, au nom qu'elle a dans le zip de Pyodide-PySide6
 [ "$LIAISON" = pyside6 ] || cp hebergement/LICENSE-Pyodide-Qt.txt exemple/pyodide-qt/LICENSE.txt
+python3 -c "
+import os, zipfile
+with zipfile.ZipFile('exemple/pyodide-qt/python_stdlib.zip') as a, zipfile.ZipFile('s.zip', 'w', zipfile.ZIP_STORED) as b:
+    for i in a.infolist(): b.writestr(i, a.read(i), zipfile.ZIP_STORED)
+os.replace('s.zip', 'exemple/pyodide-qt/python_stdlib.zip')"
+brotli -q 11 -f exemple/pyodide-qt/pyodide.asm.wasm & MOTEUR=$!  # les deux en parallèle (une minute et demie pour le moteur)
+brotli -q 11 -f exemple/pyodide-qt/python_stdlib.zip
+wait $MOTEUR
 ls -l exemple/pyodide-qt

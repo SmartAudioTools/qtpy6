@@ -22,6 +22,7 @@ jobs:
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      - run: sudo apt-get install -y -q brotli  # telecharger.sh : les jumeaux .br de Pyodide-Qt
       - run: hebergement/telecharger.sh
       - run: python3 hebergement/construire_site.py site
       - uses: actions/configure-pages@v5

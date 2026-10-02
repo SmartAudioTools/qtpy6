@@ -12,7 +12,7 @@ from pathlib import Path
 
 
 def assembler(archive, fichiers=(), paquets=(), distributions=(), polices=(), dossier_polices="polices", pyc=False,
-              exclure=()):
+              exclure=(), compression=zipfile.ZIP_DEFLATED):
     """Écrit le zip ``archive``. ``fichiers`` : ``{nom_dans_le_zip: chemin}``. ``paquets`` : des noms de modules
     importables, dont le dossier entier (``.py`` et données, sans ``__pycache__``) est pris là où il est, ce qui vaut pour
     une installation éditable. ``distributions`` : des paquets installés pris avec leurs métadonnées, pour ceux dont les
@@ -23,9 +23,11 @@ def assembler(archive, fichiers=(), paquets=(), distributions=(), polices=(), do
     (UNCHECKED_HASH : le dépaquetage change les dates) ; un autre Python que celui du navigateur ne les lit pas et
     compile la source, gardée pour cela et pour les traces d'erreur. ``exclure`` : des débuts de noms dans le zip
     laissés dehors, ``qtpy6/web/js/pdfjs/`` typiquement (1,7 Mo, servis à côté de ``qtpy6web.js``, d'où
-    ``qtpy6.web.pdf`` les charge à la première ouverture d'un PDF). Rend la taille en octets."""
+    ``qtpy6.web.pdf`` les charge à la première ouverture d'un PDF). ``compression`` : ``zipfile.ZIP_STORED`` pour une archive
+    servie compressée en Brotli (``brotli`` de ``preparer``), qui ne tire presque rien d'un zip déjà dégonflé. Rend la
+    taille en octets."""
     archive = Path(archive)
-    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as z, tempfile.TemporaryDirectory() as tmp:
+    with zipfile.ZipFile(archive, "w", compression) as z, tempfile.TemporaryDirectory() as tmp:
         def ecrire(chemin, nom):
             if nom.startswith(tuple(exclure)):
                 return
