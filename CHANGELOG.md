@@ -41,7 +41,9 @@
   canevas (`backingStore().flush` : Qt-WASM n'envoie que ce qu'il peint) : 2 ms par image, à l'identique au pixel près.
   Un seul relais par fenêtre voit passer les événements, et ne visite que les zones en cours de décalage. Il remplace
   un filtre d'application par zone, soit un appel Python par événement et par page. Le décalage des lignes se fait en
-  JavaScript (`copyWithin` sur une vue de l'image) : 0,4 ms par image au lieu de 1,2 en Python.
+  JavaScript (`copyWithin` sur une vue de l'image) : 0,4 ms par image au lieu de 1,2 en Python. L'image est relevée
+  dès l'affichage, au repos (le filtre d'application posé le temps d'un Paint seulement) : sinon les deux premières
+  images de la première descente montaient à 30-80 ms.
   En natif, une QScrollArea ordinaire.
 - Dans le navigateur, `deleteLater` détruit enfin : la pompe (`qtpy6.web.bloquant`) n'appelait
   que `processEvents`, qui ne traite jamais `DeferredDelete` hors d'une boucle `exec()`. Un widget

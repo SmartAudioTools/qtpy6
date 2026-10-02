@@ -47,3 +47,4 @@ def test_zone_ordinaire_en_natif(app):
     zone.verticalScrollBar().setValue(50)
     app.processEvents()
     assert zone._dy == 0 and zone.widget().pos().y() == -50
+    assert defilement._Relais.seul is None  # ni amorcé à l'affichage ni posé au pas : le filtre d'application ralentit le natif

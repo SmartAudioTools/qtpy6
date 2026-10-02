@@ -36,7 +36,7 @@ tout est alors repeint à l'image suivante (juste, mais au prix d'un repeint com
 pas vertical plus petit que le viewport, à une échelle entière (à 1,25 ou 1,5 le décalage tomberait entre deux lignes)
 et une fois l'image de Qt relevée ; sinon, et en natif, une QScrollArea ordinaire."""
 
-from qtpy6.QtCore import QEvent, QObject, QPoint, QRect, Qt
+from qtpy6.QtCore import QEvent, QObject, QPoint, QRect, Qt, QTimer
 from qtpy6.QtGui import QImage, QPainter, QRegion
 from qtpy6.QtWidgets import QApplication, QScrollArea, QWidget
 
@@ -49,6 +49,21 @@ class ZoneDefilante(QScrollArea):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._dy = 0  # décalage du viewport (px logiques, vers le bas si positif) dû à l'image de Qt à la prochaine image
+
+    def showEvent(self, evenement):
+        super().showEvent(evenement)
+        if ACTIF and navigateur():
+            QTimer.singleShot(0, self, self._amorcer)  # après l'affichage, pas pendant la construction de l'écran
+
+    def _amorcer(self):
+        """Le relais posé et l'image de Qt relevée dès l'affichage, au repos, et non au premier pas : sans image, le premier
+        pas repeint tout le viewport, et le relevé s'étale sur l'image suivante (mesuré le 02/10/2026 sur le bac à
+        l'échelle 2 : les deux premières images de la première descente à 31-82 ms sur sept passes, 10 ms au plus une
+        fois amorcé). Un pixel sali dans le widget le plus profond qui le couvre suffit à provoquer l'UpdateRequest et le
+        Paint ; le filtre d'application n'est posé que le temps de ce Paint (``_Relais.amorcer``)."""
+        if self.isVisible() and (_Relais.seul is None or _Relais.seul.images.get(self.window().windowHandle()) is None):
+            _Relais.amorcer(self.window())
+            _salir(self.viewport(), QRect(0, 0, 1, 1))
 
     def scrollContentsBy(self, dx, dy):
         contenu, vue = self.widget(), self.viewport()
@@ -118,12 +133,33 @@ class _Relais(QObject):
 
     @classmethod
     def installer(cls):
-        if cls.seul is None:
-            cls.seul = cls()
-            QApplication.instance().installEventFilter(cls.seul)
+        """Le filtre d'application, pour de bon : au premier pas de défilement."""
+        relais = cls.seul = cls.seul or cls()
+        if relais.application != "permanent":
+            QApplication.instance().installEventFilter(relais)
+            relais.application = "permanent"
+            for fenetre in relais.fenetres:  # le filtre d'application les voit déjà
+                fenetre.removeEventFilter(relais)
+            relais.fenetres.clear()
+
+    @classmethod
+    def amorcer(cls, fenetre):
+        """Le filtre d'application le temps de relever l'image de ``fenetre`` (widget de fenêtre), puis, jusqu'au premier
+        pas, cette seule fenêtre filtrée, pour son Hide et son WinIdChange : laissé sur toute l'application dès l'affichage,
+        il ralentissait de moitié la construction de fond des questions (bac à l'échelle 2, médianes sur sept passes :
+        1,23 s au lieu de 0,81 ; mesuré le 02/10/2026)."""
+        relais = cls.seul = cls.seul or cls()
+        if relais.application is None:
+            QApplication.instance().installEventFilter(relais)
+            relais.application = "provisoire"
+        if relais.application == "provisoire" and fenetre not in relais.fenetres:
+            fenetre.installEventFilter(relais)
+            relais.fenetres.add(fenetre)
 
     def __init__(self):
         super().__init__()
+        self.application = None  # le filtre d'application : None, "provisoire" (le temps d'un relevé) ou "permanent"
+        self.fenetres = set()  # les widgets de fenêtre filtrés un à un, tant que le filtre d'application ne l'est pas
         self.images = {}  # QWindow → l'image de son backing store, relevée au premier Paint qui suit une UpdateRequest
         self.attend = None  # la QWindow dont l'UpdateRequest vient de passer sans image : le Paint qui suit la donne
         self.decalees = set()
@@ -145,6 +181,9 @@ class _Relais(QObject):
             if self.attend is not None:
                 if isinstance(objet, QWidget) and objet.window().windowHandle() is self.attend:
                     self.images[self.attend] = _image(objet)
+                    if self.application == "provisoire":
+                        QApplication.instance().removeEventFilter(self)
+                        self.application = None
                 self.attend = None
             for zone in list(self.decalees):  # peint sans UpdateRequest (exposition, redimensionnement) : rien n'est
                 zone._poser(0)                 # décalé, tout est à repeindre
