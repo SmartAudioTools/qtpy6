@@ -2,6 +2,9 @@
 
 ## Non publié
 
+- `qtpy6.erreurs.installer()` : les exceptions non rattrapées s'affichent dans une boîte de dialogue, depuis
+  n'importe quel fil (`QThread`, `threading.Thread`), en plus de la trace en console. Repris de SmartFramework
+  (`ui/exceptionDialog.py`), sans l'installation à l'import ni la feuille de style de l'application écrasée.
 - `Rangee` : plusieurs `addStretch()` d'une même ligne s'en partagent la place libre à parts égales, comme dans
   un `QHBoxLayout` (un seul poussait à droite ce qui le suivait, les suivants étaient ignorés) : un ressort entre
   chaque widget les espace régulièrement.

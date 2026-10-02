@@ -142,6 +142,7 @@ l'application a chargée. Le reste (chargeur de la page, polices, tactile, stock
 | `scaled(obj, *more)` | `obj × QT_SCALE`, résout `auto` au premier appel (il faut une `QApplication`) |
 | `qtpy6.QtSelector` | les widgets de réglage et `main()` (point d'entrée `qtselector`) |
 | `qtpy6.QtCore.QPropertyAnimation` | celle de la liaison, même API, mais menée par les images de l'écran (`QWindow.requestUpdate` : rappel du compositeur sur Wayland, `requestAnimationFrame` dans le navigateur) au lieu de la minuterie de 16 ms de Qt, dès que la cible est un widget dont la fenêtre existe ; `par_image = False` (sur la classe ou l'instance) rend celle de Qt telle quelle (`qtpy6.animation`) |
+| `qtpy6.erreurs` | `installer()` : une exception non rattrapée, de n'importe quel fil (`sys.excepthook` et `threading.excepthook`), passe au crochet précédent puis s'affiche dans une `QMessageBox` critique au texte sélectionnable, ouverte dans le fil principal ; `boite(message)` rend cette boîte |
 | `qtpy6.web` | le navigateur : `navigateur()`, `application()`, `lancer()`, `construire`, `bloquant`, `fils`, `tactile`, `dispositions`, `travailleur`, `stockage`, `assembler`, `sonde` ([web.md](web.md)) |
 
 ## Tests et niveau de preuve
