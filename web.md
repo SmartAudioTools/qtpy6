@@ -100,7 +100,7 @@ pip install -e . --no-deps --no-build-isolation --config-settings editable_mode=
 | `qtpy6.web.tactile` | `detecte()` : un doigt parmi les pointeurs du navigateur (`any-pointer: coarse`, ou `navigator.maxTouchPoints` > 0), ou en natif parmi les périphériques de Qt (`QInputDevice`, écran tactile). `activer(app, cible=44)` : boutons, listes, champs, cases montent à la taille d'une cible au doigt par une feuille de style **ajoutée** à celle de l'application, à appeler avant de construire les widgets. `activer_au_doigt(app)` : `activer` si `detecte()`, sinon au premier doigt posé sur la page (`pointerdown` tactile ; Firefox sous Linux ne dit rien de l'écran). `marge()` : l'espace à mettre autour d'un widget d'une ligne pour en faire une cible. `defiler_au_doigt(zone)` : une `QScrollArea` que le doigt fait défiler (`QScroller` ; sans lui, un glisser fait 0 px). |
 | `qtpy6.web.dispositions` | `Disposition`, `Rangee` : des dispositions qui se **replient** quand la place manque. `QHBoxLayout` impose la somme de ses colonnes comme largeur minimale (mesuré : une barre de boutons à 574 px, une fenêtre à 451 px au minimum) ; `Rangee` passe à la ligne comme du texte. |
 | `qtpy6.web.travailleur` | Un Web Worker Pyodide piloté depuis l'application (`Travailleur`), et `ProcessusWeb`, le `QProcess` du navigateur (section suivante). |
-| `qtpy6.web.stockage` | `lire(cle)`, `ecrire(cle, texte)`, `effacer(cle)` sur `localStorage` (du texte, quelques Mio, qui survit au rechargement) ; `telecharger(nom, contenu, mime, lien=None)`, le seul chemin vers le disque de l'utilisateur (tout de suite, ou par un `<a>` de la page qu'il clique). |
+| `qtpy6.web.stockage` | `lire(cle)`, `ecrire(cle, texte)`, `effacer(cle)` sur `localStorage` (du texte, quelques Mio, qui survit au rechargement) ; `monter(dossier)` range un dossier dans IndexedDB (des fichiers ordinaires, binaires compris, jusqu'au quota de l'origine) et y remet ceux de la visite précédente, `synchroniser(attendre=False)` l'y recopie après une écriture ; `telecharger(nom, contenu, mime, lien=None)`, le seul chemin vers le disque de l'utilisateur (tout de suite, ou par un `<a>` de la page qu'il clique). |
 | `qtpy6.web.assembler` | `assembler(archive, fichiers, paquets, distributions, polices)` écrit le zip que la page dépaquette : des fichiers, des paquets purs Python pris là où ils sont installés (`qtpy6`, `qtpy6.web` compris, et ceux de l'application), des distributions avec leurs métadonnées, des polices. `polices(*motifs)` : des globs, erreur si aucun fichier. |
 | `qtpy6.web.sonde` | `python -m qtpy6.web.sonde page.html capture.png [--racine DIR] [--delai 120] [--etat fini] [--taille 1000x900] [--zoom 2] [--tactile]` : sert `--racine` en local, ouvre la page dans Firefox sans interface, attend `window.etat`, imprime `window.journal`, capture l'écran et écrit chaque image de `window.captures` (`{suffixe: png en base64}`) en `capture_<suffixe>.png`. Code de retour 0 si l'état attendu est atteint. |
 | `qtpy6.web.lancer(script, args=(), pret=None, module=None)` | Exécute un script écrit pour le bureau comme `python script args…` (avec `module`, `script` est son `__main__.py` et c'est `python -m module` qui est imité : imports relatifs compris) ; `app.exec()` y suspend jusqu'à `quit()`, `sys.exit` est rattrapé et donne le code de retour ; `pret()` quand l'application entre dans `exec()`. À appeler d'une entrée suspendable : `lancer` de `qtpy6web.js`. |
@@ -189,7 +189,12 @@ Le plus souvent rien : `construire` et le script tel quel. Ce qui reste différe
    l'application, dans un worker (section « Le worker ») ; `subprocess.run` aussi, dans une entrée suspendable. Tout
    autre programme lève `FileNotFoundError`.
 5. **Les fichiers** vivent dans le système de fichiers de Pyodide (en mémoire, perdu au rechargement) : ce qui doit
-   survivre passe par `stockage.ecrire`. `QFileDialog.getOpenFileName` ouvre le sélecteur du navigateur et y dépose le
+   survivre passe par `stockage.ecrire` (du texte), ou par un dossier que `stockage.monter` range dans IndexedDB au
+   démarrage — vide au montage, qui cache son contenu : les fichiers livrés avec l'application se recopient dedans au
+   premier lancement — et que `stockage.synchroniser()` recopie après chaque écriture (une copie à la fois, une écriture
+   venue pendant la copie en relance une à sa fin). Éprouvé dans Firefox le 01/10/2026 : écriture, copie, démontage,
+   remontage, octets relus identiques ; sans `synchroniser`, le fichier est perdu. `monter` demande aussi
+   `navigator.storage.persist()`, sans quoi le navigateur peut effacer l'origine quand le disque se remplit. `QFileDialog.getOpenFileName` ouvre le sélecteur du navigateur et y dépose le
    fichier choisi ; `getSaveFileName` demande un nom, et le fichier est téléchargé dès que l'application l'a écrit
    (`stockage.telecharger` pour le faire soi-même).
 6. **Les polices** : livrer celles de l'interface et la fixe dans l'archive (`assembler(..., polices=...)`), les déclarer
@@ -238,7 +243,7 @@ dans le navigateur).
 ## Tests
 
 ```bash
-QT_QPA_PLATFORM=offscreen python -m pytest tests/test_web.py -q
+QT_QPA_PLATFORM=offscreen python -m pytest tests/test_web.py tests/test_stockage.py -q
 ```
 
 En natif, tout s'importe et est inerte ; les doublures sont vérifiées dans un sous-processus où `sys.platform` est forcé à
