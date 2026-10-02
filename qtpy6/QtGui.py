@@ -4,7 +4,7 @@ import sys
 
 from . import PYSIDE6, _binding
 
-_binding.load(globals(), 'QtGui')
+_binding.load(globals(), 'QtGui', 'QTextCursor', 'QFontDatabase', 'QFont', 'QGuiApplication')  # names this code uses
 
 if PYSIDE6:
     # PySide calls movePosition's `mode` parameter `arg__2` (PYSIDE-185).

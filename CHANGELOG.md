@@ -4,6 +4,11 @@
 
 - `assembler(..., exclure=[...])` laisse des fichiers hors de l'archive, `qtpy6/web/js/pdfjs/` typiquement (1,7 Mo) :
   `qtpy6.web.pdf` charge alors pdf.js à côté de `qtpy6web.js` (`window.qtpy6Js`), au premier PDF ouvert seulement.
+- Dans le navigateur, PySide6 par défaut : un Pyodide 0.29.3 où Qt 6.10.2 et PySide6 6.10.2 sont liés en
+  WebAssembly, construit par la recette `wasm/` (LGPL v3, licence dans `pyodide-qt/LICENSE.txt`) ;
+  `hebergement/telecharger.sh pyqt6` garde Pyodide-Qt (PyQt6) en repli. Sa bibliothèque standard est en `.pyc` :
+  Pyodide chargé en 0,6 s au lieu de 1,6 s. `assembler(..., pyc=True)` fait de même pour l'archive de
+  l'application (import du lecteur QCM 0,55 s au lieu de 0,9 s, archive 40 % plus lourde).
 - `qtpy6.QtCore.QPropertyAnimation` est menée par les images de l'écran, sans rien changer à son API ni au
   code des applications. Qt Widgets avance ses animations à une minuterie de 16 ms que rien ne cale sur le
   rafraîchissement : une image reçoit parfois deux pas (le premier jamais affiché), la suivante aucun. Dès que la

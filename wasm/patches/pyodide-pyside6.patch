@@ -1,0 +1,49 @@
+diff --git a/Makefile.envs b/Makefile.envs
+index d0b5c79..050335d 100644
+--- a/Makefile.envs
++++ b/Makefile.envs
+@@ -197,7 +197,9 @@ export MAIN_MODULE_LDFLAGS= $(LDFLAGS_BASE) \
+ 	-lhtml5_webgl.js \
+ 	-lsdl.js \
+ 	-sMAX_WEBGL_VERSION=2  \
+-	-sGL_WORKAROUND_SAFARI_GETCONTEXT_BUG=0
++	-sGL_WORKAROUND_SAFARI_GETCONTEXT_BUG=0 \
++	-lembind \
++	$(PYSIDE6_LDFLAGS)
+ 
+ EXPORTS=_main \
+    ,_free \
+diff --git a/src/core/main.c b/src/core/main.c
+index d108cd3..9848b9d 100644
+--- a/src/core/main.c
++++ b/src/core/main.c
+@@ -5,6 +5,16 @@
+ #include <jslib.h>
+ #include <stdbool.h>
+ 
++/* PySide6 lié statiquement (qtpy6/wasm) : les modules d'extension sont des modules intégrés,
++ * sous leur nom complet. BuiltinImporter.find_spec ne regarde que ce nom, pas le chemin : les
++ * paquets PySide6 et shiboken6 restent les vrais paquets Python purs de la bibliothèque standard. */
++extern PyObject *PyInit_Shiboken(void);
++extern PyObject *PyInit_QtCore(void);
++extern PyObject *PyInit_QtGui(void);
++extern PyObject *PyInit_QtWidgets(void);
++extern PyObject *PyInit_QtSvg(void);
++extern PyObject *PyInit_QtSvgWidgets(void);
++
+ #define FAIL_IF_STATUS_EXCEPTION(status)                                       \
+   if (PyStatus_Exception(status)) {                                            \
+     goto finally;                                                              \
+@@ -64,6 +74,12 @@ main(int argc, char** argv)
+   // This exits and prints a message to stderr on failure,
+   // no status code to check.
+   PyImport_AppendInittab("_pyodide_core", PyInit__pyodide_core);
++  PyImport_AppendInittab("shiboken6.Shiboken", PyInit_Shiboken);
++  PyImport_AppendInittab("PySide6.QtCore", PyInit_QtCore);
++  PyImport_AppendInittab("PySide6.QtGui", PyInit_QtGui);
++  PyImport_AppendInittab("PySide6.QtWidgets", PyInit_QtWidgets);
++  PyImport_AppendInittab("PySide6.QtSvg", PyInit_QtSvg);
++  PyImport_AppendInittab("PySide6.QtSvgWidgets", PyInit_QtSvgWidgets);
+   initialize_python(argc, argv);
+   // Normally the runtime would exit when main() returns, don't let that
+   // happen.

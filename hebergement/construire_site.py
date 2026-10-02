@@ -1,7 +1,7 @@
 """Le site GitHub Pages de qtpy6 dans ``site/`` (ou le dossier donné) : la page de lancement (``index.html``), le cadre
 isolé où tourne le script (``cadre.html``), le chargeur ``qtpy6web.js``, ``qtpy6.zip`` (le paquet, que le cadre met dans
 ``sys.path``), les roues que le cadre charge avant tout script (``roues/`` : serializejson compilé pour WebAssembly et
-sa dépendance apply, listées dans ``roues.json``) et Pyodide-Qt (``exemple/pyodide-qt/``, qu'apporte ``telecharger.sh``) avec sa licence. La bibliothèque
+sa dépendance apply, listées dans ``roues.json``) et le Pyodide avec Qt (``exemple/pyodide-qt/``, qu'apporte ``telecharger.sh``, sa licence dedans). La bibliothèque
 standard seule : ni qtpy6 ni Qt n'ont à être installés pour construire (l'action Pages n'a qu'un python3 nu).
 
     python3 hebergement/construire_site.py [site]"""
@@ -19,7 +19,6 @@ def construire(site):
     site = Path(site)
     site.mkdir(parents=True, exist_ok=True)
     for source, cible in (("hebergement/index.html", "index.html"), ("hebergement/cadre.html", "cadre.html"),
-                          ("hebergement/LICENSE-Pyodide-Qt.txt", "LICENSE-Pyodide-Qt.txt"),
                           ("qtpy6/web/js/qtpy6web.js", "qtpy6web.js")):
         shutil.copyfile(DEPOT / source, site / cible)
     with zipfile.ZipFile(site / "qtpy6.zip", "w", zipfile.ZIP_DEFLATED) as z:

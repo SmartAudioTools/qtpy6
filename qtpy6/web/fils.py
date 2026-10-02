@@ -473,6 +473,10 @@ def doubler(ns):
 
     for classe in (QThread, QRunnable, QThreadPool, QMutex, QRecursiveMutex, QMutexLocker, QReadWriteLock, QReadLocker,
                    QWriteLocker, QSemaphore, QSemaphoreReleaser, QWaitCondition, QProcessEnvironment):
+        try:  # qtpy6._binding paresseux : un nom de la liaison n'est dans ns qu'une fois demandé
+            ns["__getattr__"](classe.__name__)
+        except (KeyError, AttributeError):
+            pass
         if classe.__name__ not in ns:
             ns[classe.__name__] = classe
 

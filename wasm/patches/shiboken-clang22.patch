@@ -1,0 +1,100 @@
+--- a/sources/shiboken6/ApiExtractor/clangparser/clangparser.cpp
++++ b/sources/shiboken6/ApiExtractor/clangparser/clangparser.cpp
+@@ -326,9 +326,15 @@
+     setupTarget(translationUnit);
+ 
+     CXCursor rootCursor = clang_getTranslationUnitCursor(translationUnit);
++    CXPrintingPolicy printingPolicy = clang_getCursorPrintingPolicy(rootCursor);
++    clang_PrintingPolicy_setProperty(printingPolicy, CXPrintingPolicy_IncludeNewlines, 0);
++    setPrintingPolicy(printingPolicy);
+ 
+     clang_visitChildren(rootCursor, visitorCallback, reinterpret_cast<CXClientData>(&bv));
+ 
++    setPrintingPolicy(nullptr);
++    clang_PrintingPolicy_dispose(printingPolicy);
++
+     QList<Diagnostic> diagnostics = getDiagnostics(translationUnit);
+     diagnostics.append(bv.diagnostics());
+     bv.setDiagnostics(diagnostics);
+--- a/sources/shiboken6/ApiExtractor/clangparser/clangutils.cpp
++++ b/sources/shiboken6/ApiExtractor/clangparser/clangutils.cpp
+@@ -10,6 +10,8 @@
+ 
+ #include <string_view>
+ 
++using namespace Qt::StringLiterals;
++
+ bool operator==(const CXCursor &c1, const CXCursor &c2) noexcept
+ {
+     return c1.kind == c2.kind
+@@ -137,11 +139,58 @@
+     return resolveTypedef(resolveElaboratedType(type));
+ }
+ 
++// Clang 22 : clang_getTypeSpelling() ne rend plus le nom qualifié. Repris de l'amont (PYSIDE-3286, 27cb9ca,
++// shiboken 6.11.1), en plus court : la politique d'affichage est globale, posée par parse(), au lieu d'être
++// passée à chaque appel.
++static CXPrintingPolicy printingPolicy = nullptr;
++
++void setPrintingPolicy(CXPrintingPolicy p)
++{
++    printingPolicy = p;
++}
++
++// Nom qualifié d'une déclaration par la chaîne de ses parents sémantiques (« QList::const_reference »).
++static QString cursorScopedName(const CXCursor &decl)
++{
++    QString result;
++    for (CXCursor c = decl; !clang_isTranslationUnit(c.kind) && !clang_Cursor_isNull(c)
++         && !clang_isInvalid(c.kind); c = clang_getCursorSemanticParent(c)) {
++        const QString name = getCursorSpelling(c);
++        if (!name.isEmpty())
++            result.prepend(result.isEmpty() ? name : name + u"::"_s);
++    }
++    return result;
++}
++
++static bool isInClassTemplate(CXCursor c)
++{
++    for (c = clang_getCursorSemanticParent(c); !clang_Cursor_isNull(c) && !clang_isInvalid(c.kind)
++         && !clang_isTranslationUnit(c.kind); c = clang_getCursorSemanticParent(c)) {
++        if (c.kind == CXCursor_ClassTemplate || c.kind == CXCursor_ClassTemplatePartialSpecialization)
++            return true;
++    }
++    return false;
++}
++
+ QString getTypeName(const CXType &type)
+ {
+-    CXString typeSpelling = clang_getTypeSpelling(type);
+-    const QString result = QString::fromUtf8(clang_getCString(typeSpelling));
++    // Un typedef ou une classe imbriquée DANS un modèle de classe : clang_getFullyQualifiedName() le qualifie avec
++    // la dernière instanciation rencontrée (« QList<QString>::const_reference » au lieu de « QList::const_reference »,
++    // mesuré sur libclang 22.1.8), ce qui fait générer QItemSelection::at() en « QItemSelectionRange<QString> ».
++    // On reconstruit alors la forme qu'avait clang 21, sans arguments d'instanciation.
++    if (printingPolicy != nullptr && (type.kind == CXType_Typedef || type.kind == CXType_Record)) {
++        const CXCursor decl = clang_getTypeDeclaration(type);
++        if (isInClassTemplate(decl)) {
++            const QString name = cursorScopedName(decl);
++            return clang_isConstQualifiedType(type) != 0 ? u"const "_s + name : name;
++        }
++    }
++    CXString typeSpelling = printingPolicy != nullptr
++        ? clang_getFullyQualifiedName(type, printingPolicy, 0) : clang_getTypeSpelling(type);
++    QString result = QString::fromUtf8(clang_getCString(typeSpelling));
+     clang_disposeString(typeSpelling);
++    if (result.startsWith(u"struct "))  // clang_getFullyQualifiedName() garde le mot-clé (comme l'amont 6.11)
++        result.remove(0, 7);
+     return result;
+ }
+ 
+--- a/sources/shiboken6/ApiExtractor/clangparser/clangutils.h
++++ b/sources/shiboken6/ApiExtractor/clangparser/clangutils.h
+@@ -27,6 +27,7 @@
+ QString getCursorSpelling(const CXCursor &cursor);
+ QString getCursorDisplayName(const CXCursor &cursor);
+ QString getTypeName(const CXType &type);
++void setPrintingPolicy(CXPrintingPolicy p);
+ bool hasScopeResolution(const CXType &type);
+ CXType fullyResolveType(const CXType &type);
+ QString getResolvedTypeName(const CXType &type);

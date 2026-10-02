@@ -5,7 +5,8 @@ import sys
 
 from . import PYQT6, QT_FONT, QT_FONT_SIZE, _binding
 
-_binding.load(globals(), 'QtWidgets')
+_binding.load(globals(), 'QtWidgets', 'QApplication', 'QFileDialog',  # names this code and bloquant read
+              'QDialog', 'QMenu', 'QMessageBox', 'QInputDialog', 'QColorDialog', 'QFontDialog', 'QLineEdit')
 
 # QFileSystemModel: in QtWidgets for PySide6 (its Qt5 place), moved to QtGui by PyQt6.
 if PYQT6:

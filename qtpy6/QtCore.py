@@ -6,7 +6,9 @@ import sys
 from . import PYQT6, _binding
 from . import QT_VERSION as _QT_VERSION  # PyQt's QtCore has an integer QT_VERSION
 
-_binding.load(globals(), 'QtCore')
+# Lazy mode: the names this module's code and its helpers (animation, fils, bloquant) read before the module exists.
+_binding.load(globals(), 'QtCore', 'QObject', 'QCoreApplication', 'QEventLoop', 'QEvent', 'QPropertyAnimation',
+              'QTimer', 'Signal', 'SignalInstance')
 
 if PYQT6:
     for _pyqt, _pyside in {'pyqtSignal': 'Signal', 'pyqtSlot': 'Slot', 'pyqtProperty': 'Property',

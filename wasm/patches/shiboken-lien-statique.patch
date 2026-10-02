@@ -1,0 +1,64 @@
+--- a/sources/shiboken6/generator/shiboken/cppgenerator_container.cpp
++++ b/sources/shiboken6/generator/shiboken/cppgenerator_container.cpp
+@@ -75,7 +75,9 @@
+ 
+     // creation function from C++ reference, used by field accessors
+     // which are within extern "C"
+-    s << "extern \"C\" PyObject *" << funcName << '(';
++    // qtpy6/wasm : interne au fichier. Les modules liés ensemble statiquement (PySide6 en WebAssembly) définissent
++    // chacun leur propre « createQPointList » : en externe, l'édition de liens échoue sur des symboles en double.
++    s << "static PyObject *" << funcName << '(';
+     if (flags.testFlag(ContainerCreationFlag::Const))
+         s << "const ";
+     s << containerSignature << "* ct)\n{\n" << indent
+@@ -101,7 +103,7 @@
+                                     const QString &checkFunction,
+                                     const QString &converterFunction)
+ {
+-    s << "extern \"C\" PythonToCppFunc " << name << "(PyObject *" << PYTHON_ARG << ")\n{\n"
++    s << "static PythonToCppFunc " << name << "(PyObject *" << PYTHON_ARG << ")\n{\n"
+       << indent << "if (" << checkFunction << '(' << PYTHON_ARG << "))\n" << indent
+       << "return " << converterFunction << ";\n"
+       << outdent << "return {};\n" << outdent << "}\n\n";
+@@ -111,7 +113,7 @@
+                                          const QString &name,
+                                          const QString &typeName)
+ {
+-    s << "extern \"C\" void " << name << "(PyObject *" << PYTHON_ARG << ", void *cppOut)\n{\n"
++    s << "static void " << name << "(PyObject *" << PYTHON_ARG << ", void *cppOut)\n{\n"
+       << indent << "auto *d = ShibokenSequenceContainerPrivate<" << typeName
+       << ">::get(" << PYTHON_ARG << ");\n";
+ }
+@@ -268,7 +270,7 @@
+ 
+     // Check function
+     result.checkFunctionName = result.name + u"_Check"_s;
+-    s << "extern \"C\" int " << result.checkFunctionName << "(PyObject *" << PYTHON_ARG
++    s << "static int " << result.checkFunctionName << "(PyObject *" << PYTHON_ARG
+         << ")\n{\n" << indent << "return " << PYTHON_ARG << " != nullptr && "
+         << PYTHON_ARG << " != Py_None && " << PYTHON_ARG << "->ob_type == "
+         << typeFName << "();\n" << outdent << "}\n\n";
+--- a/sources/shiboken6/generator/shiboken/cppgenerator.cpp
++++ b/sources/shiboken6/generator/shiboken/cppgenerator.cpp
+@@ -6639,7 +6639,7 @@
+         QString iType = cppApiVariableName() + "[i].type"_L1;
+         QString iName = cppApiVariableName() + "[i].fullName"_L1;
+ 
+-        s << "void cleanTypesAttributes() {\n" << indent
++        s << "static void cleanTypesAttributes() {\n" << indent
+             << "static PyObject *attrName = Shiboken::PyName::qtStaticMetaObject();\n"
+             << "const int imax = SBK_" << moduleName() << "_IDX_COUNT;\n"
+             << "for (int i = 0; i < imax && " << iName << " != nullptr; ++i) {\n" << indent
+@@ -6682,8 +6682,10 @@
+     if (!requiredModules.isEmpty())
+         s << "// Required modules' type and converter arrays.\n";
+     for (const QString &requiredModule : requiredModules) {
+-        s << "Shiboken::Module::TypeInitStruct *" << cppApiVariableName(requiredModule) << ";\n"
+-            << "SbkConverter **" << convertersVariableName(requiredModule) << ";\n";
++        // qtpy6/wasm : faibles. Liés statiquement, ils se confondent avec ceux du module requis, qui reçoivent
++        // de toute façon la même valeur (Shiboken::Module::getTypeStructs/getTypeConverters de ce module).
++        s << "__attribute__((weak)) Shiboken::Module::TypeInitStruct *" << cppApiVariableName(requiredModule) << ";\n"
++            << "__attribute__((weak)) SbkConverter **" << convertersVariableName(requiredModule) << ";\n";
+     }
+ 
+     s << "\n// Module initialization "

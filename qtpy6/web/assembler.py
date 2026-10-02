@@ -4,23 +4,38 @@ l'application, les paquets purs Python dont elle dépend, ses données, ses poli
 
 import importlib
 import importlib.metadata
+import py_compile
+import sys
+import tempfile
 import zipfile
 from pathlib import Path
 
 
-def assembler(archive, fichiers=(), paquets=(), distributions=(), polices=(), dossier_polices="polices", exclure=()):
+def assembler(archive, fichiers=(), paquets=(), distributions=(), polices=(), dossier_polices="polices", pyc=False,
+              exclure=()):
     """Écrit le zip ``archive``. ``fichiers`` : ``{nom_dans_le_zip: chemin}``. ``paquets`` : des noms de modules
     importables, dont le dossier entier (``.py`` et données, sans ``__pycache__``) est pris là où il est, ce qui vaut pour
     une installation éditable. ``distributions`` : des paquets installés pris avec leurs métadonnées, pour ceux dont les
     points d'entrée servent (les extensions de ``markdown``). ``polices`` : des fichiers ``.ttf``/``.otf``, sous
-    ``dossier_polices`` (ce qu'``application(polices=…)`` charge). ``exclure`` : des débuts de noms dans le zip
+    ``dossier_polices`` (ce qu'``application(polices=…)`` charge). ``pyc`` : chaque ``.py`` accompagné de son
+    ``__pycache__/<nom>.cpython-3XX.pyc``, compilé par CET interpréteur, que Pyodide n'a plus à compiler à l'import
+    (mesures : notes/2026-09-30 - PySide6 en WebAssembly.md, « Démarrage »). Sans contrôle de la source
+    (UNCHECKED_HASH : le dépaquetage change les dates) ; un autre Python que celui du navigateur ne les lit pas et
+    compile la source, gardée pour cela et pour les traces d'erreur. ``exclure`` : des débuts de noms dans le zip
     laissés dehors, ``qtpy6/web/js/pdfjs/`` typiquement (1,7 Mo, servis à côté de ``qtpy6web.js``, d'où
     ``qtpy6.web.pdf`` les charge à la première ouverture d'un PDF). Rend la taille en octets."""
     archive = Path(archive)
-    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as z:
+    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as z, tempfile.TemporaryDirectory() as tmp:
         def ecrire(chemin, nom):
-            if not nom.startswith(tuple(exclure)):
-                z.write(chemin, nom)
+            if nom.startswith(tuple(exclure)):
+                return
+            z.write(chemin, nom)
+            if pyc and nom.endswith(".py"):
+                nom = Path(nom)
+                cible = nom.parent / "__pycache__" / f"{nom.stem}.{sys.implementation.cache_tag}.pyc"
+                py_compile.compile(chemin, f"{tmp}/c.pyc", str(nom), doraise=True,
+                                   invalidation_mode=py_compile.PycInvalidationMode.UNCHECKED_HASH)
+                z.write(f"{tmp}/c.pyc", cible.as_posix())
 
         for nom, chemin in dict(fichiers).items():
             ecrire(chemin, nom)

@@ -1,0 +1,18 @@
+# qtpy6 : un sous-type que le build a laissé de côté (QThread, QThreadPool… sans QT_CONFIG(thread)) reste inscrit dans le
+# graphe d'héritage. identifyType le crée pour chaque QObject converti en Python : la création échoue, l'erreur restait posée
+# (« returned a result with an exception set » à l'appel suivant) et PepType_SOTP(nullptr) était lu. Ignoré désormais.
+diff --git a/sources/shiboken6/libshiboken/bindingmanager.cpp b/sources/shiboken6/libshiboken/bindingmanager.cpp
+index 32eb697..39aff9e 100644
+--- a/sources/shiboken6/libshiboken/bindingmanager.cpp
++++ b/sources/shiboken6/libshiboken/bindingmanager.cpp
+@@ -119,6 +119,10 @@ Graph::TypeCptrPair Graph::identifyType(void *cptr,
+             type = Shiboken::Module::get(*typeNode.initStruct);
+         else
+             type = typeNode.initStruct->type;
++        if (type == nullptr) {  // a type the build left out (QThread without QT_CONFIG(thread)): not this one
++            PyErr_Clear();
++            return {nullptr, nullptr};
++        }
+     }
+ 
+     auto *sotp = PepType_SOTP(type);

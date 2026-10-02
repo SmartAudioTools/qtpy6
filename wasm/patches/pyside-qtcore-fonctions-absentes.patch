@@ -1,0 +1,37 @@
+--- a/sources/pyside6/PySide6/QtCore/CMakeLists.txt
++++ b/sources/pyside6/PySide6/QtCore/CMakeLists.txt
+@@ -162,7 +162,6 @@
+ ${QtCore_GEN_DIR}/qstringencoder_wrapper.cpp
+ ${QtCore_GEN_DIR}/qstringlistmodel_wrapper.cpp
+ ${QtCore_GEN_DIR}/qsysinfo_wrapper.cpp
+-${QtCore_GEN_DIR}/qsystemsemaphore_wrapper.cpp
+ ${QtCore_GEN_DIR}/qt_wrapper.cpp
+ ${QtCore_GEN_DIR}/qtcorehelper_qdirlistingiterator_wrapper.cpp
+ ${QtCore_GEN_DIR}/qtcorehelper_qgenericargumentholder_wrapper.cpp
+@@ -180,7 +179,6 @@
+ ${QtCore_GEN_DIR}/qtimeline_wrapper.cpp
+ ${QtCore_GEN_DIR}/qtimer_wrapper.cpp
+ ${QtCore_GEN_DIR}/qtimerevent_wrapper.cpp
+-${QtCore_GEN_DIR}/qtimezone_offsetdata_wrapper.cpp
+ ${QtCore_GEN_DIR}/qtimezone_wrapper.cpp
+ ${QtCore_GEN_DIR}/qtranslator_wrapper.cpp
+ ${QtCore_GEN_DIR}/qtransposeproxymodel_wrapper.cpp
+@@ -225,6 +223,18 @@
+          ${QtCore_GEN_DIR}/qpermission_wrapper.cpp)
+ endif()
+ 
++# Qt pour WebAssembly : ni sémaphores système ni fuseaux horaires (QTimeZone n'y garde que l'UTC et les décalages)
++if("systemsemaphore" IN_LIST QtCore_disabled_features)
++    list(APPEND QtCore_DROPPED_ENTRIES QSystemSemaphore)
++    message(STATUS "Qt${QT_MAJOR_VERSION}Core: Dropping QSystemSemaphore")
++else()
++    list(APPEND QtCore_SRC ${QtCore_GEN_DIR}/qsystemsemaphore_wrapper.cpp)
++endif()
++
++if(NOT "timezone" IN_LIST QtCore_disabled_features)
++    list(APPEND QtCore_SRC ${QtCore_GEN_DIR}/qtimezone_offsetdata_wrapper.cpp)
++endif()
++
+ if("sharedmemory" IN_LIST QtCore_disabled_features)
+     list(APPEND QtCore_DROPPED_ENTRIES QSharedMemory)
+     message(STATUS "Qt${QT_MAJOR_VERSION}Core: Dropping QSharedMemory")

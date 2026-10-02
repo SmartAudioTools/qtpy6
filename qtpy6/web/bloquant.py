@@ -304,11 +304,11 @@ def doubler_qtcore(ns):
 
     ns["QTimer"].singleShot = staticmethod(un_coup_)
 
-    # Pas de fils dans le navigateur : un objet reste où il est.
-    if not hasattr(QObject, "moveToThread"):
-        QObject.moveToThread = lambda self, thread: None
-    if not hasattr(QObject, "thread"):
-        QObject.thread = lambda self: ns["QThread"].currentThread()
+    # Pas de fils dans le navigateur : un objet reste où il est. Remplacées même si la liaison les a : PyQt6-WASM n'a ni l'une
+    # ni l'autre, PySide6-WASM les a mais sans le type QThread (Qt sans fils), si bien que thread() échoue en laissant son
+    # erreur posée (« returned a result with an exception set » à l'appel suivant) et que moveToThread refuse notre QThread.
+    QObject.moveToThread = lambda self, thread: None
+    QObject.thread = lambda self: ns["QThread"].currentThread()
 
     # QEventLoop.exec : suspendre jusqu'à quit()/exit().
     def boucle_exec(self, flags=None):
