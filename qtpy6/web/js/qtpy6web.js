@@ -128,14 +128,10 @@ export async function preparer(conteneur, { indexURL, archives = [], roues = [],
   // allers-retours de plus, et chaque roue le démarrage entier de Pyodide. Pyodide et loadPackage les reçoivent ensuite.
   ["pyodide.asm.wasm", "python_stdlib.zip"].forEach(n => prelancer(indexURL + n));
   roues.forEach(r => prelancer(r));
-  const attendu = fetch(new URL("../versions.json", import.meta.url)).then(r => r.ok ? r.json() : null).catch(() => null);
   const zips = archives.map(a => telecharger(a.url));  // en parallèle du chargement de Pyodide
   const { loadPyodide } = await import(indexURL + "pyodide.mjs");
   const [py, ...donnees] = await Promise.all([loadPyodide({ indexURL, stdout: print, stderr: print }), ...zips]);
   print(`Pyodide-Qt ${py.version} chargé${donnees.length ? " ; archives " + donnees.map(d => (d.byteLength / 1024) | 0).join(", ") + " Kio" : ""}`);
-  const versions = await attendu;
-  if (versions && versions.pyodide_qt.version !== py.version)
-    print(`attention : Pyodide-Qt ${py.version} là où qtpy6.web attend ${versions.pyodide_qt.version} (roues ${versions.pyodide_qt.abi})`);
   archives.forEach((a, i) => py.unpackArchive(donnees[i], "zip", { extractDir: a.dossier }));
   progres(0.93);
   // loadPackage, et non unpackArchive, pour une roue : il précharge ses .so de façon asynchrone
@@ -152,6 +148,14 @@ export async function preparer(conteneur, { indexURL, archives = [], roues = [],
   py.runPython(`import json, os, sys
 os.environ.update(json.loads(${JSON.stringify(JSON.stringify(env))}))
 sys.path[:0] = json.loads(${JSON.stringify(JSON.stringify(archives.map(a => a.dossier)))})`);
+  // La version attendue : versions.json de qtpy6.web, lu dans l'archive (find_spec n'importe rien). Un fetch relatif au
+  // chargeur ne la trouvait qu'en développement (js/ sous qtpy6/web/) : publié, qtpy6web.js est à la racine du site, 404.
+  const attendue = py.runPython(`import importlib.util, pathlib
+s = importlib.util.find_spec("qtpy6")
+f = s and pathlib.Path(s.submodule_search_locations[0], "web", "versions.json")
+f.read_text() if f and f.exists() else "null"`), versions = JSON.parse(attendue);
+  if (versions && versions.pyodide_qt.version !== py.version)
+    print(`attention : Pyodide-Qt ${py.version} là où qtpy6.web attend ${versions.pyodide_qt.version} (roues ${versions.pyodide_qt.abi})`);
   progres(1);
   return py;
 }
