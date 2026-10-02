@@ -45,6 +45,10 @@
   dès l'affichage, au repos (le filtre d'application posé le temps d'un Paint seulement) : sinon les deux premières
   images de la première descente montaient à 30-80 ms.
   En natif, une QScrollArea ordinaire.
+- `qtpy6.peinture.en_image(peintre, rect, cle, dessiner)` : un dessin coûteux (`QSvgRenderer.render`, réduction
+  d'image) peint une fois dans une `QImage` à la taille des pixels, avec le même décalage sous le pixel, puis posé tel
+  quel aux peintures suivantes ; moteur raster seulement (un `QPdfWriter` garde les vecteurs), plafond de 48 Mo.
+  Figures SVG du lecteur QCM (repeint complet) : 30-48 → 15-18 ms en natif, 47-50 → 23-29 ms dans le navigateur à ×2.
 - Dans le navigateur, `deleteLater` détruit enfin : la pompe (`qtpy6.web.bloquant`) n'appelait
   que `processEvents`, qui ne traite jamais `DeferredDelete` hors d'une boucle `exec()`. Un widget
   ainsi « détruit » restait à l'écran et, son objet Python libéré, se peignait en widget natif.
