@@ -30,7 +30,10 @@
 - `qtpy6.web.defilement.ZoneDefilante` : une QScrollArea qui, dans le navigateur, défile comme en natif. Qt-WASM n'a
   pas de défilement de surface et repeint tout le viewport à chaque pas (12 ms par image à l'échelle 2 sur le lecteur
   QCM, pour 16,7 d'écran) ; ici le contenu est déplacé sans rien salir, les lignes de l'image du backing store sont
-  décalées à l'`UpdateRequest`, et seule la bande qui entre est peinte : 2 ms par image, à l'identique au pixel près.
+  décalées à l'`UpdateRequest` (celle du widget de fenêtre, la seule que Qt-WASM envoie quand un widget est sali), et
+  seule la bande qui entre est peinte (par le contenu et chacun de ses descendants qu'elle touche : Qt n'y propage pas
+  la région à ses enfants opaques, un en-tête de tableau restait vide), puis le viewport décalé est envoyé au
+  canevas (`backingStore().flush` : Qt-WASM n'envoie que ce qu'il peint) : 2 ms par image, à l'identique au pixel près.
   Un seul relais par fenêtre voit passer les événements, et ne visite que les zones en cours de décalage. Il remplace
   un filtre d'application par zone, soit un appel Python par événement et par page. Le décalage des lignes se fait en
   JavaScript (`copyWithin` sur une vue de l'image) : 0,4 ms par image au lieu de 1,2 en Python.

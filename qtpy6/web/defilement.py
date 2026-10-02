@@ -10,21 +10,23 @@ Ici, le geste du natif, fait à la main : le contenu est déplacé sans que Qt n
 contenu le temps du déplacement), la bande qui entre est demandée au contenu, et à l'``UpdateRequest`` qui précède la
 peinture de l'image, les lignes de l'image de Qt (celle du backing store) qui couvrent le viewport sont décalées ligne à
 ligne, sur la largeur du viewport seulement (rien d'autre ne bouge, ni la barre de défilement, ni ce qui borde la zone).
-Qt peint alors la bande, puis recopie dans l'image qu'il montre (un ``ImageData``, envoyé entier au canevas à chaque
-image) le rectangle ENGLOBANT de tout ce qui a été peint depuis l'image précédente : la bande d'un côté et un pixel de
-l'autre coin du viewport, demandé exprès, font que c'est le viewport entier, désormais juste, qui est recopié (mesuré
-sur Qt 6.10.2, échelles 1 et 2 : bande + barre de défilement donnent une seule recopie, le viewport ; la bande seule,
-elle seule). L'image de Qt n'est atteignable que pendant un Paint (le ``paintDevice()`` du moteur de peinture d'un
-widget) : elle est relevée une fois, au premier Paint qui suit une ``UpdateRequest`` de la fenêtre (le Paint d'un
-``render()`` ou d'un ``grab()`` peindrait ailleurs, dans un QPixmap), et gardée, l'objet C++ vivant autant que le
-backing store (lâchée si la fenêtre se cache ou change de fenêtre native, et vérifiée à sa taille avant chaque usage).
+Qt peint alors la bande, mais ne recopie vers le canevas que ce qu'il a peint : le viewport décalé lui est donc envoyé
+explicitement (``backingStore().flush``). Sans cet envoi, la bande seule arrivait à l'écran et le reste du viewport y
+restait à l'ancienne position (mesuré le 02/10/2026 sur le bac à l'échelle 2 : jusqu'à 1,2 million de pixels faux
+pendant une animation, vu aussi par l'utilisateur sur son écran) ; l'ancien moyen, un pixel du coin opposé demandé pour
+que l'englobant recopié soit le viewport entier, ne suffit pas sur le chemin de la pompe d'animation.
+L'image de Qt n'est atteignable que pendant un Paint (le ``paintDevice()`` du moteur de peinture d'un widget) : elle
+est relevée une fois, au premier Paint qui suit une ``UpdateRequest`` de la fenêtre (le Paint d'un ``render()`` ou
+d'un ``grab()`` peindrait ailleurs, dans un QPixmap), et gardée, l'objet C++ vivant autant que le backing store (lâchée
+si la fenêtre se cache ou change de fenêtre native, et vérifiée à sa taille avant chaque usage).
 
 *Mesuré, et à savoir : ``QWasmBackingStore::beginPaint`` EFFACE (transparent) la région à peindre avant que les widgets
 ne peignent, et c'est pourquoi le décalage se fait à l'``UpdateRequest`` et non au Paint : fait au Paint, il recopiait
 la bande déjà effacée seize lignes plus haut, une raie blanche à chaque pas. ``viewport().update(rect)`` ne repeint
 RIEN quand le contenu opaque couvre le viewport (Qt retranche les enfants opaques de la région à peindre et ne la
-propage pas à l'enfant), ``window().update(rect)`` pas davantage : la bande se demande au widget de contenu lui-même, et
-la zone découverte, s'il y en a une, au viewport. Écartés, mesurés avant : décaler le canevas lui-même par ``drawImage``
+propage pas à l'enfant), ``window().update(rect)`` pas davantage : la bande se demande au viewport ET à chacun de ses
+descendants qu'elle touche (``_salir`` : le contenu retranche à son tour ses propres enfants opaques, l'en-tête d'un
+QTableWidget, qui restait vide sur l'écran réel). Écartés, mesurés avant : décaler le canevas lui-même par ``drawImage``
 (Qt-WASM l'écrase entier à chaque image) ; décaler l'``ImageData`` attrapé au passage de ``putImageData`` (juste tant
 que Qt n'y recopie que la bande, mais dès que la barre de défilement est peinte dans la même image, Qt recopie le
 viewport entier depuis son image, restée ancienne : un patchwork).*
@@ -35,7 +37,7 @@ pas vertical plus petit que le viewport, à une échelle entière (à 1,25 ou 1,
 et une fois l'image de Qt relevée ; sinon, et en natif, une QScrollArea ordinaire."""
 
 from qtpy6.QtCore import QEvent, QObject, QPoint, QRect, Qt
-from qtpy6.QtGui import QImage, QPainter
+from qtpy6.QtGui import QImage, QPainter, QRegion
 from qtpy6.QtWidgets import QApplication, QScrollArea, QWidget
 
 from . import navigateur
@@ -65,23 +67,16 @@ class ZoneDefilante(QScrollArea):
         self._poser(self._dy + dy)  # un pas avant que le précédent ne soit peint : les deux se cumulent, bande comprise
         if abs(self._dy) >= vue.height():
             self._poser(0)
-            self._repeindre(vue.rect())
+            _salir(vue, vue.rect())
             return
         bande = abs(self._dy)
-        self._repeindre(QRect(0, 0 if self._dy > 0 else vue.height() - bande, vue.width(), bande))
-        coin = QPoint(vue.width() - 1, vue.height() - 1) if self._dy > 0 else QPoint(0, 0)
-        self._repeindre(QRect(coin, coin))  # l'englobant de ce qui est peint = le viewport entier, recopié d'un bloc
+        _salir(vue, QRect(0, 0 if self._dy > 0 else vue.height() - bande, vue.width(), bande))
 
     def _poser(self, dy):
         """``_dy``, et la zone inscrite au relais tant qu'il est non nul : seules celles-là y sont visitées."""
         self._dy = dy
         if _Relais.seul is not None:
             (_Relais.seul.decalees.add if dy else _Relais.seul.decalees.discard)(self)
-
-    def _repeindre(self, rect):
-        """``rect`` du viewport : au contenu (seul à peindre ce qu'il couvre) et au viewport (le reste, découvert)."""
-        self.widget().update(rect.translated(-self.widget().pos()))
-        self.viewport().update(rect)
 
     def _decaler_image(self, image):
         """Avant que Qt ne peigne : les lignes du viewport décalées dans ``image``, ou tout repeint si elle manque."""
@@ -90,15 +85,31 @@ class ZoneDefilante(QScrollArea):
         vue = self.viewport()
         r = int(vue.devicePixelRatioF())
         if image is None or image.size() != vue.window().size() * r:
-            self.widget().update()
+            _salir(vue, vue.rect())
             return
         p = vue.mapTo(vue.window(), QPoint(0, 0))
         decaler_lignes(image, p.x() * r, p.y() * r, vue.width() * r, vue.height() * r, dy * r)
+        # Qt-WASM n'envoie au canevas que ce qu'il peint : les lignes décalées hors de la bande, il faut les lui envoyer
+        vue.window().backingStore().flush(QRegion(QRect(p, vue.size())), vue.window().windowHandle())
+
+
+def _salir(widget, rect):
+    """``rect`` à repeindre dans ``widget`` ET dans chaque descendant qu'il touche. Qt retire de la région d'un widget
+    ses enfants opaques (``autoFillBackground`` : l'en-tête d'un QTableWidget) sans la leur transmettre, ce qui suppose
+    leurs pixels intacts ; ici ils ont été décalés ou effacés, et l'en-tête restait vide (vu sur l'écran réel le
+    02/10/2026 sur le bac, 115 000 pixels contre ``grab()``). Seuls les enfants que touche la bande sont visités."""
+    widget.update(rect)
+    for enfant in widget.children():
+        if isinstance(enfant, QWidget) and not enfant.isWindow() and enfant.isVisible():
+            zone = rect.intersected(enfant.geometry())
+            if not zone.isEmpty():
+                _salir(enfant, zone.translated(-enfant.pos()))
 
 
 class _Relais(QObject):
-    """Le filtre d'application UNIQUE des zones. L'UpdateRequest va à la QWindow et les Paint à chaque widget, d'où un
-    filtre sur toute l'application (en natif, il ralentissait tout : test_aide 39 s → > 5 min, d'où le navigateur seul).
+    """Le filtre d'application UNIQUE des zones. L'UpdateRequest va au widget de fenêtre (ou à sa QWindow, selon le
+    chemin qui a demandé l'image) et les Paint à chaque widget, d'où un filtre sur toute l'application (en natif, il
+    ralentissait tout : test_aide 39 s → > 5 min, d'où le navigateur seul).
     Un seul pour toutes les zones, et non un par zone : le lecteur de SmartTeacher en a une par page (218 pour un TP), et
     chaque événement traversait alors 218 filtres Python (128 600 appels pour vingt redimensionnements, mesuré le
     02/10/2026). L'image du backing store est gardée par fenêtre, puisqu'elle est la même pour toutes ses zones, et seules
@@ -120,10 +131,15 @@ class _Relais(QObject):
     def eventFilter(self, objet, evenement):
         t = evenement.type()
         if t == QEvent.Type.UpdateRequest:
-            if objet.isWindowType():  # la QWindow seule : à celui du widget de fenêtre, 338 pixels faux (mesuré)
-                image = self.images.get(objet)
-                self.attend = objet if image is None else None
-                for zone in [z for z in self.decalees if z.window().windowHandle() is objet]:
+            # celle du widget de fenêtre est la seule que Qt-WASM 6.10 envoie quand un widget est sali (QWidget.update) :
+            # ne prendre que celle de la QWindow laissait chaque pas sans décalage, puis tout repeint au Paint (mesuré le
+            # 02/10/2026 sur la figure du bac à l'échelle 2 : 18 à 20 ms par image au lieu de 16,7, fil occupé à 93 %)
+            fenetre = objet if objet.isWindowType() else \
+                objet.windowHandle() if isinstance(objet, QWidget) and objet.isWindow() else None
+            if fenetre is not None:
+                image = self.images.get(fenetre)
+                self.attend = fenetre if image is None else None
+                for zone in [z for z in self.decalees if z.window().windowHandle() is fenetre]:
                     zone._decaler_image(image)
         elif t == QEvent.Type.Paint:
             if self.attend is not None:
