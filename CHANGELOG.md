@@ -18,6 +18,13 @@
   défile autant qu'en natif (`qtpy6web.js`, `molette`) ; `preparer` reçoit `progres` et `tailles`, l'avancement
   du chargement de 0 à 1 ; `tactile.activer_au_doigt` active le tactile au premier doigt posé quand le navigateur
   ne dit rien de son écran (Firefox sous Linux), et `tactile.detecte` lit aussi `navigator.maxTouchPoints`.
+- `qtpy6.web.sonde --visible` : une vraie fenêtre sur l'écran, avec la synchronisation verticale du compositeur,
+  pour mesurer la fluidité (hors écran, Firefox cadence ses images seul).
+- `qtpy6.web.defilement.ZoneDefilante` : une QScrollArea qui, dans le navigateur, défile comme en natif. Qt-WASM n'a
+  pas de défilement de surface et repeint tout le viewport à chaque pas (12 ms par image à l'échelle 2 sur le lecteur
+  QCM, pour 16,7 d'écran) ; ici le contenu est déplacé sans rien salir, les lignes de l'image du backing store sont
+  décalées à l'`UpdateRequest`, et seule la bande qui entre est peinte : 2 ms par image, à l'identique au pixel près.
+  En natif, une QScrollArea ordinaire.
 - Dans le navigateur, `deleteLater` détruit enfin : la pompe (`qtpy6.web.bloquant`) n'appelait
   que `processEvents`, qui ne traite jamais `DeferredDelete` hors d'une boucle `exec()`. Un widget
   ainsi « détruit » restait à l'écran et, son objet Python libéré, se peignait en widget natif.

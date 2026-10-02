@@ -4,13 +4,15 @@ l'écran, puis écrit chaque image de ``window.captures`` (``{suffixe: png_en_ba
 Qt, par exemple) en ``<capture>_<suffixe>.png``. Le code de retour dit si l'état attendu a été atteint.
 
     python -m qtpy6.web.sonde page.html?param=x capture.png [--racine DIR] [--delai 120] [--etat fini]
-                             [--taille 1000x900] [--zoom 2] [--tactile]
+                             [--taille 1000x900] [--zoom 2] [--tactile] [--visible]
 
 ``page`` est relative à ``--racine`` (le dossier de la page par défaut), servie par http.server : une page ouverte en
 file:// n'a ni modules ni fetch. ``--taille`` : la fenêtre en pixels CSS (Firefox ne descend pas sous 500 de large : une
 largeur de téléphone se mesure en natif hors écran, ou avec ``--zoom``) ; ``--zoom`` : le zoom du navigateur ou l'écran
 HiDPI (``layout.css.devPixelsPerPx``, la capture en est multipliée) ; ``--tactile`` : un écran au doigt (le seul pointeur
-est « coarse », ce que ``tactile.detecte`` voit, et les événements touch sont activés). Firefox parce que Chromium
+est « coarse », ce que ``tactile.detecte`` voit, et les événements touch sont activés) ; ``--visible`` : une vraie fenêtre
+sur l'écran, avec son compositeur et sa synchronisation verticale, pour mesurer la fluidité (hors écran, Firefox cadence
+ses images seul). Firefox parce que Chromium
 n'ouvre pas sans socket Unix, ce qu'un bac à sable peut interdire."""
 
 import argparse
@@ -32,6 +34,7 @@ def main(argv=None):
     a.add_argument("--taille", default="1000x900")
     a.add_argument("--zoom")
     a.add_argument("--tactile", action="store_true")
+    a.add_argument("--visible", action="store_true", help="une vraie fenêtre sur l'écran, pas hors écran")
     o = a.parse_args(argv)
     from selenium import webdriver  # noqa: PLC0415 - la dépendance optionnelle [sonde]
 
@@ -51,7 +54,8 @@ def main(argv=None):
     threading.Thread(target=serveur.serve_forever, daemon=True).start()
 
     options = webdriver.FirefoxOptions()
-    options.add_argument("--headless")
+    if not o.visible:
+        options.add_argument("--headless")
     largeur, hauteur = o.taille.split("x")
     options.add_argument(f"--width={largeur}")
     options.add_argument(f"--height={hauteur}")

@@ -17,6 +17,7 @@ Le reste, qui n'a pas d'équivalent Qt, est dans ce paquet :
                                      le ramasse-miettes entre deux événements, jamais au milieu d'un appel de Qt
     tactile                          détecter un écran au doigt, grossir les cibles, faire défiler au doigt
     dispositions                     des dispositions qui se replient quand la place manque (Disposition, Rangee)
+    defilement                       ZoneDefilante : une QScrollArea qui, dans le navigateur, ne repeint que la bande qui entre
     travailleur                      le Web Worker Pyodide piloté depuis Qt (Travailleur, ProcessusWeb, configurer)
     lancer(script, args, pret)       exécute un script écrit pour le bureau, ``sys.exit(app.exec())`` compris
     lanceur                          un .py ou un .zip quelconque, dont il trouve le point d'entrée (la page du site)
