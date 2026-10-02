@@ -874,7 +874,7 @@ Vérifié dans Firefox sans interface (sonde, scénario `cours`, sujet SNT TP01 
 97 tests verts sous `QT_API=pyqt6` et `QT_API=pyside6`.
 Défaut trouvé au passage, non corrigé ici (fichier d'une autre session) : le scénario `cours` de
 `sonde_lecteur.html` teste `couche is not None`. Or `querySelector` rend `jsnull` sous Pyodide 0.29, donc il
-échoue avant l'affichage. Le test a été fait sur une copie corrigée (`if couche`), puis supprimée.
+échoue avant l'affichage. Le test a été fait sur une copie corrigée (`if couche`), puis supprimée. Corrigé le 02/10/2026 (SmartTeacher rév. 268).
 
 ## Documentation passée à PySide6 (02/10/2026, 9 h 30)
 
@@ -891,3 +891,26 @@ Demande : « tu fais les 3 » (la documentation qui parlait encore de PyQt6 en �
 - Vérifié par lecture : chaque affirmation nouvelle a sa source (`telecharger.sh` l. 5-23, la notice de licence l. 23-29
   sur le moyen de re-lier, `wasm/README.md` présent). Les hunks d'une autre session dans ces deux fichiers (`--roue`,
   `stockage.monter`, `QPropertyAnimation`) ne sont pas les miens et ne sont pas commités avec.
+
+## Chargement paresseux : le gain mesuré sur le lecteur QCM (02/10/2026, 10 h 15)
+
+Demande : « oui » (mesurer le gain des voies A+B sur le lecteur de SmartTeacher, point ouvert plus haut).
+
+**Banc.** Copie jetable de `SmartTeacher/QCM/web/pyqt6` sous `$TMPDIR/qcmbanc`, `pyodide-qt` lié au build PySide6
+de `exemple/` (la copie locale de SmartTeacher est encore l'ancien Pyodide-Qt PyQt6). Deux archives : `lecteur.zip`
+tel que construit (paresseux) et la même avec `LAZY = False` dans `qtpy6/_binding.py` et son `.pyc` retiré
+(impatient, le seul changement). Sonde `sonde_lecteur.html`, Firefox sans interface, trois tours alternés, charge 4,5 à 5,7.
+
+| | paresseux | impatient |
+|---|---|---|
+| import du lecteur, `essais_types` | 0,39 / 0,42 / 0,43 s | 0,52 / 0,56 / 0,49 s |
+| import du lecteur, bac NSI | 0,40 / 0,41 / 0,40 s | 0,54 / 0,51 / 0,50 s |
+| ouverture du `.qcm`, bac NSI | 3,76 / 3,72 / 3,52 s | 3,78 / 3,57 / 3,44 s |
+| tas wasm | 50 / 104 Mio | 50 / 104 Mio |
+
+- **Gain : ≈ 110 ms à l'import du lecteur** (0,41 s contre 0,52 s en moyenne), moins que les 130–250 ms estimés sur
+  node : le lecteur nomme 112 classes, lourdes, et celles qu'il ne nomme pas restent le gros du gain.
+- **Le coût n'est pas reporté sur l'ouverture** (classes créées à la première utilisation) : les écarts sont dans le
+  bruit, sans sens constant. Mémoire identique.
+- Au passage : le même lecteur sous l'ancien Pyodide-Qt PyQt6 (copie locale de SmartTeacher) s'importe en 0,79 s.
+Niveau de preuve : mesuré, trois essais par case, machine chargée ; captures non relues (état « fini » partout).
