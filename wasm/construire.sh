@@ -191,6 +191,8 @@ phase_pyodide() {
   # npm ci a été fait par telecharger_sources.sh (réseau) : on marque l'installation que make rejouerait sinon.
   [ -e "$PYODIDE/node_modules/.installed" ] || { ln -sfn src/js/node_modules/ "$PYODIDE/node_modules"
     touch "$PYODIDE/node_modules/.installed"; }
+  # make ne connaît pas les archives de Qt et de PySide : sans cela, une phase pyside rejouée ne serait pas reliée.
+  rm -f "$PYODIDE/dist/pyodide.asm.js"
   make -C "$PYODIDE" all-but-packages
   # Un pyodide-lock.json vide : PySide6 est intégré, il n'y a aucun paquet à charger.
   [ -f "$PYODIDE/dist/pyodide-lock.json" ] || "$HOTEPY" -c 'import json, sys

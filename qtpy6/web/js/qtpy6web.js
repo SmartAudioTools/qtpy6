@@ -64,7 +64,8 @@ async function en_brotli(fetch_origine, adresse) {
 }
 
 // Les octets reçus pendant `preparer` : chaque réponse de fetch lue en double (clone), son nom (dernier segment de l'adresse)
-// pesé par `tailles` ; et ceux de `brotli` demandés par en_brotli. Rend la fonction qui remet le fetch d'origine.
+// pesé par `tailles` ; et ceux de `brotli` demandés par en_brotli. Rend `prelancer(url)`, qui commence un téléchargement
+// tout de suite et le garde pour la première demande de la même adresse, et `retablir()`, qui remet le fetch d'origine.
 function compter(tailles, brotli, signaler) {
   const fetch_origine = window.fetch;
   const fichiers = Object.fromEntries(Object.entries(tailles).map(([nom, total]) => [nom, { recu: 0, total }]));
@@ -74,7 +75,7 @@ function compter(tailles, brotli, signaler) {
     haut = Math.max(haut, f.reduce((s, x) => s + Math.min(x.recu, x.total), 0) / Math.max(1, f.reduce((s, x) => s + x.total, 0)));
     signaler(haut);
   };
-  window.fetch = async (...args) => {
+  const obtenir = async (...args) => {
     const adresse = new URL(String(args[0]?.url ?? args[0]), location.href), nom = adresse.pathname.split("/").pop();
     const reponse = brotli.includes(nom) && await en_brotli(fetch_origine, adresse) || await fetch_origine(...args);
     if (!reponse.ok || !reponse.body) return reponse;
@@ -86,7 +87,16 @@ function compter(tailles, brotli, signaler) {
     })().catch(() => {});
     return reponse;
   };
-  return () => { window.fetch = fetch_origine; };
+  const prelances = new Map();
+  window.fetch = (...args) => {
+    const adresse = new URL(String(args[0]?.url ?? args[0]), location.href).href, reponse = prelances.get(adresse);
+    prelances.delete(adresse);  // une seule fois : le corps d'une réponse ne se lit qu'une fois
+    return reponse || obtenir(...args);
+  };
+  return {
+    prelancer: url => { const p = obtenir(url); p.catch(() => {}); prelances.set(new URL(url, location.href).href, p); },
+    retablir: () => { window.fetch = fetch_origine; },
+  };
 }
 
 // La molette à la mesure du bureau. Qt-WASM fait d'un pixel du navigateur un angleDelta de 1 et d'une ligne 12 ; or un
@@ -111,9 +121,13 @@ function molette(conteneur) {
 export async function preparer(conteneur, { indexURL, archives = [], roues = [], env = {}, sur_ligne, progres = () => {},
                                             tailles = {}, brotli = [] } = {}) {
   if (sur_ligne) ecouter = sur_ligne;
-  const retablir = compter(tailles, ["pyodide.asm.wasm", "python_stdlib.zip", ...brotli], f => progres(0.9 * f));
+  const { prelancer, retablir } = compter(tailles, ["pyodide.asm.wasm", "python_stdlib.zip", ...brotli], f => progres(0.9 * f));
   window.journal = journal;
   indexURL = new URL(indexURL.endsWith("/") ? indexURL : indexURL + "/", location.href).href;
+  // Les gros fichiers demandés dès maintenant : sinon le moteur attendait pyodide.mjs puis pyodide.asm.js (1,2 Mo), deux
+  // allers-retours de plus, et chaque roue le démarrage entier de Pyodide. Pyodide et loadPackage les reçoivent ensuite.
+  ["pyodide.asm.wasm", "python_stdlib.zip"].forEach(n => prelancer(indexURL + n));
+  roues.forEach(r => prelancer(r));
   const attendu = fetch(new URL("../versions.json", import.meta.url)).then(r => r.ok ? r.json() : null).catch(() => null);
   const zips = archives.map(a => telecharger(a.url));  // en parallèle du chargement de Pyodide
   const { loadPyodide } = await import(indexURL + "pyodide.mjs");
@@ -122,7 +136,6 @@ export async function preparer(conteneur, { indexURL, archives = [], roues = [],
   const versions = await attendu;
   if (versions && versions.pyodide_qt.version !== py.version)
     print(`attention : Pyodide-Qt ${py.version} là où qtpy6.web attend ${versions.pyodide_qt.version} (roues ${versions.pyodide_qt.abi})`);
-  retablir();
   archives.forEach((a, i) => py.unpackArchive(donnees[i], "zip", { extractDir: a.dossier }));
   progres(0.93);
   // loadPackage, et non unpackArchive, pour une roue : il précharge ses .so de façon asynchrone
@@ -130,6 +143,7 @@ export async function preparer(conteneur, { indexURL, archives = [], roues = [],
     if (!roue.endsWith(".whl")) throw new Error(`roue ${roue} : l'adresse doit finir par .whl (pas de requête), Pyodide y lit le nom du paquet`);
     await py.loadPackage(new URL(roue, location.href).href);
   }
+  retablir();
   progres(0.97);
   py._module.qtContainerElements = [conteneur];  // l'API privée de Qt-WASM, isolée ici : l'élément qui sert d'écran à Qt
   molette(conteneur);
