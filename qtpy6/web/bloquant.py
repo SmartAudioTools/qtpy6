@@ -16,6 +16,7 @@ avertissement. Les doublures sont posées par ``QtCore``, ``QtGui`` et ``QtWidge
 classes de la liaison elle-même (``PyQt6.QtWidgets.QDialog.exec`` compris), PyQt6 ou PySide6 : rien ici ne dépend de
 l'une ou de l'autre, hors les deux lignes de ``_mort``."""
 
+import functools
 import inspect
 import os
 import sys
@@ -170,6 +171,9 @@ def _mort():
 def _nb_arguments(slot):
     """Combien d'arguments positionnels ``slot`` accepte (None : autant qu'on veut). La liaison tronque ceux du signal à ce
     nombre ; le relais doit faire de même."""
+    if type(slot) is functools.partial and not slot.keywords:  # functools.partial(self.methode, x) : un relais par question
+        n = _nb_arguments(slot.func)  # d'un sujet, inspect.signature 0,12 ms chacun dans le navigateur (02/10/2026)
+        return None if n is None else max(0, n - len(slot.args))
     fonction = getattr(slot, "__func__", slot)
     if type(fonction) is types.FunctionType and not hasattr(fonction, "__wrapped__"):
         # lu sur le code : inspect.signature coûtait 0,4 s sur les 3 300 connexions de l'ouverture d'un sujet (02/10/2026)

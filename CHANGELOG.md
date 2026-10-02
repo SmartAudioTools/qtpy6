@@ -28,6 +28,8 @@
 - Dans le navigateur, le canevas de chaque fenêtre Qt est créé avec `willReadFrequently` (`qtpy6web.js`) : tenu en
   mémoire, il reçoit l'image de chaque peinture en 1,5 ms au lieu de 8,3 à 1800 px (Intel HD, mesuré par
   SmartTeacher) ; `?lecture=0` dans l'adresse rend le comportement d'origine.
+- Le `connect` enveloppé de `qtpy6.web` compte les arguments d'un `functools.partial` sur sa fonction, sans
+  `inspect.signature` : à l'ouverture d'un sujet du lecteur QCM (218 questions, 948 connexions), 15 ms au lieu de 64.
 - `qtpy6.web.sonde --visible` : une vraie fenêtre sur l'écran, avec la synchronisation verticale du compositeur,
   pour mesurer la fluidité (hors écran, Firefox cadence ses images seul).
 - `qtpy6.web.defilement.ZoneDefilante` : une QScrollArea qui, dans le navigateur, défile comme en natif. Qt-WASM n'a
