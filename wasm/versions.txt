@@ -2,7 +2,6 @@
 05eec38bb71bffff8860786e3c0766cc4b86affc72439bd246c54889bdcb7400  ./pyside-setup-everywhere-src-6.10.2.tar.xz
 aeb78d29291a2b5fd53cb55950f8f5065b4978c25fb1d77f627d695ab9adf21e  ./qtbase-everywhere-src-6.10.2.tar.xz
 f07ff80f38caf235187200345392ca7479445ddf49a36c3694cd52a735dad6e1  ./qtsvg-everywhere-src-6.10.2.tar.xz
-dc9fa150d730abfca8f42c52f94fbf6c03a8ce18d7c38902495ef73ba97bc821  ./emdawnwebgpu_pkg-v20260219.200501.zip
 b8d79530e3b7c96a5cb2d40d431ddb512af4a563e863728d8713039aa50203f9  pyodide/cpython/downloads/Python-3.13.2.tgz
 git 72e3c78d53a32a76e0aca7443ad24e5cae1042d3  pyodide
 git 0eb494ffb3536971da3309d98ac56f6515f985a4  pyodide/pyodide-build

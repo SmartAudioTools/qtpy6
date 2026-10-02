@@ -914,3 +914,28 @@ tel que construit (paresseux) et la même avec `LAZY = False` dans `qtpy6/_bindi
   bruit, sans sens constant. Mémoire identique.
 - Au passage : le même lecteur sous l'ancien Pyodide-Qt PyQt6 (copie locale de SmartTeacher) s'importe en 0,79 s.
 Niveau de preuve : mesuré, trois essais par case, machine chargée ; captures non relues (état « fini » partout).
+
+## `shibokensupport` en `.pyc` : essayé, abandonné (02/10/2026, 10 h 40)
+
+Point 3 du plan révisé, mené dans « tu avances un maximum en autonomie ».
+
+- **Premier essai :** un patch d'une ligne (`use_pyc_in_embedding TRUE` en croisé). Le build passe, mais `import shiboken6`
+  meurt (« source code string cannot contain null bytes », `init_phase_1`). La raison : la même ligne de CMake
+  définit aussi `SHIBOKEN_NO_EMBEDDING_PYC=1`, et `signature_globals.cpp` fait alors `compile()` du chargeur au lieu
+  de `marshal.loads`. Il faut les deux hunks.
+- **Second essai, avec les deux hunks :** le build marche. Mesure sous node, trois tours alternés sur le même `dist`
+  (seuls `pyodide.asm.{js,wasm}` et `python_stdlib.zip` changent) :
+  - `import shiboken6` : 102 à 111 ms avec le `.pyc`, contre 107 à 113 ms sans ;
+  - **gain ≈ 5 ms, dans le bruit**, pour +175 Ko de wasm.
+
+  Les 68 à 83 ms de `compile()` relevés plus haut ne venaient donc pas de l'archive embarquée. L'hypothèse la plus
+  probable, non vérifiée, est qu'ils viennent des modules `.py` de PySide6 et de shiboken6 rangés dans
+  `python_stdlib.zip`. Ceux-là sont déjà couverts par le point 1 : la bibliothèque standard en `.pyc` à l'hébergement.
+- **Décision :** patch retiré de `wasm/patches/` (copie dans `$TMPDIR`, perdue à la fin de session, sans regret). La
+  source `pyside-setup` a été remise à l'état d'origine (`git apply -R`), et le build publié restauré depuis la
+  sauvegarde `avant-pyc/`. Le sha256 de `pyodide-pyside6-0.29.3.0.zip` est à nouveau celui de `versions.json`
+  (`5e7d87c7…`, contrôlé).
+- **Alternative écartée :** garder le patch pour le principe. Elle est écartée parce que le patch ajoute une
+  divergence de recette sans gain mesurable.
+
+Niveau de preuve : mesuré (`perf_counter` sous node, 3 tours) ; restauration vérifiée par sha256.
