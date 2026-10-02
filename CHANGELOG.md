@@ -45,6 +45,12 @@
   dès l'affichage, au repos (le filtre d'application posé le temps d'un Paint seulement) : sinon les deux premières
   images de la première descente montaient à 30-80 ms.
   En natif, une QScrollArea ordinaire.
+- `qtpy6.paresse` : une longue page défilante paresseuse. `Paresse(zone, elements)` désactive la disposition des
+  éléments à plus d'une hauteur de vue (un redimensionnement ne remet en page que ceux de l'écran), bâtit un élément
+  né vide (`batie`, `batir()`) quand il entre dans la vue, et compense le défilement pour que l'écran ne bouge pas ;
+  `Chantier(parent, elements)` bâtit le reste en tâche de fond par tranches de 20 ms, en pause tant qu'une page
+  défile. Lecteur QCM de SmartTeacher : 20 redimensionnements 968 → 480 ms, ouverture 2,2 s plus courte dans le
+  navigateur, saut de la première descente 27-69 px → 8 px.
 - `qtpy6.peinture.en_image(peintre, rect, cle, dessiner)` : un dessin coûteux (`QSvgRenderer.render`, réduction
   d'image) peint une fois dans une `QImage` à la taille des pixels, avec le même décalage sous le pixel, puis posé tel
   quel aux peintures suivantes ; moteur raster seulement (un `QPdfWriter` garde les vecteurs), plafond de 48 Mo.
