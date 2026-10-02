@@ -20,6 +20,7 @@ try {
   const py = await preparer(qt, {
     indexURL: "./pyodide-qt/",                                       // Pyodide-Qt (à côté, ou un hôte avec CORS)
     archives: [{ url: "./app.zip", dossier: "/home/pyodide/app" }],  // qtpy6.web.assembler : le code et les polices
+    roues: [],                                                       // extensions compilées (.whl), à côté de la page
     sur_ligne: l => attente.textContent = l,
   });
   // Le script tel qu'on le lance sur un bureau (python app.py), ``sys.exit(app.exec())`` compris.

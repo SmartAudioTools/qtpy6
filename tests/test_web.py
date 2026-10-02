@@ -125,6 +125,19 @@ def test_assembler(tmp_path):
     assert not any("__pycache__" in n for n in noms)
 
 
+
+def test_construire_avec_une_roue(tmp_path):
+    from qtpy6.web.construire import construire
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app/app.py").write_text("x = 1\n")
+    roue = tmp_path / "ext-1.0-cp313-cp313-pyemscripten_2025_0_wasm32.whl"
+    roue.write_bytes(b"PK")
+    construire(tmp_path / "app/app.py", tmp_path / "site", roues=[roue])
+    page = (tmp_path / "site/index.html").read_text()
+    assert f'roues: ["./{roue.name}"],' in page and (tmp_path / "site" / roue.name).read_bytes() == b"PK"
+    construire(tmp_path / "app/app.py", tmp_path / "site2")
+    assert "roues: []," in (tmp_path / "site2/index.html").read_text()
+
 def test_stockage_hors_navigateur():
     with pytest.raises(ModuleNotFoundError):  # le module s'importe en natif ; ses fonctions, elles, veulent le navigateur
         stockage.lire("cle")
