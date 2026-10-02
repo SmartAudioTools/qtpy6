@@ -752,8 +752,8 @@ prend la liaison présente, et `qtpy6web.js` ne force plus rien. Restait **le mo
 - publier la release avec le zip ;
 - sans cela, l'action Pages (`telecharger.sh` sans argument) échouera sur l'adresse de la release. Pour garder
   PyQt6 en attendant, il suffit d'écrire `telecharger.sh pyqt6` dans `.github/workflows/pages.yml`.
-- `web.md`, en cours de modification par une autre session, décrit encore la licence GPL de Pyodide-Qt (§
-  hébergement et § Licence). Il est à mettre à jour après validation.
+- ~~`web.md`, en cours de modification par une autre session, décrit encore la licence GPL de Pyodide-Qt (§
+  hébergement et § Licence). Il est à mettre à jour après validation.~~ Fait le 02/10/2026 (dernière section).
 - Le zip embarque la licence du dépôt : la modifier impose de relancer `paquet`, puis de reporter la nouvelle
   empreinte dans `versions.json` (elle change à chaque construction, voir la section suivante).
 
@@ -769,7 +769,7 @@ brouillon y renvoyait par lien. Proposé : y joindre les textes, puis commiter t
 - `wasm/construire.sh paquet` relancé : nouveau zip, sha256 `d0619f4f…` reporté (remplacé depuis, voir plus bas) dans `versions.json`. Vérifié :
   `telecharger.sh pyside6 <zip local>` passe la vérification d'empreinte, et `exemple/pyodide-qt/LICENSE.txt` est
   identique au fichier du dépôt. Tests : 97 verts sous `QT_API=pyqt6` et `QT_API=pyside6`.
-- Reste ouvert : publier la release avec CE zip AVANT de pousser (sinon l'action Pages échoue) ; `web.md` (§ Licence).
+- Reste ouvert : publier la release avec CE zip AVANT de pousser (sinon l'action Pages échoue) ; ~~`web.md` (§ Licence)~~ (fait le 02/10/2026).
 
 ## Démarrage d'un QCM en ligne (point 4 de la liste)
 
@@ -875,3 +875,19 @@ Vérifié dans Firefox sans interface (sonde, scénario `cours`, sujet SNT TP01 
 Défaut trouvé au passage, non corrigé ici (fichier d'une autre session) : le scénario `cours` de
 `sonde_lecteur.html` teste `couche is not None`. Or `querySelector` rend `jsnull` sous Pyodide 0.29, donc il
 échoue avant l'affichage. Le test a été fait sur une copie corrigée (`if couche`), puis supprimée.
+
+## Documentation passée à PySide6 (02/10/2026, 9 h 30)
+
+Demande : « tu fais les 3 » (la documentation qui parlait encore de PyQt6 en était un).
+- `web.md` : intro (anglais et français), commentaire de l'exemple de page, Installation (le terme « Pyodide-Qt »
+  défini comme le Pyodide où Qt est lié, quelle que soit la liaison ; les deux builds, `pyodide_pyside6` par défaut en
+  LGPL v3, `pyodide_qt` en repli GPL v3), Hébergement (`telecharger.sh [pyside6|pyqt6]`, tailles PySide6 mesurées en
+  local : 41 Mo, `.wasm` 35 Mo, 11 en gzip -9 ; la construction du zip par `wasm/construire.sh paquet`), Licence.
+- `README.md` : la phrase d'introduction du navigateur et la ligne du niveau de preuve (testé sous les deux liaisons).
+- Choix : les autres « Pyodide-Qt » du texte sont gardés, désormais au sens générique défini une fois en Installation,
+  plutôt que renommés partout (une quinzaine d'occurrences, dont des mesures faites sous PyQt6 qui restent historiques :
+  « Pièges et mesures (… Pyodide-Qt 0.29.3) »). Écarté : un nouveau nom (« Pyodide-PySide6 ») partout, qui aurait
+  rendu fausses les mesures faites sous PyQt6.
+- Vérifié par lecture : chaque affirmation nouvelle a sa source (`telecharger.sh` l. 5-23, la notice de licence l. 23-29
+  sur le moyen de re-lier, `wasm/README.md` présent). Les hunks d'une autre session dans ces deux fichiers (`--roue`,
+  `stockage.monter`, `QPropertyAnimation`) ne sont pas les miens et ne sont pas commités avec.

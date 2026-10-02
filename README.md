@@ -120,7 +120,8 @@ Sous Windows, l'import rend aussi le processus « DPI aware ».
 
 ## Dans le navigateur
 
-Le même code tourne dans une page web, sous Pyodide-Qt (Qt 6 et PyQt6 en WebAssembly) :
+Le même code tourne dans une page web, sous un Pyodide où Qt 6 et PySide6 sont liés en WebAssembly (LGPL v3, recette
+`wasm/` ; PyQt6 en repli) :
 `python -m qtpy6.web.construire app.py site/` en fait un site statique, `sys.exit(app.exec())` compris. Ce que Qt-WASM
 n'a pas et qui a un nom Qt, qtpy6 le double sous ce nom, dans le navigateur seulement : les `exec()` et boîtes statiques
 (`QMessageBox.question`, `QFileDialog.getOpenFileName`…) attendent leur réponse, `QThread` et ses verrous deviennent des
@@ -151,8 +152,9 @@ l'application a chargée. Le reste (chargeur de la page, polices, tactile, stock
   des interpréteurs neufs et couvre, pour chaque binding installé, la sélection
   (environnement, fichier de session, binding déjà importé, valeur invalide,
   aucun binding), les réglages de police et d'échelle, `QtSelector` et sa démo.
-- **Le navigateur : testé en direct dans Firefox sans interface** (Pyodide-Qt 0.29.3, Qt 6.10.2,
-  PyQt6 seul) : une application de bureau construite telle quelle (`construire`) a enchaîné
+- **Le navigateur : testé en direct dans Firefox sans interface** (Pyodide 0.29.3, Qt 6.10.2,
+  sous PyQt6 puis sous PySide6, où le lecteur d'épreuves de SmartTeacher a aussi été ouvert, défilé et
+  animé) : une application de bureau construite telle quelle (`construire`) a enchaîné
   `QMessageBox.question`, `QInputDialog`, un `QMenu.exec`, un `QThread` attendu par `wait()`, l'ouverture et
   l'enregistrement d'un fichier, puis `quit()` jusqu'au code de sortie. `tests/test_web.py` (18 tests)
   rejoue en natif la mécanique de suspension, `greenlet` y tenant le rôle de JSPI : il prouve la

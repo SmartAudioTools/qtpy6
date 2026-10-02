@@ -1,10 +1,10 @@
 # qtpy6 dans le navigateur (`qtpy6.web`)
 
-*Run a qtpy6 application in the browser, unchanged, on
-[Pyodide-Qt](https://github.com/JarrettSJohnson/pyodide-with-pyqt6) — documentation in French below.*
+*Run a qtpy6 application in the browser, unchanged, on a Pyodide where Qt 6 and PySide6 are linked to WebAssembly
+(built by the `wasm/` recipe of this repository, LGPL v3) — documentation in French below.*
 
-Une application écrite avec **qtpy6** tourne **telle quelle dans le navigateur** : Qt 6 et PyQt6 compilés en WebAssembly
-(Pyodide-Qt) dessinent la fenêtre dans un élément de la page, le code Python de l'application n'est pas modifié.
+Une application écrite avec **qtpy6** tourne **telle quelle dans le navigateur** : Qt 6 et PySide6 compilés en WebAssembly
+dessinent la fenêtre dans un élément de la page, le code Python de l'application n'est pas modifié.
 
 **Ce que Qt-WASM n'a pas et qui a un nom Qt, qtpy6 le double lui-même**, sous ce nom, dans le navigateur seulement
 (`sys.platform == "emscripten"`) ; en natif, rien ne change :
@@ -41,7 +41,7 @@ python -m qtpy6.web.sonde --racine site site/index.html capture.png   # ou n'imp
 `construire` prend le dossier du script entier (sauf fichiers cachés et `__pycache__`), qtpy6, et ce qu'on ajoute
 (`--paquet`, `--distribution`, `--police`) ; la page (`js/gabarit.html`) lance le script comme `python mon_application.py`
 (`qtpy6.web.lancer` : `__main__`, `sys.argv`, dossier courant, `sys.exit` rattrapé) et le montre quand il entre dans
-`app.exec()`. Pyodide-Qt vient par défaut de l'hébergement de qtpy6 (`--pyodide ./pyodide-qt/` pour un dossier local).
+`app.exec()`. Pyodide-Qt (voir Installation) vient par défaut de l'hébergement de qtpy6 (`--pyodide ./pyodide-qt/` pour un dossier local).
 
 Une page à soi qui embarque l'application dans un élément garde la main sur le chargement :
 
@@ -50,7 +50,7 @@ Une page à soi qui embarque l'application dans un élément garde la main sur l
 <script type="module">
   import { preparer, lancer } from "./qtpy6web.js";   // qtpy6/web/js/, copié à côté de la page
   const py = await preparer(document.getElementById("qt"), {
-    indexURL: "./pyodide-qt/",                                        // Pyodide-Qt
+    indexURL: "./pyodide-qt/",                                        // Pyodide avec Qt et PySide6
     archives: [{ url: "./app.zip", dossier: "/home/pyodide/app" }],  // le code, qtpy6, les polices
   });
   lancer(py, "/home/pyodide/app/mon_application.py");  // ou py.pyimport(...) d'une fonction qui ne fait pas exec()
@@ -68,12 +68,19 @@ pip install qtpy6               # qtpy6.web en fait partie ; PyQt6 n'est PAS né
 pip install qtpy6[sonde]        # + selenium, pour la sonde (Firefox et geckodriver viennent du système)
 ```
 
-Python ≥ 3.10. Le paquet n'embarque **pas** Pyodide-Qt : la page le charge depuis l'URL `indexURL` (à côté d'elle, ou sur
-un hôte qui autorise CORS). La version épinglée est dans `qtpy6/web/versions.json` (Pyodide-Qt 0.29.3 : Qt 6.10.2, PyQt6
-6.10.2, Python 3.13 ; le Pyodide ordinaire du worker : 314.0.7, Python 3.14) ; `preparer` compare celle qu'il a chargée
-et écrit une ligne d'avertissement au journal si elles diffèrent. Pyodide-Qt est publié sous GPL v3 (celle de PyQt6) :
-toute page qui le sert distribue PyQt6, et le code de l'application servi avec doit en tenir compte. qtpy6 est MIT
-et ne contient aucun binaire.
+Python ≥ 3.10. Le paquet n'embarque **pas** le Pyodide où Qt est lié — appelé **Pyodide-Qt** dans la suite, quelle
+que soit la liaison : la page le charge depuis l'URL `indexURL` (à côté d'elle, ou sur un hôte qui autorise CORS). Deux
+builds, épinglés dans `qtpy6/web/versions.json`, tous deux Pyodide 0.29.3, Qt 6.10.2, Python 3.13 (le Pyodide ordinaire
+du worker : 314.0.7, Python 3.14) ; `preparer` compare la version chargée à celle du fichier et écrit une ligne
+d'avertissement au journal si elles diffèrent :
+- **`pyodide_pyside6`, le défaut** : PySide6 6.10.2, construit par la recette `wasm/` de ce dépôt (Qt et PySide6 liés
+  statiquement), **LGPL v3** : une application commerciale peut le servir sans publier son propre code, chargé à part
+  dans `app.zip` ; la notice `pyodide-qt/LICENSE.txt` (`hebergement/LICENSE-Pyodide-PySide6.txt`) donne les textes et
+  le moyen de re-lier exigés par la LGPL.
+- **`pyodide_qt`, le repli** : [Pyodide-Qt](https://github.com/JarrettSJohnson/pyodide-with-pyqt6) de JarrettSJohnson,
+  PyQt6 6.10.2, **GPL v3** : toute page qui le sert distribue PyQt6, et le code de l'application servi avec doit en
+  tenir compte.
+qtpy6 est MIT et ne contient aucun binaire.
 
 **Installation éditable (développement)** : si le dépôt est rangé sous un dossier déjà présent sur `sys.path` (un `.pth`
 qui met `~/Python` ou `/DATA/Python` sur le chemin), le dossier du dépôt lui-même devient un paquet-espace de noms
@@ -393,9 +400,12 @@ postes visés ; (5) le temps de chargement à froid derrière le bandeau, avec l
 
 ## Hébergement
 
-Pyodide-Qt (36 Mo, dont le `.wasm` de 32 : 9,9 en gzip) ne se versionne pas : `hebergement/telecharger.sh` rapporte la
-release épinglée dans `qtpy6/web/versions.json` (`archive`, `sha256` vérifiée ; un zip déjà téléchargé en argument, sans
-réseau) et la dépaquette dans `exemple/pyodide-qt/`. L'action `.github/workflows/pages.yml` fait la même chose et publie le
+Pyodide-Qt ne se versionne pas (PySide6 : 41 Mo, dont le `.wasm` de 35 : 11 en gzip, mesuré en local ; PyQt6 : 36 Mo,
+dont 32 de `.wasm`) : `hebergement/telecharger.sh [pyside6|pyqt6]` rapporte la release épinglée dans
+`qtpy6/web/versions.json` (`pyodide_pyside6` par défaut, `pyodide_qt` avec `pyqt6` ; `archive`, `sha256` vérifiée ; un
+zip déjà téléchargé en argument, sans réseau) et la dépaquette, licence comprise, dans `exemple/pyodide-qt/`. Le zip
+PySide6 se construit par `wasm/construire.sh paquet` (`wasm/README.md`) et se publie en release du dépôt ; son empreinte
+change à chaque construction, à reporter dans `versions.json`. L'action `.github/workflows/pages.yml` fait la même chose et publie le
 dossier sur GitHub Pages quand le script, `versions.json` ou elle-même changent (ou à la main, *Run workflow*) :
 
     indexURL: "https://smartaudiotools.github.io/qtpy6/pyodide-qt/"
@@ -466,4 +476,7 @@ embarque : serializejson (Prosperity Public License 3.0.0 pour l'usage non comme
 
 ## Licence
 
-MIT (`LICENSE.txt`). Pyodide-Qt, que la page charge et que l'hébergement distribue, est GPL v3 (`hebergement/LICENSE-Pyodide-Qt.txt`) ; Pyodide est MPL 2.0 ; Qt est LGPL v3 ; pdf.js (`qtpy6/web/js/pdfjs/`) est Apache 2.0.
+MIT (`LICENSE.txt`). Le Pyodide avec Qt que la page charge et que l'hébergement distribue : par défaut Qt et PySide6,
+LGPL v3 (`hebergement/LICENSE-Pyodide-PySide6.txt`, livrée dans le zip) ; en repli Pyodide-Qt (PyQt6), GPL v3
+(`hebergement/LICENSE-Pyodide-Qt.txt`). Pyodide est MPL 2.0 ; la recette `wasm/` est MIT ; pdf.js
+(`qtpy6/web/js/pdfjs/`) est Apache 2.0.
