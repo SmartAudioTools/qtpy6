@@ -31,6 +31,8 @@ def _js():
         dossier = importlib.resources.files(__package__).joinpath("js")
 
         def url(nom):
+            if not dossier.joinpath(nom).is_file():  # archive sans pdf.js (assembler, exclure) : à côté de qtpy6web.js
+                return js.URL.new(nom, js.qtpy6Js).href
             source = dossier.joinpath(nom).read_text(encoding="utf-8")
             return js.URL.createObjectURL(js.Blob.new([source], type="text/javascript"))
 

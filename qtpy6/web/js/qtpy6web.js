@@ -101,6 +101,7 @@ export async function preparer(conteneur, { indexURL, archives = [], roues = [],
   py._module.qtContainerElements = [conteneur];  // l'API privée de Qt-WASM, isolée ici : l'élément qui sert d'écran à Qt
   molette(conteneur);
   window.qtpy6Conteneur = conteneur;  // ce que qtpy6.web.pdf lit pour caler ses <div> sur les widgets
+  window.qtpy6Js = import.meta.url;  // d'où qtpy6.web.pdf charge pdf.js quand l'archive ne l'a pas (assembler, exclure)
   py.runPython(`import json, os, sys
 os.environ.update(json.loads(${JSON.stringify(JSON.stringify(env))}))
 sys.path[:0] = json.loads(${JSON.stringify(JSON.stringify(archives.map(a => a.dossier)))})`);

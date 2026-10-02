@@ -89,3 +89,20 @@ dans un navigateur ni sous un PySide6-WASM** (il n'existe pas encore).
   viennent pas de cette session : à ne pas commiter avec l'étape.
 - `_est_destroyed` sous PySide6 repose sur le `str()` du SignalInstance : fragile si une version le change ; un test
   le couvre (le relais d'un `destroyed` est appelé directement, sans report).
+
+**6. pdf.js hors de l'archive, chargé au premier PDF (02/10/2026).** Demande de l'utilisateur : « fais les 3 dans
+l'ordre en autonomie » (pdf.js paresseux, service worker, serializejson sans blosc).
+- `assembler(..., exclure=[...])` : des débuts de noms laissés hors du zip (les polices passent par `z.write`, pas
+  par ce filtre, et ne sont pas concernées).
+- `qtpy6web.js` pose `window.qtpy6Js = import.meta.url` ; `pdf.py` (`_js`, `url`) prend le fichier dans le paquet
+  s'il y est (comportement inchangé pour qui n'exclut rien), sinon `new URL(nom, qtpy6Js)`.
+- SmartTeacher (`QCM/web/construire.py`, `deployer.sh`) copie `pdfjs/` à côté de `qtpy6web.js` et le publie.
+Écarté : retirer pdf.js du paquet qtpy6 et le servir toujours à part. Toute application devrait alors publier
+`pdfjs/` ; avec `exclure`, c'est un choix de l'application, et le défaut ne casse personne.
+Mesuré : `lecteur.zip` 3015 → 2516 Kio. Pour un sujet sans cours, 1,7 Mo en moins, jamais téléchargés.
+Vérifié dans Firefox sans interface (sonde, scénario `cours`, sujet SNT TP01 avec son PDF) : `QPdfView`, texte
+« L'ESSENTIEL DU LANGAGE PYTHON » dans la couche de texte 0,6 s après le clic, et `unzip -l` sans `pdfjs`.
+97 tests verts sous `QT_API=pyqt6` et `QT_API=pyside6`.
+Défaut trouvé au passage, non corrigé ici (fichier d'une autre session) : le scénario `cours` de
+`sonde_lecteur.html` teste `couche is not None`. Or `querySelector` rend `jsnull` sous Pyodide 0.29, donc il
+échoue avant l'affichage. Le test a été fait sur une copie corrigée (`if couche`), puis supprimée.

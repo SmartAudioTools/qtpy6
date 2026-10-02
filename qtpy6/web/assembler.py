@@ -8,26 +8,32 @@ import zipfile
 from pathlib import Path
 
 
-def assembler(archive, fichiers=(), paquets=(), distributions=(), polices=(), dossier_polices="polices"):
+def assembler(archive, fichiers=(), paquets=(), distributions=(), polices=(), dossier_polices="polices", exclure=()):
     """Écrit le zip ``archive``. ``fichiers`` : ``{nom_dans_le_zip: chemin}``. ``paquets`` : des noms de modules
     importables, dont le dossier entier (``.py`` et données, sans ``__pycache__``) est pris là où il est, ce qui vaut pour
     une installation éditable. ``distributions`` : des paquets installés pris avec leurs métadonnées, pour ceux dont les
     points d'entrée servent (les extensions de ``markdown``). ``polices`` : des fichiers ``.ttf``/``.otf``, sous
-    ``dossier_polices`` (ce qu'``application(polices=…)`` charge). Rend la taille en octets."""
+    ``dossier_polices`` (ce qu'``application(polices=…)`` charge). ``exclure`` : des débuts de noms dans le zip
+    laissés dehors, ``qtpy6/web/js/pdfjs/`` typiquement (1,7 Mo, servis à côté de ``qtpy6web.js``, d'où
+    ``qtpy6.web.pdf`` les charge à la première ouverture d'un PDF). Rend la taille en octets."""
     archive = Path(archive)
     with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as z:
+        def ecrire(chemin, nom):
+            if not nom.startswith(tuple(exclure)):
+                z.write(chemin, nom)
+
         for nom, chemin in dict(fichiers).items():
-            z.write(chemin, nom)
+            ecrire(chemin, nom)
         for nom in paquets:
             racine = Path(importlib.import_module(nom).__file__).parent
             for p in sorted(racine.rglob("*")):
                 if p.is_file() and "__pycache__" not in p.parts:
-                    z.write(p, f"{nom}/{p.relative_to(racine)}")
+                    ecrire(p, f"{nom}/{p.relative_to(racine).as_posix()}")
         for nom in distributions:
             d = importlib.metadata.distribution(nom)
             for f in d.files:
                 if f.suffix != ".pyc" and not str(f).startswith(".."):
-                    z.write(d.locate_file(f), str(f))
+                    ecrire(d.locate_file(f), f.as_posix())
         for p in polices:
             z.write(p, f"{dossier_polices}/{Path(p).name}")
     return archive.stat().st_size

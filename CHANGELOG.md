@@ -2,6 +2,8 @@
 
 ## Non publié
 
+- `assembler(..., exclure=[...])` laisse des fichiers hors de l'archive, `qtpy6/web/js/pdfjs/` typiquement (1,7 Mo) :
+  `qtpy6.web.pdf` charge alors pdf.js à côté de `qtpy6web.js` (`window.qtpy6Js`), au premier PDF ouvert seulement.
 - `qtpy6.QtCore.QPropertyAnimation` est menée par les images de l'écran, sans rien changer à son API ni au
   code des applications. Qt Widgets avance ses animations à une minuterie de 16 ms que rien ne cale sur le
   rafraîchissement : une image reçoit parfois deux pas (le premier jamais affiché), la suivante aucun. Dès que la
