@@ -47,8 +47,6 @@ class ZoneDefilante(QScrollArea):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._dy = 0  # décalage du viewport (px logiques, vers le bas si positif) dû à l'image de Qt à la prochaine image
-        if ACTIF and navigateur():
-            _Relais.installer()
 
     def scrollContentsBy(self, dx, dy):
         contenu, vue = self.widget(), self.viewport()
@@ -57,6 +55,8 @@ class ZoneDefilante(QScrollArea):
             self._poser(0)
             super().scrollContentsBy(dx, dy)
             return
+        _Relais.installer()  # au premier pas seulement : construire un écran sous un filtre d'application, c'était
+        # 138 000 appels Python avant le premier affichage (lecteur de SmartTeacher, mesuré le 02/10/2026)
         contenu.setAttribute(Qt.WidgetAttribute.WA_UpdatesDisabled, True)
         try:
             super().scrollContentsBy(dx, dy)  # le contenu est déplacé, rien n'est marqué sale
