@@ -12,7 +12,7 @@
   // La partie de pdf_viewer.css (pdf.js 6.2.108) qui fait la couche de texte, plus la page et le fond de la vue.
   const CSS = `
 .qtpy6-pdf { position: fixed; overflow: auto; background: #d9d9d9; z-index: 10; box-sizing: border-box;
-  scrollbar-color: rgba(0 0 0 / 0.3) transparent; }
+  scrollbar-color: rgba(0 0 0 / 0.3) white; }
 .qtpy6-pdf .page { position: relative; margin: 0 auto; background: white;
   --user-unit: 1; --total-scale-factor: calc(var(--scale-factor) * var(--user-unit));
   --scale-round-x: 1px; --scale-round-y: 1px; }
