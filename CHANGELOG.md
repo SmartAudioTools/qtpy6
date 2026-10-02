@@ -25,6 +25,9 @@
   défile autant qu'en natif (`qtpy6web.js`, `molette`) ; `preparer` reçoit `progres` et `tailles`, l'avancement
   du chargement de 0 à 1 ; `tactile.activer_au_doigt` active le tactile au premier doigt posé quand le navigateur
   ne dit rien de son écran (Firefox sous Linux), et `tactile.detecte` lit aussi `navigator.maxTouchPoints`.
+- Dans le navigateur, le canevas de chaque fenêtre Qt est créé avec `willReadFrequently` (`qtpy6web.js`) : tenu en
+  mémoire, il reçoit l'image de chaque peinture en 1,5 ms au lieu de 8,3 à 1800 px (Intel HD, mesuré par
+  SmartTeacher) ; `?lecture=0` dans l'adresse rend le comportement d'origine.
 - `qtpy6.web.sonde --visible` : une vraie fenêtre sur l'écran, avec la synchronisation verticale du compositeur,
   pour mesurer la fluidité (hors écran, Firefox cadence ses images seul).
 - `qtpy6.web.defilement.ZoneDefilante` : une QScrollArea qui, dans le navigateur, défile comme en natif. Qt-WASM n'a

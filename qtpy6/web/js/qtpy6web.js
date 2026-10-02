@@ -21,6 +21,18 @@ const t0 = performance.now();
 export const journal = [];
 let ecouter = () => {};
 
+// Le canevas de chaque fenêtre Qt (qt-window-canvas) est créé avec willReadFrequently : tenu en mémoire et non sur la carte
+// graphique, il reçoit l'image que Qt-WASM envoie à chaque peinture (putImageData) en 1,5 ms au lieu de 8,3 à 1800 px
+// (Intel HD, mesuré par SmartTeacher le 02/10/2026). Les autres canevas (pdf.js) restent accélérés. ?lecture=0 dans
+// l'adresse rend le comportement d'origine, pour comparer.
+if (new URLSearchParams(location.search).get("lecture") !== "0") {
+  const getContext = HTMLCanvasElement.prototype.getContext;
+  HTMLCanvasElement.prototype.getContext = function(type, attrs) {
+    return getContext.call(this, type, type === "2d" && this.classList.contains("qt-window-canvas")
+                                        ? { ...attrs, willReadFrequently: true } : attrs);
+  };
+}
+
 export function print(m) {
   const l = `${((performance.now() - t0) / 1000).toFixed(2)}s ${m}`;
   journal.push(l); console.log(l); ecouter(l);
