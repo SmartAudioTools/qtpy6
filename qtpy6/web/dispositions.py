@@ -65,10 +65,11 @@ class Disposition(QLayout):
 class Rangee(Disposition):
     """Une rangée de widgets qui passe à la ligne quand la place manque. Un ``addStretch`` y garde son sens : ce qui
     le suit est poussé à droite de sa ligne ; un ``addSpacing`` est un blanc fixe, comme dans un ``QHBoxLayout``. Les
-    widgets de politique horizontale ``Expanding`` se partagent la largeur de leur ligne à parts égales, sauf un plus
-    large que sa part, qui garde sa largeur. ``uniforme`` les coupe en lignes comme s'ils avaient tous la largeur du plus
-    large, pour que les parts soient vraiment égales, mais seulement si cela ne coûte pas de ligne de plus : quand la
-    place manque, chacun reprend la largeur de son texte."""
+    ressorts d'une même ligne s'en partagent la place libre à parts égales, comme dans un ``QHBoxLayout`` : un ressort
+    entre chaque widget les espace régulièrement. Les widgets de politique horizontale ``Expanding`` se partagent la
+    largeur de leur ligne à parts égales, sauf un plus large que sa part, qui garde sa largeur. ``uniforme`` les coupe
+    en lignes comme s'ils avaient tous la largeur du plus large, pour que les parts soient vraiment égales, mais
+    seulement si cela ne coûte pas de ligne de plus : quand la place manque, chacun reprend la largeur de son texte."""
 
     def __init__(self, espacement, uniforme=False):
         super().__init__(espacement)
@@ -137,15 +138,17 @@ class Rangee(Disposition):
             for k, n in enumerate(extensibles):  # les plus larges d'abord : qui dépasse la part égale garde sa largeur
                 largeurs[n] = max(largeurs[n], libre // (len(extensibles) - k))
                 libre -= largeurs[n]
-            x, apres = rect.x(), None
-            if None in ligne:  # ce qui suit le ressort, calé à droite s'il y a la place
-                apres = ligne.index(None)
-                x_droite = rect.right() + 1 - sum(largeurs[apres:]) - self.spacing() * max(len(items) - apres - 1, 0)
-            for n, item in enumerate(items):
-                if n == apres:
-                    x = max(x, x_droite)
+            # la place libre aux ressorts, à parts égales (rien quand elle manque)
+            reste, ressorts = max(rect.width() - sum(largeurs) - self.spacing() * (len(items) - 1), 0), ligne.count(None)
+            x, n, r = rect.x(), 0, 0
+            for m in ligne:
+                if m is None:
+                    x += reste * (r + 1) // ressorts - reste * r // ressorts
+                    r += 1
+                    continue
                 if poser:
-                    item.setGeometry(QRect(x, y, largeurs[n], hauteur_ligne))
+                    m[0].setGeometry(QRect(x, y, largeurs[n], hauteur_ligne))
                 x += largeurs[n] + self.spacing()
+                n += 1
             y += hauteur_ligne + self.spacing()
         return y - rect.y() - (self.spacing() if y > rect.y() else 0)

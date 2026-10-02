@@ -2,6 +2,9 @@
 
 ## Non publié
 
+- `Rangee` : plusieurs `addStretch()` d'une même ligne s'en partagent la place libre à parts égales, comme dans
+  un `QHBoxLayout` (un seul poussait à droite ce qui le suivait, les suivants étaient ignorés) : un ressort entre
+  chaque widget les espace régulièrement.
 - `assembler(..., exclure=[...])` laisse des fichiers hors de l'archive, `qtpy6/web/js/pdfjs/` typiquement (1,7 Mo) :
   `qtpy6.web.pdf` charge alors pdf.js à côté de `qtpy6web.js` (`window.qtpy6Js`), au premier PDF ouvert seulement.
 - Dans le navigateur, PySide6 par défaut : un Pyodide 0.29.3 où Qt 6.10.2 et PySide6 6.10.2 sont liés en
