@@ -1,5 +1,5 @@
-Pyodide-PySide6 0.29.3 (pyodide-qt/) - BROUILLON, à valider avant publication
-==============================================================================
+Pyodide-PySide6 0.29.3 (pyodide-qt/)
+====================================
 
 Ce dossier est un Pyodide 0.29.3 (Python 3.13) dans lequel Qt 6.10.2 (qtbase, qtsvg) et PySide6 / shiboken6 6.10.2
 sont liés STATIQUEMENT dans pyodide.asm.wasm, construit par la recette de qtpy6 (wasm/ du dépôt

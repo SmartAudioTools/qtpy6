@@ -763,9 +763,10 @@ brouillon y renvoyait par lien. Proposé : y joindre les textes, puis commiter t
 - `hebergement/LICENSE-Pyodide-PySide6.txt` : le texte SPDX `/usr/share/licenses/spdx/LGPL-3.0-only.txt` ajouté à la
   fin. Il contient déjà la GPL v3 à la suite de la LGPL : une première version qui ajoutait aussi `GPL-3.0-only.txt`
   la donnait en double, retirée. Pris sur le disque et non sur gnu.org : le shell n'a pas de réseau, et ce sont les
-  textes de la FSF à l'identique. Le marqueur « BROUILLON » de l'en-tête est gardé : le fond juridique (le moyen de
-  re-lier par la recette et les sources épinglées) n'a pas été relu par un juriste.
-- `wasm/construire.sh paquet` relancé : nouveau zip, sha256 `d0619f4f…` reporté dans `versions.json`. Vérifié :
+  textes de la FSF à l'identique. Le marqueur « BROUILLON » de l'en-tête, d'abord gardé (fond juridique non relu par
+  un juriste), a été retiré à la demande de l'utilisateur (« je veux le retirer », 9 h 07) une fois le site publié ;
+  zip reconstruit, sha256 `5e7d87c7…`, release mise à jour par `gh release upload --clobber`.
+- `wasm/construire.sh paquet` relancé : nouveau zip, sha256 `d0619f4f…` reporté (remplacé depuis, voir plus bas) dans `versions.json`. Vérifié :
   `telecharger.sh pyside6 <zip local>` passe la vérification d'empreinte, et `exemple/pyodide-qt/LICENSE.txt` est
   identique au fichier du dépôt. Tests : 97 verts sous `QT_API=pyqt6` et `QT_API=pyside6`.
 - Reste ouvert : publier la release avec CE zip AVANT de pousser (sinon l'action Pages échoue) ; `web.md` (§ Licence).
