@@ -100,20 +100,26 @@ def _coller():
     """Ctrl+V colle le texte du presse-papiers du système dans le champ qui a le focus. Qt-WASM laisse passer Ctrl+V au
     navigateur pour recevoir son événement ``paste``, mais n'en fait rien : ni texte, ni touche (mesuré dans Firefox,
     28/09/2026, sur un QLineEdit ; ``paste()`` depuis le presse-papiers interne de Qt marche). L'événement est pris ici,
-    avant Qt (phase de capture, sur le document) et arrêté : si Qt apprend à coller, le texte n'arrivera pas deux fois."""
+    avant Qt (phase de capture, sur le document) et arrêté : si Qt apprend à coller, le texte n'arrivera pas deux fois.
+    Le texte passe par Qt comme sur le bureau : posé dans le presse-papiers de Qt, puis un Ctrl+V envoyé au champ, que
+    voient les filtres d'événements de l'application (un filtre qui interdit de coller depuis l'extérieur le bloque ici
+    aussi ; SmartTeacher, 02/10/2026 : insérer le texte directement passait outre)."""
     import js  # noqa: PLC0415 - voir la docstring du module
     from pyodide.ffi import create_proxy  # noqa: PLC0415
+    from qtpy6.QtCore import QEvent, Qt  # noqa: PLC0415
+    from qtpy6.QtGui import QKeyEvent  # noqa: PLC0415
     from qtpy6.QtWidgets import QApplication  # noqa: PLC0415
 
     def coller(evenement):
         champ = QApplication.focusWidget()
         texte = evenement.clipboardData and evenement.clipboardData.getData("text/plain")
-        inserer = getattr(champ, "insert", None) or getattr(champ, "insertPlainText", None)  # QLineEdit, éditeurs de texte
-        if not texte or inserer is None or champ.isReadOnly():
+        if not texte or champ is None:
             return
         evenement.preventDefault()
         evenement.stopPropagation()
-        inserer(texte)
+        QApplication.clipboard().setText(texte)
+        for genre in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
+            QApplication.sendEvent(champ, QKeyEvent(genre, Qt.Key.Key_V, Qt.KeyboardModifier.ControlModifier, "\x16"))
 
     js.document.addEventListener("paste", create_proxy(coller), True)
 

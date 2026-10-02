@@ -283,7 +283,7 @@ def test_pdf_lien_seul_sur_sa_ligne(app, tmp_path):
     chemin = str(tmp_path / "sommaire.pdf")
     texte = QtGui.QTextDocument()
     texte.set_html('<p><a href="#c">Court</a></p><p><a href="#c">Un</a> et <a href="#c">deux</a></p>'
-                   + "<p>x</p>" * 80 + '<p><a name="c">Cible</a></p>')
+                   + "<p>x</p>" * 80 + '<p><a name="c">Cible</a></p>' + "<p>x</p>" * 80)
     texte.print_(QtGui.QPdfWriter(chemin)) if hasattr(texte, "print_") else texte.print(QtGui.QPdfWriter(chemin))
     document = QPdfDocument(None)
     document.load(chemin)
@@ -308,6 +308,11 @@ def test_pdf_lien_seul_sur_sa_ligne(app, tmp_path):
     assert lien(largeur - court.left() - 2, court) is not None, "le bout de la ligne d'un lien seul n'est pas cliquable"
     assert lien(largeur - un.left() - 2, deux) is None, "deux liens sur une ligne : le bout de la ligne est devenu cliquable"
     assert lien(un.center().x(), un) is not None and lien(deux.center().x(), deux) is not None
+    cible = lien(court.center().x(), court)
+    vue._follow(cible)
+    haut = vue._pages()[cible.page()].top() + cible.location().y() * echelle  # la destination, dans la vue
+    assert abs(haut - QPdfView.LINK_MARGIN * echelle) <= 1, f"la destination est à {haut} px du haut de la vue"
+    vue.verticalScrollBar().setValue(0)
 
     def plus_sombre():  # le pixel le plus sombre du texte de « Court »
         image = vue.viewport().grab().toImage()
@@ -319,7 +324,7 @@ def test_pdf_lien_seul_sur_sa_ligne(app, tmp_path):
         app.processEvents()
     vue.setPageLimit(1)  # la cible est plus loin : le lien ne se suit plus, et un voile blanc l'éclaircit
     app.processEvents()
-    assert {cible for _, _, cible in vue._link_areas(0)} == {document.pageCount() - 1}
+    assert {page for _, _, page in vue._link_areas(0)} == {cible.page()} and cible.page() > 0
     assert lien(court.center().x(), court) is None
     assert plus_sombre() > avant + 30, (avant, plus_sombre())
     vue.close()
@@ -403,6 +408,45 @@ def test_police_fixe_dans_le_navigateur():
     """)
     assert sortie == "True Liberation Mono 9"
 
+
+
+def test_coller_passe_par_qt():
+    """Le collage du navigateur passe par un Ctrl+V de Qt : un filtre d'événements de l'application le voit, et peut
+    l'interdire (il insérait le texte directement : SmartTeacher, 02/10/2026)."""
+    sortie = en_navigateur("""
+        import types
+        ecouteurs = {}
+        sys.modules["js"] = types.SimpleNamespace(
+            document=types.SimpleNamespace(addEventListener=lambda nom, f, *a: ecouteurs.setdefault(nom, f)),
+            setInterval=lambda *a: 0, Function=types.SimpleNamespace(new=lambda *a: lambda *b: None))
+        sys.modules["pyodide"], sys.modules["pyodide.ffi"] = types.ModuleType("pyodide"), types.SimpleNamespace(create_proxy=lambda f: f)
+        from qtpy6.QtCore import QEvent, QObject
+        from qtpy6.QtGui import QKeySequence
+        from qtpy6.QtWidgets import QLineEdit
+        from qtpy6.web import application
+        app = application()
+        champ = QLineEdit()
+        champ.show()
+        champ.activateWindow()
+        champ.setFocus()
+        app.processEvents()
+
+        def coller(texte):
+            evenement = types.SimpleNamespace(clipboardData=types.SimpleNamespace(getData=lambda _: texte),
+                                              preventDefault=lambda: None, stopPropagation=lambda: None)
+            ecouteurs["paste"](evenement)
+            return champ.text()
+
+        class Garde(QObject):
+            def eventFilter(self, objet, evenement):
+                return evenement.type() == QEvent.Type.KeyPress and evenement.matches(QKeySequence.StandardKey.Paste)
+
+        print(coller("a"), end=" ")
+        garde = Garde()
+        app.installEventFilter(garde)
+        print(coller("b"))
+    """)
+    assert sortie == "a a"
 
 # --- Les doublures bloquantes, hors navigateur ------------------------------------------------------------------------
 # JSPI n'existe pas ici : les primitives Pyodide de ``bloquant`` sont remplacées par des greenlets, qui suspendent

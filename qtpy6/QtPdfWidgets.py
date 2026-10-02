@@ -20,6 +20,8 @@ else:
         """QPdfView, plus a selection within one page (drag with the left button, Ctrl+C copies it), internal links
         followed on click, and ``setPageLimit``: only the first pages are shown."""
 
+        LINK_MARGIN = 12  # points left above a link's destination (same in the browser: pdf_vue.js)
+
         def __init__(self, parent=None):
             super().__init__(parent)  # PyQt6 wants the parent, even None
             self._anchor = None  # (page, point in the page's points) where the drag started
@@ -162,12 +164,13 @@ else:
                      QRectF(r.left(), r.top(), max(r.width(), width - 2 * r.left()), r.height()), r, t) for r, t in links]
 
         def _follow(self, link):
-            """Scrolls to the link's destination: the top of the viewport on its location in the target page."""
+            """Scrolls to the link's destination: the top of the viewport ``LINK_MARGIN`` points above its location in
+            the target page (on the location itself, a title's top was cut off)."""
             target = self._pages().get(link.page())
             if target is not None:
                 scale = target.width() / self.document().pagePointSize(link.page()).width()
                 bar = self.verticalScrollBar()
-                bar.setValue(bar.value() + target.top() + round(link.location().y() * scale))
+                bar.setValue(bar.value() + target.top() + round(max(0, link.location().y() - self.LINK_MARGIN) * scale))
 
         def mousePressEvent(self, event):
             link = self._link(event.position().toPoint()) if event.button() == Qt.MouseButton.LeftButton else None

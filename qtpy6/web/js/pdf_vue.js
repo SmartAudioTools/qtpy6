@@ -8,6 +8,7 @@
 // un <a> par lien interne du PDF (un sommaire), qui fait défiler jusqu'à sa destination.
 (urlPdf, urlWorker) => {
   let lib = null;
+  const MARGE_LIEN = 12;  // points laissés au-dessus de la destination d'un lien : dessus, le haut d'un titre était coupé (même marge sur ordinateur, QtPdfWidgets.py)
 
   // La partie de pdf_viewer.css (pdf.js 6.2.108) qui fait la couche de texte, plus la page et le fond de la vue.
   const CSS = `
@@ -160,10 +161,10 @@
         lien.addEventListener("click", e => {
           e.preventDefault();
           const page = this.div.children[cible];
-          const { page: proxy, echelle } = page.qtpy6;  // une destination XYZ donne son haut en points du PDF
+          const { page: proxy, echelle } = page.qtpy6;  // une destination XYZ donne son haut en points du PDF (y vers le haut)
           const haut = dest[1]?.name === "XYZ" && dest[3] != null
-            ? proxy.getViewport({ scale: echelle }).convertToViewportPoint(dest[2] ?? 0, dest[3])[1] : 0;
-          this.div.scrollTop = page.offsetTop + haut;
+            ? proxy.getViewport({ scale: echelle }).convertToViewportPoint(dest[2] ?? 0, dest[3] + MARGE_LIEN)[1] : 0;
+          this.div.scrollTop = page.offsetTop + Math.max(0, haut);
         });
         liens.append(lien);
       }
