@@ -170,6 +170,13 @@ def _mort():
 def _nb_arguments(slot):
     """Combien d'arguments positionnels ``slot`` accepte (None : autant qu'on veut). La liaison tronque ceux du signal à ce
     nombre ; le relais doit faire de même."""
+    fonction = getattr(slot, "__func__", slot)
+    if type(fonction) is types.FunctionType and not hasattr(fonction, "__wrapped__"):
+        # lu sur le code : inspect.signature coûtait 0,4 s sur les 3 300 connexions de l'ouverture d'un sujet (02/10/2026)
+        code = fonction.__code__
+        if code.co_flags & inspect.CO_VARARGS:
+            return None
+        return code.co_argcount - (fonction is not slot)  # une méthode liée : son premier paramètre est déjà pris
     try:
         parametres = inspect.signature(slot).parameters.values()
     except (TypeError, ValueError):

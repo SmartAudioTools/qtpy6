@@ -80,47 +80,58 @@ class Rangee(Disposition):
     def addSpacing(self, largeur):
         self.addItem(QSpacerItem(largeur, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum))
 
-    def _lignes(self, largeur):
-        """Les lignes : des listes d'items visibles, coupées là où le suivant ne tient plus ; ``None`` marque le ressort."""
-        lignes = self._couper(largeur, 0)
-        extensibles = [i.sizeHint().width() for i in self.items if self._extensible(i)]
+    def _mesurer(self):
+        """Les items à ranger, ``(item, largeur, hauteur, extensible)`` d'après leur ``sizeHint`` ; ``None`` pour le
+        ressort, les items vides écartés (un QSpacerItem est toujours « vide » pour Qt : un blanc fixe reste). Lu une fois
+        par calcul, pas à chaque étape (l'ouverture d'un sujet calcule 3 400 fois ses 354 rangées). Pas d'un calcul à
+        l'autre : Qt n'invalide une disposition imbriquée qu'en activant sa parente, et un sizeHint gardé jusque-là
+        changeait la mise en page (python_tp, mesuré le 02/10/2026)."""
+        mesures = []
+        for item in self.items:
+            large, blanc = bool(item.expandingDirections() & Qt.Orientation.Horizontal), item.spacerItem() is not None
+            if blanc and large:
+                mesures.append(None)
+            elif blanc or not item.isEmpty():
+                taille = item.sizeHint()
+                mesures.append((item, taille.width(), taille.height(), large and not blanc))
+        return mesures
+
+    def _lignes(self, largeur, mesures):
+        """Les lignes : des listes de mesures (``_mesurer``), coupées là où la suivante ne tient plus ; ``None`` marque
+        le ressort."""
+        lignes = self._couper(largeur, 0, mesures)
+        extensibles = [m[1] for m in mesures if m is not None and m[3]]
         if self.uniforme and extensibles:
-            egales = self._couper(largeur, max(extensibles))
+            egales = self._couper(largeur, max(extensibles), mesures)
             if len(egales) == len(lignes):
                 return egales
         return lignes
 
-    def _couper(self, largeur, large):
+    def _couper(self, largeur, large, mesures):
         """Les lignes, chaque item extensible compté au moins ``large``."""
-        lignes, x = [[]], 0
-        for item in self.items:
-            if item.spacerItem() is not None and item.expandingDirections() & Qt.Orientation.Horizontal:
+        lignes, x, espace = [[]], 0, self.spacing()
+        for m in mesures:
+            if m is None:
                 lignes[-1].append(None)
                 continue
-            if item.isEmpty() and item.spacerItem() is None:  # un QSpacerItem est toujours « vide » pour Qt
-                continue
-            l = max(item.sizeHint().width(), large if self._extensible(item) else 0)
-            if x and x + self.spacing() + l > largeur:
+            l = max(m[1], large) if m[3] else m[1]
+            if x and x + espace + l > largeur:
                 lignes.append([])
                 x = 0
-            lignes[-1].append(item)
-            x += (self.spacing() if x else 0) + l
+            lignes[-1].append(m)
+            x += (espace if x else 0) + l
         return lignes
-
-    @staticmethod
-    def _extensible(item):
-        return not item.isEmpty() and item.spacerItem() is None and bool(item.expandingDirections() & Qt.Orientation.Horizontal)
 
     def _disposer(self, rect, poser):
         y = rect.y()
-        for ligne in self._lignes(rect.width()):
-            items = [i for i in ligne if i is not None]
-            if not items:
+        for ligne in self._lignes(rect.width(), self._mesurer()):
+            mesures = [m for m in ligne if m is not None]
+            if not mesures:
                 continue
-            hauteur_ligne = max(i.sizeHint().height() for i in items)
-            largeurs = [i.sizeHint().width() for i in items]
-            extensibles = sorted((n for n, i in enumerate(items) if i.expandingDirections() & Qt.Orientation.Horizontal),
-                                 key=lambda n: -largeurs[n])
+            items = [m[0] for m in mesures]
+            hauteur_ligne = max(m[2] for m in mesures)
+            largeurs = [m[1] for m in mesures]
+            extensibles = sorted((n for n, m in enumerate(mesures) if m[3]), key=lambda n: -largeurs[n])
             libre = (rect.width() - self.spacing() * (len(items) - 1)
                      - sum(l for n, l in enumerate(largeurs) if n not in extensibles))
             for k, n in enumerate(extensibles):  # les plus larges d'abord : qui dépasse la part égale garde sa largeur
