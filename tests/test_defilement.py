@@ -48,3 +48,20 @@ def test_zone_ordinaire_en_natif(app):
     app.processEvents()
     assert zone._dy == 0 and zone.widget().pos().y() == -50
     assert defilement._Relais.seul is None  # ni amorcé à l'affichage ni posé au pas : le filtre d'application ralentit le natif
+
+
+def test_salir_un_enfant_dont_update_n_a_pas_d_argument(app):
+    from qtpy6.QtCore import QRect
+    from qtpy6.QtWidgets import QWidget
+
+    class Toile(QWidget):  # comme la toile d'arbre de SmartTeacher : update() redéfini sans argument
+        def update(self):
+            super().update()
+
+    parent = QWidget()
+    parent.resize(100, 100)
+    toile = Toile(parent)
+    toile.setGeometry(0, 0, 50, 50)
+    parent.show()
+    defilement._salir(parent, QRect(0, 0, 100, 100))  # levait TypeError
+    parent.close()

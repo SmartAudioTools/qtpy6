@@ -39,6 +39,8 @@
   seule la bande qui entre est peinte (par le contenu et chacun de ses descendants qu'elle touche : Qt n'y propage pas
   la région à ses enfants opaques, un en-tête de tableau restait vide), puis le viewport décalé est envoyé au
   canevas (`backingStore().flush` : Qt-WASM n'envoie que ce qu'il peint) : 2 ms par image, à l'identique au pixel près.
+  La bande est salie par `QWidget.update(w, rect)`, jamais par la méthode du widget : un `update()` redéfini sans
+  argument par l'application (une toile qui s'y redispose) levait TypeError à chaque pas.
   Un seul relais par fenêtre voit passer les événements, et ne visite que les zones en cours de décalage. Il remplace
   un filtre d'application par zone, soit un appel Python par événement et par page. Le décalage des lignes se fait en
   JavaScript (`copyWithin` sur une vue de l'image) : 0,4 ms par image au lieu de 1,2 en Python. L'image est relevée

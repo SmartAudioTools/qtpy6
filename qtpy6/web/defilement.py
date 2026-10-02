@@ -112,8 +112,10 @@ def _salir(widget, rect):
     """``rect`` à repeindre dans ``widget`` ET dans chaque descendant qu'il touche. Qt retire de la région d'un widget
     ses enfants opaques (``autoFillBackground`` : l'en-tête d'un QTableWidget) sans la leur transmettre, ce qui suppose
     leurs pixels intacts ; ici ils ont été décalés ou effacés, et l'en-tête restait vide (vu sur l'écran réel le
-    02/10/2026 sur le bac, 115 000 pixels contre ``grab()``). Seuls les enfants que touche la bande sont visités."""
-    widget.update(rect)
+    02/10/2026 sur le bac, 115 000 pixels contre ``grab()``). Seuls les enfants que touche la bande sont visités.
+    ``QWidget.update`` et non ``widget.update`` : une application peut redéfinir ``update()`` sans argument (la toile
+    d'arbre de SmartTeacher y refait sa disposition), et l'appel par la bande levait TypeError à chaque défilement."""
+    QWidget.update(widget, rect)
     for enfant in widget.children():
         if isinstance(enfant, QWidget) and not enfant.isWindow() and enfant.isVisible():
             zone = rect.intersected(enfant.geometry())
