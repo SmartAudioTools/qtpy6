@@ -34,7 +34,7 @@ tout est alors repeint à l'image suivante (juste, mais au prix d'un repeint com
 pas vertical plus petit que le viewport, à une échelle entière (à 1,25 ou 1,5 le décalage tomberait entre deux lignes)
 et une fois l'image de Qt relevée ; sinon, et en natif, une QScrollArea ordinaire."""
 
-from qtpy6.QtCore import QEvent, QPoint, QRect, Qt
+from qtpy6.QtCore import QEvent, QObject, QPoint, QRect, Qt
 from qtpy6.QtGui import QImage, QPainter
 from qtpy6.QtWidgets import QApplication, QScrollArea, QWidget
 
@@ -47,16 +47,14 @@ class ZoneDefilante(QScrollArea):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._dy = 0  # décalage du viewport (px logiques, vers le bas si positif) dû à l'image de Qt à la prochaine image
-        self._image = None  # l'image du backing store, relevée au premier Paint qui suit une UpdateRequest de la fenêtre
-        self._attend = False  # une UpdateRequest vient de passer : le Paint qui suit peint dans l'image de Qt
-        if ACTIF and navigateur():  # l'UpdateRequest va à la QWindow, les Paint à chaque widget : un filtre sur tout
-            QApplication.instance().installEventFilter(self)  # (en natif, il ralentissait tout : test_aide 39 s → > 5 min)
+        if ACTIF and navigateur():
+            _Relais.installer()
 
     def scrollContentsBy(self, dx, dy):
         contenu, vue = self.widget(), self.viewport()
         r = vue.devicePixelRatioF()
         if not ACTIF or not navigateur() or dx or not dy or contenu is None or not contenu.updatesEnabled() or r != int(r):
-            self._dy = 0
+            self._poser(0)
             super().scrollContentsBy(dx, dy)
             return
         contenu.setAttribute(Qt.WidgetAttribute.WA_UpdatesDisabled, True)
@@ -64,9 +62,9 @@ class ZoneDefilante(QScrollArea):
             super().scrollContentsBy(dx, dy)  # le contenu est déplacé, rien n'est marqué sale
         finally:
             contenu.setAttribute(Qt.WidgetAttribute.WA_UpdatesDisabled, False)
-        self._dy += dy  # un pas avant que le précédent ne soit peint : les deux se cumulent, bande comprise
+        self._poser(self._dy + dy)  # un pas avant que le précédent ne soit peint : les deux se cumulent, bande comprise
         if abs(self._dy) >= vue.height():
-            self._dy = 0
+            self._poser(0)
             self._repeindre(vue.rect())
             return
         bande = abs(self._dy)
@@ -74,41 +72,72 @@ class ZoneDefilante(QScrollArea):
         coin = QPoint(vue.width() - 1, vue.height() - 1) if self._dy > 0 else QPoint(0, 0)
         self._repeindre(QRect(coin, coin))  # l'englobant de ce qui est peint = le viewport entier, recopié d'un bloc
 
+    def _poser(self, dy):
+        """``_dy``, et la zone inscrite au relais tant qu'il est non nul : seules celles-là y sont visitées."""
+        self._dy = dy
+        if _Relais.seul is not None:
+            (_Relais.seul.decalees.add if dy else _Relais.seul.decalees.discard)(self)
+
     def _repeindre(self, rect):
         """``rect`` du viewport : au contenu (seul à peindre ce qu'il couvre) et au viewport (le reste, découvert)."""
         self.widget().update(rect.translated(-self.widget().pos()))
         self.viewport().update(rect)
 
-    def eventFilter(self, objet, evenement):
-        t = evenement.type()
-        fenetre = self.window()
-        if t == QEvent.Type.UpdateRequest:
-            if objet is fenetre.windowHandle():  # la QWindow seule : à celui du widget de fenêtre, 338 pixels faux (mesuré)
-                self._attend = self._image is None
-                if self._dy:
-                    self._decaler_image()
-        elif t == QEvent.Type.Paint:
-            if self._attend and isinstance(objet, QWidget) and objet.window() is fenetre:
-                self._image, self._attend = _image(objet), False
-            if self._dy:  # peint sans UpdateRequest (exposition, redimensionnement) : rien n'est décalé, tout est à repeindre
-                self._dy = 0
-                self.widget().update()
-        elif self._attend:
-            self._attend = False  # autre chose qu'un Paint a suivi l'UpdateRequest : un Paint ultérieur serait un render()
-        elif objet is fenetre and t in (QEvent.Type.Hide, QEvent.Type.WinIdChange):
-            self._image = None  # le backing store peut être recréé : l'image sera relevée de nouveau
-        return False
-
-    def _decaler_image(self):
-        """Avant que Qt ne peigne : les lignes du viewport décalées dans son image, ou tout repeint si elle manque."""
-        dy, self._dy = self._dy, 0
+    def _decaler_image(self, image):
+        """Avant que Qt ne peigne : les lignes du viewport décalées dans ``image``, ou tout repeint si elle manque."""
+        dy = self._dy
+        self._poser(0)
         vue = self.viewport()
         r = int(vue.devicePixelRatioF())
-        if self._image is None or self._image.size() != vue.window().size() * r:
+        if image is None or image.size() != vue.window().size() * r:
             self.widget().update()
             return
         p = vue.mapTo(vue.window(), QPoint(0, 0))
-        decaler_lignes(self._image, p.x() * r, p.y() * r, vue.width() * r, vue.height() * r, dy * r)
+        decaler_lignes(image, p.x() * r, p.y() * r, vue.width() * r, vue.height() * r, dy * r)
+
+
+class _Relais(QObject):
+    """Le filtre d'application UNIQUE des zones. L'UpdateRequest va à la QWindow et les Paint à chaque widget, d'où un
+    filtre sur toute l'application (en natif, il ralentissait tout : test_aide 39 s → > 5 min, d'où le navigateur seul).
+    Un seul pour toutes les zones, et non un par zone : le lecteur de SmartTeacher en a une par page (218 pour un TP), et
+    chaque événement traversait alors 218 filtres Python (128 600 appels pour vingt redimensionnements, mesuré le
+    02/10/2026). L'image du backing store est gardée par fenêtre, puisqu'elle est la même pour toutes ses zones, et seules
+    les zones qui ont un décalage en attente (``decalees``) sont visitées."""
+    seul = None
+
+    @classmethod
+    def installer(cls):
+        if cls.seul is None:
+            cls.seul = cls()
+            QApplication.instance().installEventFilter(cls.seul)
+
+    def __init__(self):
+        super().__init__()
+        self.images = {}  # QWindow → l'image de son backing store, relevée au premier Paint qui suit une UpdateRequest
+        self.attend = None  # la QWindow dont l'UpdateRequest vient de passer sans image : le Paint qui suit la donne
+        self.decalees = set()
+
+    def eventFilter(self, objet, evenement):
+        t = evenement.type()
+        if t == QEvent.Type.UpdateRequest:
+            if objet.isWindowType():  # la QWindow seule : à celui du widget de fenêtre, 338 pixels faux (mesuré)
+                image = self.images.get(objet)
+                self.attend = objet if image is None else None
+                for zone in [z for z in self.decalees if z.window().windowHandle() is objet]:
+                    zone._decaler_image(image)
+        elif t == QEvent.Type.Paint:
+            if self.attend is not None:
+                if isinstance(objet, QWidget) and objet.window().windowHandle() is self.attend:
+                    self.images[self.attend] = _image(objet)
+                self.attend = None
+            for zone in list(self.decalees):  # peint sans UpdateRequest (exposition, redimensionnement) : rien n'est
+                zone._poser(0)                 # décalé, tout est à repeindre
+                zone.widget().update()
+        elif self.attend is not None:
+            self.attend = None  # autre chose qu'un Paint a suivi l'UpdateRequest : un Paint ultérieur serait un render()
+        elif t in (QEvent.Type.Hide, QEvent.Type.WinIdChange) and isinstance(objet, QWidget) and objet.isWindow():
+            self.images.pop(objet.windowHandle(), None)  # le backing store peut être recréé : l'image sera relevée de nouveau
+        return False
 
 
 def _image(widget):
@@ -142,5 +171,30 @@ def decaler_lignes(image, x, y, l, h, dy):
         octets.setsize(image.sizeInBytes())
         octets = memoryview(octets)
     pas, a, n = image.bytesPerLine(), x * 4, l * 4
+    if navigateur():
+        _decaler_js()(octets, pas, a, n, y, h, dy)
+        return
     for i in range(y + h - 1, y + dy - 1, -1) if dy > 0 else range(y, y + h + dy):
         octets[i * pas + a:i * pas + a + n] = octets[(i - dy) * pas + a:(i - dy) * pas + a + n]
+
+
+_JS = None
+
+
+def _decaler_js():
+    """La boucle de ``decaler_lignes`` en JavaScript, compilée une fois : la vue de ``getBuffer`` est un Uint8Array sur la
+    mémoire WebAssembly même (aucune copie), et ``copyWithin`` y déplace chaque ligne. En Python, une tranche de
+    memoryview par ligne coûtait 2 à 4 ms par image à l'échelle 2 (1 500 lignes), mesuré le 02/10/2026."""
+    global _JS
+    if _JS is None:
+        import js  # noqa: PLC0415 - navigateur seulement
+        _JS = js.Function.new("octets", "pas", "a", "n", "y", "h", "dy", """
+            const tampon = octets.getBuffer("u8");
+            try {
+                const d = tampon.data;
+                if (dy > 0) for (let i = y + h - 1; i > y + dy - 1; i--) d.copyWithin(i * pas + a, (i - dy) * pas + a, (i - dy) * pas + a + n);
+                else for (let i = y; i < y + h + dy; i++) d.copyWithin(i * pas + a, (i - dy) * pas + a, (i - dy) * pas + a + n);
+            } finally {
+                tampon.release();
+            }""")
+    return _JS
