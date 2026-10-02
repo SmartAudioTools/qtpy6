@@ -10,7 +10,7 @@ if sys.platform == 'emscripten':
     from .web.pdf import QPdfView  # noqa: F401
 else:
     _binding.load(globals(), 'QtPdfWidgets')
-    from .QtCore import QPoint, QPointF, QRect, QSize, QSizeF, Qt
+    from .QtCore import QModelIndex, QPoint, QPointF, QRect, QRectF, QSize, QSizeF, Qt
     from .QtGui import QColor, QGuiApplication, QKeySequence, QPainter, QPolygonF
     from .QtPdf import QPdfLinkModel
 
@@ -26,7 +26,8 @@ else:
             self._selection = None  # (page, QPdfSelection)
             self._lines = {}  # {page: [QRectF of each text line]}, read once per page
             self._limit = None  # setPageLimit
-            self._links = QPdfLinkModel(self)  # those of one page at a time (setPage), read under the mouse
+            self._links = QPdfLinkModel(self)  # those of one page at a time (setPage), read once per page
+            self._areas = {}  # {page: _link_areas(page)}
             self.viewport().setCursor(Qt.CursorShape.IBeamCursor)
             self.viewport().setMouseTracking(True)  # the pointing hand over a link
             self.verticalScrollBar().rangeChanged.connect(self._clamp)
@@ -137,12 +138,28 @@ else:
             page, point = self._point(position, snap=False)
             if page is None:
                 return None
+            if page not in self._areas:
+                self._areas[page] = self._link_areas(page)
             if self._links.page() != page:
                 self._links.setPage(page)
-            link = self._links.linkAt(point)
-            if not link.isValid() or not link.url().isEmpty() or (self._limit is not None and link.page() >= self._limit):
+            # the link of the area under the point, read at the centre of its own rectangle
+            link = next((self._links.linkAt(own.center()) for area, own, _ in self._areas[page] if area.contains(point)), None)
+            if link is None or not link.isValid() or not link.url().isEmpty() or (
+                    self._limit is not None and link.page() >= self._limit):
                 return None
             return link
+
+        def _link_areas(self, page):
+            """[(clickable QRectF, the link's own QRectF, its target page)] in the page's points: a link alone on its
+            line takes the whole line, as wide as the page minus its left margin on both sides, and not only its text
+            (a table of contents: the end of a short title was not clickable). Same rule in the browser (``pdf_vue.js``)."""
+            self._links.setPage(page)
+            rectangle, target = QPdfLinkModel.Role.Rectangle.value, QPdfLinkModel.Role.Page.value
+            links = [(self._links.data(index, rectangle), self._links.data(index, target))
+                     for index in (self._links.index(row, 0) for row in range(self._links.rowCount(QModelIndex())))]
+            width = self.document().pagePointSize(page).width()
+            return [(r if any(o is not r and o.top() < r.bottom() and r.top() < o.bottom() for o, _ in links) else
+                     QRectF(r.left(), r.top(), max(r.width(), width - 2 * r.left()), r.height()), r, t) for r, t in links]
 
         def _follow(self, link):
             """Scrolls to the link's destination: the top of the viewport on its location in the target page."""
@@ -197,6 +214,7 @@ else:
                 painter.fillRect(QRect(0, last.bottom() + 1, self.viewport().width(), self.viewport().height()),
                                  self.palette().dark())
                 painter.end()
+            self._veil()
             rectangle = self._selection and self._pages().get(self._selection[0])
             if rectangle:
                 page, selection = self._selection
@@ -211,9 +229,27 @@ else:
                                                    for p in polygon]))
                 painter.end()
 
+        def _veil(self):
+            """A translucent white veil over the links to a page not shown (setPageLimit): a table of contents shows
+            which entries are out of reach. Same in the browser (``pdf_vue.js``)."""
+            if self._limit is None:
+                return
+            painter = QPainter(self.viewport())
+            for page, rectangle in self._pages().items():
+                if page >= self._limit:
+                    break
+                if page not in self._areas:
+                    self._areas[page] = self._link_areas(page)
+                scale = rectangle.width() / self.document().pagePointSize(page).width()
+                for area, _, target in self._areas[page]:
+                    if target >= self._limit:
+                        painter.fillRect(QRectF(rectangle.left() + area.left() * scale, rectangle.top() + area.top() * scale,
+                                                area.width() * scale, area.height() * scale), QColor(255, 255, 255, 160))
+            painter.end()
+
         def setDocument(self, document):
             self._anchor = self._selection = None
-            self._lines = {}
+            self._lines, self._areas = {}, {}
             self._links.setDocument(document)
             if document is not None and document.parent() is self:
                 # Qt 6.11 crashes destroying a view whose document is its child (both bindings): the child dies

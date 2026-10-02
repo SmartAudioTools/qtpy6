@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 import textwrap
+import time
 import zipfile
 from pathlib import Path
 
@@ -109,6 +110,24 @@ def test_rangee_recalcule_apres_changement(app):
     for b in boutons[1:]:
         b.hide()
     assert rangee.heightForWidth(400) == une_ligne, "les boutons cachés comptent encore : cache périmé"
+
+def test_rangee_elargir(app):
+    """``elargir`` : les extensibles gardent leur largeur et reçoivent chacun la même part de la place libre (celle
+    qu'un ressort entre deux leur aurait laissée entre eux) ; un item non extensible garde la sienne."""
+    zone = QtWidgets.QWidget()
+    rangee = dispositions.Rangee(6, elargir=True)
+    zone.set_layout(rangee)
+    boutons = [QtWidgets.QPushButton(t) for t in ("A", "Un bouton large", "B")]
+    for b in boutons:
+        b.set_size_policy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
+        rangee.add_widget(b)
+    fixe = QtWidgets.QLabel("fixe")
+    rangee.add_widget(fixe)
+    rangee.setGeometry(QtCore.QRect(0, 0, 1000, 100))
+    ajouts = [b.geometry().width() - b.sizeHint().width() for b in boutons]
+    assert max(ajouts) - min(ajouts) <= 1 and min(ajouts) > 100, ajouts
+    assert fixe.geometry().width() == fixe.sizeHint().width() and fixe.geometry().right() == 999
+
 
 def test_versions_json():
     v = json.loads((RACINE / "qtpy6" / "web" / "versions.json").read_text())
@@ -252,6 +271,57 @@ def test_pdf_limite_de_pages_en_natif(app, tmp_path):
     vue.setPageLimit(None)
     app.processEvents()
     assert barre.maximum() == 0 or barre.maximum() >= toutes - 1
+    vue.close()
+
+
+def test_pdf_lien_seul_sur_sa_ligne(app, tmp_path):
+    """Un lien interne seul sur sa ligne se suit d'un clic n'importe où sur la ligne (un sommaire), pas seulement sur
+    son texte ; deux liens sur une même ligne gardent chacun le leur."""
+    from qtpy6.QtPdf import QPdfDocument
+    from qtpy6.QtPdfWidgets import QPdfView
+
+    chemin = str(tmp_path / "sommaire.pdf")
+    texte = QtGui.QTextDocument()
+    texte.set_html('<p><a href="#c">Court</a></p><p><a href="#c">Un</a> et <a href="#c">deux</a></p>'
+                   + "<p>x</p>" * 80 + '<p><a name="c">Cible</a></p>')
+    texte.print_(QtGui.QPdfWriter(chemin)) if hasattr(texte, "print_") else texte.print(QtGui.QPdfWriter(chemin))
+    document = QPdfDocument(None)
+    document.load(chemin)
+    vue = QPdfView(None)
+    vue.setDocument(document)
+    vue.setPageMode(QPdfView.PageMode.MultiPage)
+    vue.setZoomMode(QPdfView.ZoomMode.FitToWidth)
+    vue.resize(400, 500)
+    vue.show()
+    app.processEvents()
+    page = vue._pages()[0]
+    echelle = page.width() / document.pagePointSize(0).width()
+    largeur = document.pagePointSize(0).width()
+    liens = [r for _, r, _ in vue._link_areas(0)]
+    assert len(liens) == 3, liens
+    court, un, deux = sorted(liens, key=lambda r: (r.top(), r.left()))
+
+    def lien(x, rectangle):
+        return vue._link(page.topLeft() + QtCore.QPoint(round(x * echelle), round(rectangle.center().y() * echelle)))
+
+    assert lien(court.center().x(), court) is not None, "le texte du lien n'est plus cliquable"
+    assert lien(largeur - court.left() - 2, court) is not None, "le bout de la ligne d'un lien seul n'est pas cliquable"
+    assert lien(largeur - un.left() - 2, deux) is None, "deux liens sur une ligne : le bout de la ligne est devenu cliquable"
+    assert lien(un.center().x(), un) is not None and lien(deux.center().x(), deux) is not None
+
+    def plus_sombre():  # le pixel le plus sombre du texte de « Court »
+        image = vue.viewport().grab().toImage()
+        return min(image.pixelColor(page.left() + round(x * echelle), page.top() + round(court.center().y() * echelle)).lightness()
+                   for x in range(round(court.left()), round(court.right())))
+
+    fin = time.monotonic() + 10  # QPdfView rend ses pages en arrière-plan
+    while (avant := plus_sombre()) > 250 and time.monotonic() < fin:
+        app.processEvents()
+    vue.setPageLimit(1)  # la cible est plus loin : le lien ne se suit plus, et un voile blanc l'éclaircit
+    app.processEvents()
+    assert {cible for _, _, cible in vue._link_areas(0)} == {document.pageCount() - 1}
+    assert lien(court.center().x(), court) is None
+    assert plus_sombre() > avant + 30, (avant, plus_sombre())
     vue.close()
 
 

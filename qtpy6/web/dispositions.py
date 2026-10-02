@@ -67,13 +67,14 @@ class Rangee(Disposition):
     le suit est poussé à droite de sa ligne ; un ``addSpacing`` est un blanc fixe, comme dans un ``QHBoxLayout``. Les
     ressorts d'une même ligne s'en partagent la place libre à parts égales, comme dans un ``QHBoxLayout`` : un ressort
     entre chaque widget les espace régulièrement. Les widgets de politique horizontale ``Expanding`` se partagent la
-    largeur de leur ligne à parts égales, sauf un plus large que sa part, qui garde sa largeur. ``uniforme`` les coupe
-    en lignes comme s'ils avaient tous la largeur du plus large, pour que les parts soient vraiment égales, mais
-    seulement si cela ne coûte pas de ligne de plus : quand la place manque, chacun reprend la largeur de son texte."""
+    largeur de leur ligne à parts égales, sauf un plus large que sa part, qui garde sa largeur. Avec ``elargir``, ils
+    gardent au contraire leur largeur et chacun reçoit la même part de la place libre, comme dans un ``QHBoxLayout`` :
+    des boutons sans cadre au texte centré s'y espacent comme avec un ressort entre deux, mais la zone qui réagit au
+    pointeur couvre l'écart."""
 
-    def __init__(self, espacement, uniforme=False):
+    def __init__(self, espacement, elargir=False):
         super().__init__(espacement)
-        self.uniforme = uniforme
+        self.elargir = elargir
 
     def addStretch(self):
         self.addItem(QSpacerItem(0, 0, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
@@ -100,22 +101,12 @@ class Rangee(Disposition):
     def _lignes(self, largeur, mesures):
         """Les lignes : des listes de mesures (``_mesurer``), coupées là où la suivante ne tient plus ; ``None`` marque
         le ressort."""
-        lignes = self._couper(largeur, 0, mesures)
-        extensibles = [m[1] for m in mesures if m is not None and m[3]]
-        if self.uniforme and extensibles:
-            egales = self._couper(largeur, max(extensibles), mesures)
-            if len(egales) == len(lignes):
-                return egales
-        return lignes
-
-    def _couper(self, largeur, large, mesures):
-        """Les lignes, chaque item extensible compté au moins ``large``."""
         lignes, x, espace = [[]], 0, self.spacing()
         for m in mesures:
             if m is None:
                 lignes[-1].append(None)
                 continue
-            l = max(m[1], large) if m[3] else m[1]
+            l = m[1]
             if x and x + espace + l > largeur:
                 lignes.append([])
                 x = 0
@@ -135,9 +126,14 @@ class Rangee(Disposition):
             extensibles = sorted((n for n, m in enumerate(mesures) if m[3]), key=lambda n: -largeurs[n])
             libre = (rect.width() - self.spacing() * (len(items) - 1)
                      - sum(l for n, l in enumerate(largeurs) if n not in extensibles))
-            for k, n in enumerate(extensibles):  # les plus larges d'abord : qui dépasse la part égale garde sa largeur
-                largeurs[n] = max(largeurs[n], libre // (len(extensibles) - k))
-                libre -= largeurs[n]
+            if self.elargir:  # la place libre ajoutée à chacun, à parts égales
+                libre -= sum(largeurs[n] for n in extensibles)
+                for k, n in enumerate(extensibles):
+                    largeurs[n] += max(libre, 0) * (k + 1) // len(extensibles) - max(libre, 0) * k // len(extensibles)
+            else:
+                for k, n in enumerate(extensibles):  # les plus larges d'abord : qui dépasse la part égale garde sa largeur
+                    largeurs[n] = max(largeurs[n], libre // (len(extensibles) - k))
+                    libre -= largeurs[n]
             # la place libre aux ressorts, à parts égales (rien quand elle manque)
             reste, ressorts = max(rect.width() - sum(largeurs) - self.spacing() * (len(items) - 1), 0), ligne.count(None)
             x, n, r = rect.x(), 0, 0

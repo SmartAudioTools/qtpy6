@@ -11,12 +11,14 @@
 
   // La partie de pdf_viewer.css (pdf.js 6.2.108) qui fait la couche de texte, plus la page et le fond de la vue.
   const CSS = `
-.qtpy6-pdf { position: fixed; overflow: auto; background: #d9d9d9; z-index: 10; box-sizing: border-box; }
+.qtpy6-pdf { position: fixed; overflow: auto; background: #d9d9d9; z-index: 10; box-sizing: border-box;
+  scrollbar-color: rgba(0 0 0 / 0.3) transparent; }
 .qtpy6-pdf .page { position: relative; margin: 0 auto; background: white;
   --user-unit: 1; --total-scale-factor: calc(var(--scale-factor) * var(--user-unit));
   --scale-round-x: 1px; --scale-round-y: 1px; }
 .qtpy6-pdf .liens { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
 .qtpy6-pdf .liens a { position: absolute; pointer-events: auto; cursor: pointer; }
+.qtpy6-pdf .liens .voile { position: absolute; background: rgba(255 255 255 / 0.63); }
 .qtpy6-pdf .page canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
 .qtpy6-pdf .textLayer { position: absolute; text-align: initial; inset: 0; overflow: clip; opacity: 1; line-height: 1;
   text-size-adjust: none; forced-color-adjust: none; transform-origin: 0 0; caret-color: CanvasText; z-index: 0;
@@ -130,20 +132,31 @@
       if (this.doc) this.mettreEnPage();
     }
 
-    // Les liens internes de la page (pas les URL : une épreuve ne sort pas de la page), vers une page montrée.
+    // Les liens internes de la page (pas les URL : une épreuve ne sort pas de la page), vers une page montrée ; ceux vers
+    // une page cachée sont voilés de blanc. Un lien seul sur sa ligne la prend toute, large comme la page moins sa marge
+    // gauche de chaque côté, et pas seulement son texte (un sommaire : la fin d'un titre court n'était pas cliquable) ;
+    // même règle sur ordinateur (QtPdfWidgets.py).
     async lier(page, viewport, cadre, generation) {
       const liens = document.createElement("div");
       liens.className = "liens";
-      for (const a of await page.getAnnotations()) {
-        if (a.subtype !== "Link" || !a.dest) continue;
+      const annotations = (await page.getAnnotations()).filter(a => a.subtype === "Link");
+      const seul = a => !annotations.some(b => b !== a && Math.min(b.rect[1], b.rect[3]) < Math.max(a.rect[1], a.rect[3])
+                                                         && Math.min(a.rect[1], a.rect[3]) < Math.max(b.rect[1], b.rect[3]));
+      for (const a of annotations) {
+        if (!a.dest) continue;
         const dest = typeof a.dest === "string" ? await this.doc.getDestination(a.dest) : a.dest;
         if (!dest) continue;
         const cible = typeof dest[0] === "number" ? dest[0] : await this.doc.getPageIndex(dest[0]);
-        if (cible >= this.montrees()) continue;
         const [[x1, y1], [x2, y2]] = [a.rect.slice(0, 2), a.rect.slice(2)].map(([x, y]) => viewport.convertToViewportPoint(x, y));  // pdf.js 6 n'a plus convertToViewportRectangle
-        const lien = document.createElement("a");
-        Object.assign(lien.style, { left: `${Math.min(x1, x2)}px`, top: `${Math.min(y1, y2)}px`,
-                                    width: `${Math.abs(x2 - x1)}px`, height: `${Math.abs(y2 - y1)}px` });
+        const actif = cible < this.montrees(), lien = document.createElement(actif ? "a" : "div"), gauche = Math.min(x1, x2);
+        const largeur = seul(a) ? Math.max(Math.abs(x2 - x1), viewport.width - 2 * gauche) : Math.abs(x2 - x1);
+        Object.assign(lien.style, { left: `${gauche}px`, top: `${Math.min(y1, y2)}px`,
+                                    width: `${largeur}px`, height: `${Math.abs(y2 - y1)}px` });
+        if (!actif) {  // vers une page cachée (setPageLimit) : un voile blanc, et rien à cliquer (même voile sur ordinateur)
+          lien.className = "voile";
+          liens.append(lien);
+          continue;
+        }
         lien.addEventListener("click", e => {
           e.preventDefault();
           const page = this.div.children[cible];
