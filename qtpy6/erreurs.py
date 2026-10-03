@@ -2,7 +2,7 @@
 
 ``installer()`` remplace ``sys.excepthook`` et ``threading.excepthook`` (celui d'un ``threading.Thread``) :
 l'exception passe d'abord au crochet en place (la trace en console reste), puis sa trace s'affiche dans une
-``QMessageBox`` critique au texte sélectionnable, pour la copier. Levée dans un autre fil, elle traverse un signal
+``QMessageBox`` critique au texte sélectionnable, avec un bouton « Copier » qui met toute la trace dans le presse-papiers. Levée dans un autre fil, elle traverse un signal
 jusqu'au fil de l'objet relais, celui qui a appelé ``installer()`` (le fil principal) : un widget ne se crée que là.
 Levée dans ce fil-là, le signal est livré directement, la boîte s'ouvre aussitôt. Sans ``QApplication``, la boîte en
 crée une. ``SystemExit`` dans un fil reste muet, comme ``threading`` le fait.
@@ -22,8 +22,14 @@ _relais = None
 
 def boite(message):
     """La boîte affichée pour ``message`` (la trace), pas encore ouverte."""
-    b = QMessageBox(QMessageBox.Icon.Critical, "Critical Error", "An unexpected Exception has occured!\n" + message)
-    b.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse | Qt.TextInteractionFlag.LinksAccessibleByMouse)
+    texte = "An unexpected Exception has occured!\n" + message
+    b = QMessageBox(QMessageBox.Icon.Critical, "Critical Error", texte)
+    b.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse | Qt.TextInteractionFlag.TextSelectableByKeyboard
+                              | Qt.TextInteractionFlag.LinksAccessibleByMouse)
+    b.addButton(QMessageBox.StandardButton.Ok)
+    # la trace entière d'un clic, sans avoir à la sélectionner (demande de l'utilisateur, 03/10/2026)
+    copier = b.addButton("Copier", QMessageBox.ButtonRole.ActionRole)
+    copier.clicked.connect(lambda: QApplication.clipboard().setText(texte))
     return b
 
 

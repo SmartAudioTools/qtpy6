@@ -74,4 +74,7 @@ def test_boite_selectionnable_sans_toucher_au_style(app):
     assert "Traceback ..." in b.text()
     assert b.textInteractionFlags() & Qt.TextInteractionFlag.TextSelectableByMouse
     assert app.styleSheet() == "QLabel { color: red; }"
+    copier = next(c for c in b.buttons() if c.text() == "Copier")
+    copier.click()
+    assert QApplication.clipboard().text() == "An unexpected Exception has occured!\nTraceback ..."
     app.setStyleSheet("")
