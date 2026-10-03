@@ -271,8 +271,7 @@ def doubler_qtcore(ns):
 
     def _relayer(r, args, exp):
         if r.direct or _peut_suspendre():
-            f = r.cible()
-            return f(*args[:r.n] if r.n is not None else args) if f is not None else None
+            return executer(r, exp, args)  # appelé tout de suite, mais par le relais : sender() n'y vaut que par _expediteur
         _plus_tard(executer, r, exp, args)
         return None
 
@@ -281,9 +280,10 @@ def doubler_qtcore(ns):
         if f is not None:
             _expediteur.append(exp)
             try:
-                f(*args[:r.n] if r.n is not None else args)
+                return f(*args[:r.n] if r.n is not None else args)
             finally:
                 _expediteur.pop()
+        return None
 
     def connect_(self, slot, *args, **kwargs):
         if isinstance(slot, (signal_lie, types.BuiltinFunctionType, types.BuiltinMethodType)) or not callable(slot):

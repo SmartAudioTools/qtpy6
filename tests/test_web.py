@@ -543,6 +543,43 @@ def test_slot_reporte_garde_expediteur_et_arguments():
 
 
 @greenlet_seul
+def test_slot_direct_garde_expediteur():
+    # Émis dans une entrée promettante, le slot est appelé tout de suite : sender() y vaut aussi, sinon un slot partagé par
+    # deux boutons (les flèches « question non traitée » de SmartTeacher) ne sait pas lequel a été cliqué.
+    sortie = simule("""
+        from qtpy6.QtCore import QObject, Signal
+        class A(QObject):
+            s = Signal()
+        class B(QObject):
+            def recu(self):
+                print("recu", "a1" if self.sender() is a1 else "a2" if self.sender() is a2 else self.sender())
+        a1, a2, b = A(), A(), B()
+        a1.s.connect(b.recu)
+        a2.s.connect(b.recu)
+        principal(lambda: (a1.s.emit(), a2.s.emit()))
+    """)
+    assert sortie.splitlines() == ["recu a1", "recu a2"]
+
+
+@greenlet_seul
+def test_animation_par_image_survit_au_slot_reporte():
+    # Lancée hors entrée promettante, le « Running » de start() atteint _etat après la pause intérieure : l'animation doit
+    # quand même aller au bout (la descente vers une question de SmartTeacher restait figée à 0).
+    sortie = simule("""
+        from qtpy6.QtCore import QPropertyAnimation
+        from qtpy6.QtWidgets import QScrollBar
+        barre = QScrollBar()
+        barre.setRange(0, 1000)
+        barre.show()
+        a = QPropertyAnimation(barre, b"value", duration=50, startValue=0, endValue=800)
+        a.start()
+        tourner(400)
+        print(barre.value(), a.state().name)
+    """)
+    assert sortie.strip() == "800 Stopped"
+
+
+@greenlet_seul
 def test_un_coup_de_minuterie_est_un_slot():
     sortie = simule("""
         from qtpy6.QtCore import QTimer

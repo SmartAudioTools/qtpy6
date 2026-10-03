@@ -81,7 +81,10 @@ def doubler(ns):
             super().stop()
 
         def _etat(self, nouveau, ancien):
-            if nouveau != Etat.Paused:  # arrêté ou repris autrement (cible détruite, setCurrentTime au bout…)
+            # arrêté ou repris autrement (cible détruite, setCurrentTime au bout…). L'état RÉEL, pas celui du signal : dans
+            # le navigateur, ce slot est reporté (qtpy6.web.bloquant), et le « Running » de start() arrivait une fois la
+            # pause intérieure posée, lâchant la fenêtre : l'animation restait figée (flèches de SmartTeacher, 03/10/2026)
+            if super().state() != Etat.Paused:
                 self._lacher()
 
         def _lacher(self):
