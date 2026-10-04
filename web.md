@@ -402,6 +402,17 @@ postes visés ; (5) le temps de chargement à froid derrière le bandeau, avec l
   pour le cas le plus naturel. Test : `test_pdf_document_enfant_de_la_vue` (dans un processus à part, le plantage
   emportant pytest), qui échoue sans le contournement.
 - **`QDrag.exec` ne revient jamais** (boucle imbriquée, `QBasicDrag`) : mesuré le 04/10/2026, à la souris comme au doigt, le premier glisser d'une liste à l'autre dépose mais ne retire pas l'élément de départ (il est COPIÉ), chacun des suivants rend la main en 3 ms sans rien déposer. Écartés, mesures à l'appui : `bloquant` (Qt appelle `startDrag` depuis `mouseMoveEvent`, où JSPI ne suspend pas) ; des `QDropEvent` fabriqués (leur `source()` est None, toutes les vues les refusent, mesuré en natif). D'où `qtpy6.web.glisser`. Deux pièges rencontrés en l'écrivant : `QListWidget.dropMimeData` lit l'indicateur de dépôt que seul le glisser de Qt pose, et ÉCRASE l'élément visé au lieu d'insérer (d'où `insertRows` + `setItemData`) ; et en mode paresseux de PySide6 (`Shiboken.setTypeCreationHook`, actif dans le navigateur seulement), l'espace de noms de `qtpy6.QtWidgets` ne contient pas encore les classes : on les prend par `getattr(module, nom)`. Après (sonde SmartTeacher au profil téléphone, 3 glissés par cas, doigt et souris) : 3 sur 3 déplacent, sans doublon.
+- **`WA_AcceptTouchEvents` n'arrête PAS un `QScroller` ancêtre**, en natif comme dans le navigateur : ce n'était pas un
+  écart du web mais un contrat faux de `tactile.relayer_en_souris`, qui l'affirmait jusqu'au 04/10/2026 — le widget
+  recevait le geste ET la page défilait. Mesuré en natif (`tests/test_tactile.py`, doigt simulé, `ZoneDefilante` +
+  `defiler_au_doigt` comme le lecteur QCM) : un glissé de 120 px sur le widget menait la barre de 200 à ~440, avec ou sans
+  l'acceptation, comme hors du widget (témoin). Dans le navigateur (sonde Firefox du lecteur QCM de SmartTeacher au profil
+  téléphone, scénario `parsons` de `sonde_lecteur.html`, ancien `editeur_code.EditeurLignes`) : un glissé sur l'éditeur
+  déplaçait une ligne ([6,3,0]→[6,0,3]) ET défilait (barre 186→148) ; sur la réserve, il ajoutait une ligne ET défilait
+  (328→508). Réparé : chaque événement relayé arrête le `QScroller` des ancêtres (`arreter_le_defilement`, ce que faisait
+  déjà `AppuiLong` à la prise) ; `test_glisse_sur_le_relais_ne_fait_pas_defiler` échoue sans (440 ≠ 200). Le test tourne
+  dans un processus à part : un écran tactile simulé reste recensé par Qt et ferait mentir `tactile.detecte()` ensuite.
+  Non sondé dans le navigateur après réparation (le `stop()` du `QScroller` y est mesuré par `AppuiLong`, Parsons).
 - **La sonde** : Firefox ne descend pas sous 500 px de large (une largeur de téléphone se mesure en natif hors écran, ou
   avec `--zoom`) ; Chromium n'ouvre pas sans socket Unix, ce qu'un bac à sable peut interdire. Selenium Manager tente de
   télécharger geckodriver avant de prendre celui du système : sans réseau, ses messages sont du bruit, pas une panne.

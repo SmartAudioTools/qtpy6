@@ -179,8 +179,9 @@ def relayer_en_souris(widget, evenement):
     """Un ``QTouchEvent`` (premier doigt seulement) rejoué en ``QMouseEvent`` sur les gestionnaires souris de
     ``widget`` (``mousePressEvent``/``mouseMoveEvent``/``mouseReleaseEvent``, inchangés) : ce que ``widget`` sait déjà
     faire au clic, il le refait au doigt. À appeler depuis un ``event()`` qui a mis ``WA_AcceptTouchEvents`` sur
-    ``widget`` — c'est cette acceptation qui empêche un ``QScroller`` ancêtre (``defiler_au_doigt``) de capter le même
-    doigt pour faire défiler à sa place : Qt n'accorde pas les deux gestes au même point de contact. Rend ``True``
+    ``widget``. Le doigt est alors au widget : chaque événement relayé arrête le ``QScroller`` des ancêtres
+    (``defiler_au_doigt``), que l'acceptation seule n'empêche PAS de faire défiler la page en même temps, en natif comme
+    dans le navigateur (mesuré le 04/10/2026 : ``tests/test_tactile.py``, web.md, « Pièges »). Rend ``True``
     (traité) ou ``False`` (type ou doigt absent : rien à faire)."""
     genre = _GESTES.get(evenement.type())
     points = evenement.points() if genre is not None else ()
@@ -189,10 +190,19 @@ def relayer_en_souris(widget, evenement):
     position = points[0].position()
     boutons = Qt.MouseButton.NoButton if genre == QEvent.Type.MouseButtonRelease else Qt.MouseButton.LeftButton
     souris = QMouseEvent(genre, position, position, Qt.MouseButton.LeftButton, boutons, evenement.modifiers())
+    arreter_le_defilement(widget)
     {QEvent.Type.MouseButtonPress: widget.mousePressEvent, QEvent.Type.MouseMove: widget.mouseMoveEvent,
      QEvent.Type.MouseButtonRelease: widget.mouseReleaseEvent}[genre](souris)
     evenement.accept()
     return True
+
+
+def arreter_le_defilement(widget):
+    """Arrête le ``QScroller`` de chaque ancêtre de ``widget`` (``defiler_au_doigt``) : le doigt est à ``widget``."""
+    while widget is not None:
+        if QScroller.hasScroller(widget):
+            QScroller.scroller(widget).stop()
+        widget = widget.parentWidget()
 
 
 class Toucher:
@@ -266,9 +276,5 @@ class AppuiLong(QObject):
 
     def _prendre(self):
         self.toucher.point = None
-        parent = self.widget
-        while parent is not None:
-            if QScroller.hasScroller(parent):
-                QScroller.scroller(parent).stop()
-            parent = parent.parentWidget()
+        arreter_le_defilement(self.widget)
         self.prendre(self.position)
