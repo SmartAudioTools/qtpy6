@@ -6,6 +6,8 @@ Les éléments empilés dans une ``QScrollArea`` passent par trois états : pas 
   méthode ``batir()`` qui les crée (et met ``batie`` à vrai). Un ``Chantier`` les bâtit en tâche de fond, par tranches
   de ``TRANCHE`` secondes rendues à la boucle d'événements entre deux, et s'arrête tant qu'une page paresseuse défile :
   une tranche dépasse son budget d'un élément entier, ce qui se voit comme un saut pendant une animation de défilement.
+  Dans le navigateur, une tranche attend l'image suivante (``requestAnimationFrame``) : enchaînées par la boucle
+  d'événements, deux tranches passaient souvent dans la même image, que la page ne peignait qu'après.
   Un élément qui entre dans la vue avant son tour est bâti aussitôt par sa page.
 - **Endormir.** La disposition (``QLayout.setEnabled(False)``) des éléments à plus de ``MARGE`` hauteurs de vue est
   désactivée : un redimensionnement de la fenêtre ne remet plus en page que ceux de l'écran.
@@ -15,12 +17,15 @@ Bâti ou éveillé, un élément change de hauteur : le défilement est compens�
 
 Mesuré sur le lecteur QCM de SmartTeacher (02/10/2026) : 85 questions, 20 redimensionnements 968 → 480 ms hors écran ;
 218 questions bâties en tâche de fond, ouverture 2,2 s plus courte dans le navigateur ; la première descente du sujet de
-bac sautait de 27 à 69 px quand le chantier ne s'arrêtait pas pendant le défilement, 8 px sinon."""
+bac sautait de 27 à 69 px quand le chantier ne s'arrêtait pas pendant le défilement, 8 px sinon. Une tranche par image
+dans Firefox (04/10/2026, 217 questions de python_tp) : 186 à 207 images au lieu de 119 à 140 pendant la construction,
+image médiane 33 à 49 ms au lieu de 66, construction 7,8 s au lieu de 7,5."""
 
 import math
 import time
 
 from qtpy6.QtCore import QCoreApplication, QEvent, QObject, QPoint, QTimer, Signal
+from qtpy6.web import navigateur
 
 
 class Paresse(QObject):
@@ -155,7 +160,12 @@ class Chantier(QObject):
                 page.batir(self.reste, fin)
             else:
                 self.reste.pop(0).batir()
-        if self.reste:
-            QTimer.singleShot(0, self, self.tranche)
-        else:
+        if not self.reste:
             self.fini.emit()
+        elif navigateur():
+            import js  # noqa: PLC0415 - Pyodide seulement
+            from pyodide.ffi import create_once_callable  # noqa: PLC0415
+
+            js.requestAnimationFrame(create_once_callable(lambda _: QTimer.singleShot(0, self, self.tranche)))
+        else:
+            QTimer.singleShot(0, self, self.tranche)
