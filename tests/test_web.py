@@ -155,6 +155,56 @@ def test_toucher_apres_une_course_finie_est_un_clic(app):
     assert case.isChecked()  # page au repos : le toucher est un clic
 
 
+def test_toucher_ou_glisse(app):
+    class Case(QtWidgets.QWidget):  # agit au clic, et au doigt au lever d'un toucher seulement
+        def __init__(self):
+            super().__init__()
+            self.toucher, self.clics = tactile.Toucher(), 0
+            self.resize(200, 200)
+
+        def mousePressEvent(self, evenement):
+            if not self.toucher.appui(evenement):
+                self.clics += 1
+
+        def mouseMoveEvent(self, evenement):
+            self.toucher.bouge(evenement)
+
+        def mouseReleaseEvent(self, evenement):
+            self.clics += self.toucher.leve(evenement)
+
+    case = Case()
+    case.show()
+    doigt, fenetre = QtTest.QTest.createTouchDevice(), case.windowHandle()
+
+    def geste(*points):
+        QtTest.QTest.touchEvent(fenetre, doigt).press(0, QtCore.QPoint(*points[0])).commit()
+        for point in points[1:]:
+            QtTest.QTest.touchEvent(fenetre, doigt).move(0, QtCore.QPoint(*point)).commit()
+        QtTest.QTest.touchEvent(fenetre, doigt).release(0, QtCore.QPoint(*points[-1])).commit()
+
+    tactile.ACTIF = True
+    try:
+        geste((100, 100), (102, 101))
+        assert case.clics == 1  # un toucher, même tremblé sous le seuil
+        geste((100, 40), (100, 100), (100, 160))
+        assert case.clics == 1  # un glissé ne clique pas, même revenu près du départ
+        geste((100, 100), (100, 130), (100, 101))
+        assert case.clics == 1
+        case.toucher.point = QtCore.QPointF(case.mapToGlobal(QtCore.QPoint(5, 5)))  # un toucher annulé, jamais relâché
+        case.toucher.appui(QtGui.QMouseEvent(QtCore.QEvent.Type.MouseButtonPress, QtCore.QPointF(5, 5), QtCore.QPointF(5, 5),
+                                             QtCore.Qt.MouseButton.LeftButton, QtCore.Qt.MouseButton.LeftButton,
+                                             QtCore.Qt.KeyboardModifier.NoModifier))
+        assert case.toucher.point is None  # l'appui suivant l'oublie, et la souris réelle n'arme rien
+        QtTest.QTest.mouseRelease(case, QtCore.Qt.MouseButton.LeftButton, pos=QtCore.QPoint(5, 5))
+        assert case.clics == 1  # un relâchement sans appui noté n'est pas un toucher
+        QtTest.QTest.mouseClick(case, QtCore.Qt.MouseButton.LeftButton, pos=QtCore.QPoint(5, 5))
+        assert case.clics == 2  # la souris agit à l'appui, comme avant
+    finally:
+        tactile.ACTIF = False
+    geste((100, 40), (100, 160))
+    assert case.clics == 3  # sans ACTIF, le doigt est une souris : appui immédiat
+
+
 def test_rangee_se_replie(app):
     zone = QtWidgets.QWidget()
     rangee = dispositions.Rangee(6)

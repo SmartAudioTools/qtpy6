@@ -193,3 +193,33 @@ def relayer_en_souris(widget, evenement):
      QEvent.Type.MouseButtonRelease: widget.mouseReleaseEvent}[genre](souris)
     evenement.accept()
     return True
+
+
+class Toucher:
+    """Au doigt (``ACTIF``), un toucher (doigt posé et levé sur place) se distingue d'un glissé, qui fait défiler la page
+    (``defiler_au_doigt``) : un widget qui agit au clic n'agit qu'au lever d'un toucher. Pour un widget qui laisse la page
+    défiler sous le doigt, contrairement à ``relayer_en_souris`` qui la lui prend ; à la souris, rien ne change.
+
+    ``appui`` (dans ``mousePressEvent``) rend ``True`` pour la souris que Qt tire d'un doigt : ne rien faire encore.
+    ``bouge`` (``mouseMoveEvent``) oublie l'appui dès que le doigt s'éloigne de plus de ``startDragDistance``.
+    ``leve`` (``mouseReleaseEvent``) rend ``True`` pour un toucher : agir maintenant.
+    Les positions sont GLOBALES : quand la page suit le doigt, le point touché ne bouge pas dans le widget, et des
+    positions locales n'y verraient aucun glissé. Un toucher que le navigateur annule sans relâchement (la page a pris
+    le glissé) est oublié à l'appui suivant, et un relâchement sans appui noté n'est pas un toucher."""
+
+    def __init__(self):
+        self.point = None
+
+    def appui(self, evenement):
+        doigt = ACTIF and evenement.source() != Qt.MouseEventSource.MouseEventNotSynthesized
+        self.point = evenement.globalPosition() if doigt else None
+        return doigt
+
+    def bouge(self, evenement):
+        if self.point is not None and (evenement.globalPosition() - self.point).manhattanLength() > QApplication.startDragDistance():
+            self.point = None
+
+    def leve(self, evenement):
+        self.bouge(evenement)
+        touche, self.point = self.point is not None, None
+        return touche
