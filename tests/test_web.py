@@ -919,3 +919,103 @@ def test_accept_du_selecteur_de_fichiers():
     assert _accept("Images (*.png);;Tout (*)") == ""
     assert _accept("") == ""
     assert _accept("*.tar.gz") == ".tar.gz"
+
+
+# ---- glisser : startDrag sans QDrag.exec (le navigateur) ----
+
+def _listes(app, mode=QtWidgets.QAbstractItemView.DragDropMode.DragDrop, n=2):
+    """``n`` listes côte à côte dont la ``startDrag`` est celle du navigateur (sans l'installer sur la liaison)."""
+    from qtpy6.web import glisser
+
+    class Liste(QtWidgets.QListWidget):
+        startDrag = glisser.startDrag
+
+    fenetre = QtWidgets.QWidget()
+    disposition = QtWidgets.QHBoxLayout(fenetre)
+    listes = []
+    for k in range(n):
+        liste = Liste()
+        liste.addItems([f"{'abc'[k]}{i}" for i in range(3)])
+        liste.setDragDropMode(mode)
+        liste.setDefaultDropAction(QtCore.Qt.DropAction.MoveAction)
+        disposition.addWidget(liste)
+        listes.append(liste)
+    fenetre.resize(400, 200)
+    fenetre.show()
+    QtTest.QTest.qWaitForWindowExposed(fenetre)
+    return fenetre, listes
+
+
+def _glisser(source, rang, cible, point):
+    """Le glisser de l'élément ``rang`` de ``source`` lâché en ``point`` du viewport de ``cible``."""
+    source.setCurrentRow(rang)
+    source.startDrag(source.supportedDropActions() | QtCore.Qt.DropAction.CopyAction)
+    QtTest.QTest.mouseMove(cible.viewport(), point)
+    QtTest.QTest.mouseRelease(cible.viewport(), QtCore.Qt.MouseButton.LeftButton, QtCore.Qt.KeyboardModifier.NoModifier, point)
+
+
+def _textes(liste):
+    return [liste.item(k).text() for k in range(liste.count())]
+
+
+def test_glisser_d_une_liste_a_l_autre_deplace(app):
+    fenetre, (a, b) = _listes(app)
+    _glisser(a, 0, b, b.visualItemRect(b.item(1)).center() + QtCore.QPoint(0, 3))  # moitié basse de b1
+    assert (_textes(a), _textes(b)) == (["a1", "a2"], ["b0", "b1", "a0", "b2"])  # déplacé, pas copié
+    _glisser(a, 0, b, QtCore.QPoint(5, b.viewport().height() - 2))  # le second glisser vit aussi ; sous le dernier
+    assert (_textes(a), _textes(b)) == (["a2"], ["b0", "b1", "a0", "b2", "a1"])
+    assert b.currentItem().text() == "a1"
+
+
+def test_glisser_dans_la_meme_liste(app):
+    Mode = QtWidgets.QAbstractItemView.DragDropMode
+    fenetre, (a,) = _listes(app, Mode.InternalMove, n=1)
+    _glisser(a, 0, a, a.visualItemRect(a.item(2)).center() + QtCore.QPoint(0, 3))
+    assert _textes(a) == ["a1", "a2", "a0"]
+    _glisser(a, 2, a, a.visualItemRect(a.item(0)).center() - QtCore.QPoint(0, 3))
+    assert _textes(a) == ["a0", "a1", "a2"]
+    _glisser(a, 1, a, a.visualItemRect(a.item(1)).center())  # lâché sur lui-même : rien
+    assert _textes(a) == ["a0", "a1", "a2"]
+
+
+def test_glisser_respecte_ce_que_la_vue_autorise(app):
+    Mode = QtWidgets.QAbstractItemView.DragDropMode
+    fenetre, (a, b) = _listes(app)
+    b.setDragDropMode(Mode.NoDragDrop)  # b refuse les dépôts
+    _glisser(a, 0, b, b.visualItemRect(b.item(0)).center())
+    assert (_textes(a), _textes(b)) == (["a0", "a1", "a2"], ["b0", "b1", "b2"])
+    b.setDragDropMode(Mode.InternalMove)  # b ne prend que ses propres éléments
+    _glisser(a, 0, b, b.visualItemRect(b.item(0)).center())
+    assert (_textes(a), _textes(b)) == (["a0", "a1", "a2"], ["b0", "b1", "b2"])
+    b.setDragDropMode(Mode.DragDrop)
+    a.item(0).setFlags(a.item(0).flags() & ~QtCore.Qt.ItemFlag.ItemIsDragEnabled)  # élément non déplaçable
+    _glisser(a, 0, b, b.visualItemRect(b.item(0)).center())
+    assert (_textes(a), _textes(b)) == (["a0", "a1", "a2"], ["b0", "b1", "b2"])
+    a.setDefaultDropAction(QtCore.Qt.DropAction.CopyAction)  # une copie, si la vue de départ copie
+    _glisser(a, 1, b, QtCore.QPoint(5, b.viewport().height() - 2))
+    assert (_textes(a), _textes(b)) == (["a0", "a1", "a2"], ["b0", "b1", "b2", "a1"])
+
+
+def test_glisser_rend_la_souris_apres_le_lacher(app):
+    fenetre, (a, b) = _listes(app)
+    _glisser(a, 0, b, b.visualItemRect(b.item(0)).center())
+    QtTest.QTest.mouseClick(a.viewport(), QtCore.Qt.MouseButton.LeftButton, pos=a.visualItemRect(a.item(1)).center())
+    assert a.currentRow() == 1  # le clic suivant n'est plus avalé
+
+
+def test_glisser_pas_installe_en_natif():
+    from qtpy6.web import glisser
+
+    assert QtWidgets.QListWidget.startDrag is not glisser.startDrag and not glisser.installee()
+
+
+def test_glisser_installe_dans_le_navigateur():
+    """Posée sur les classes de la liaison. Le mode paresseux de ``_binding`` (PySide6 de Pyodide) n'existe pas ici :
+    que la doublure passe par le module et non par l'espace de noms, où ``QListWidget`` n'est pas encore, se mesure
+    dans le navigateur (sonde_lecteur, ``?trace=1``)."""
+    sortie = en_navigateur("""
+        from qtpy6.QtWidgets import QListWidget, QTreeView
+        from qtpy6.web import glisser
+        print(QListWidget.startDrag is glisser.startDrag, QTreeView.startDrag is glisser.startDrag)
+    """)
+    assert sortie.split() == ["True", "True"]

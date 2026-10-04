@@ -2,6 +2,7 @@
 
 ## Non publié
 
+- Dans le navigateur, le glisser-déposer des vues d'éléments (`QListWidget`, `QTreeView`, `QTableView`…) déplace enfin : `QDrag.exec` de Qt-WASM ne revenant jamais, le premier glisser copiait l'élément et les suivants ne faisaient rien. `qtpy6.web.glisser` remplace leur `startDrag` (navigateur seulement) par un glisser mené par un filtre d'application qui dépose par le modèle (`web.md`, « Pièges »).
 - `qtpy6.erreurs.installer()` : les exceptions non rattrapées s'affichent dans une boîte de dialogue, depuis
   n'importe quel fil (`QThread`, `threading.Thread`), en plus de la trace en console. Repris de SmartFramework
   (`ui/exceptionDialog.py`), sans l'installation à l'import ni la feuille de style de l'application écrasée.
