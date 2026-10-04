@@ -157,6 +157,14 @@ c'est un processus, pas un fil. Le Pyodide du worker vient de `versions.json` (j
 et n'a pas d'adresse propre : elles sont rendues absolues côté Python) ; un `import()` de `pyodide.mjs` depuis un autre
 hôte exige CORS.
 
+Ce coût du premier `start` se paie d'avance : `travailleur.prechauffer()` monte en réserve UN worker neuf dont le
+Pyodide charge dès maintenant, que le prochain `start()` du même Pyodide consomme au lieu de tout payer. À appeler aux
+moments calmes — la question affichée, le processus précédent fini. Idempotent tant que la réserve n'est pas consommée ;
+un worker de réserve n'a jamais exécuté de code, et un worker consommé n'y revient jamais (un `start` suivant repaie,
+sauf à repréchauffer). Si `configurer` change l'indexURL, la réserve périmée est terminée et remplacée ; si le
+chargement a échoué (Pyodide injoignable), l'échec ressort en erreur du `start` qui le consomme, et le suivant repart à
+froid, comme sans réserve.
+
 ```python
 p = QProcess()                                   # le même code sur le bureau et dans le navigateur
 p.readyReadStandardOutput.connect(lambda: print(bytes(p.readAllStandardOutput()).decode(), end=""))

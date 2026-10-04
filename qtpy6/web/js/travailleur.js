@@ -4,10 +4,12 @@
 //   reçus : {init: {indexURL, archives: [{url, dossier}], module, cwd}}, {appel: {id, fonction, args}}
 //   émis :  {pret}, {id, sortie} (ce que l'appel imprime, au fil de l'eau), {id, retour}, {id, erreur}, {erreur} (init)
 // Ou bien un processus (ProcessusWeb) : un script lancé en __main__, qui lit son stdin comme sur le bureau.
-//   reçus : {lancer: {indexURL, zip, dossier, argv, cwd}}, {entree: texte} (stdin), {entree: null} (fin de fichier) ;
+//   reçus : {prechauffer: {indexURL}} (charger Pyodide dès maintenant, sans script : le {lancer} qui suivra l'épargne),
+//           {lancer: {indexURL, zip, dossier, argv, cwd}}, {entree: texte} (stdin), {entree: null} (fin de fichier) ;
 //           le zip porte ses chemins depuis la racine du système de fichiers, où il est dépaqueté
 //   émis :  {sortie} (stdout), {sortie_erreur} (stderr), {fin: code}, {erreur} (Pyodide injoignable, JSPI absent)
 let py, module, appeler, courant = 0, file = Promise.resolve();  // courant : le numéro de l'appel en cours, 0 hors de tout appel (l'import du module)
+let prechauffe = null;  // {indexURL, py: Promise} : le Pyodide lancé par {prechauffer}, qu'un {lancer} du même indexURL reprend
 const decodeur = new TextDecoder();
 
 function telecharger(url) {
@@ -48,9 +50,13 @@ async function traiter({ id, fonction, args }) {
 const entrees = [], attentes = [];  // stdin : ce qui est arrivé sans être lu, et les lectures qui attendent
 self.prochaine_entree = () => entrees.length ? Promise.resolve(entrees.shift()) : new Promise(r => attentes.push(r));
 
+function charger(indexURL) {
+  return import(indexURL + "pyodide.mjs").then(({ loadPyodide }) => loadPyodide({ indexURL }));
+}
+
 async function lancer({ indexURL, zip, dossier, argv, cwd }) {
-  const { loadPyodide } = await import(indexURL + "pyodide.mjs");
-  py = await loadPyodide({ indexURL });
+  py = await (prechauffe?.indexURL === indexURL ? prechauffe.py : charger(indexURL));  // un échec du préchauffage ressort ici, en {erreur}
+  prechauffe = null;
   const canal = cle => { const d = new TextDecoder(); return { write: o => { postMessage({ [cle]: d.decode(o, { stream: true }) }); return o.length; } }; };
   py.setStdout(canal("sortie")); py.setStderr(canal("sortie_erreur"));
   py.unpackArchive(zip, "zip", { extractDir: "/" });
@@ -107,6 +113,11 @@ _executer(**_lancement)
 
 onmessage = e => {
   const m = e.data;
+  if (m.prechauffer) {  // le rejet est gardé pour le {lancer} qui consommera (le catch vide évite l'« unhandled rejection »)
+    prechauffe = { indexURL: m.prechauffer.indexURL, py: charger(m.prechauffer.indexURL) };
+    prechauffe.py.catch(() => {});
+    return;
+  }
   if (m.lancer) { lancer(m.lancer).catch(e => postMessage({ erreur: String(e) })); return; }
   if ("entree" in m) { attentes.length ? attentes.shift()(m.entree) : entrees.push(m.entree); return; }
   file = m.init ? file.then(() => demarrer(m.init)).catch(e => postMessage({ erreur: String(e) }))

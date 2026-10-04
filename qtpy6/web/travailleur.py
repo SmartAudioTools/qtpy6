@@ -15,6 +15,9 @@ compris (quelques secondes).
                                               ``start(sys.executable, ["-u", "script.py", …])`` lance le script en
                                               ``__main__`` dans un worker neuf, ``write`` est son stdin (JSPI)
     configurer(indexURL)                      le Pyodide du worker, s'il ne vient pas de ``versions.json``
+    prechauffer()                             monte en réserve UN worker dont le Pyodide charge dès maintenant : le
+                                              prochain ``ProcessusWeb.start()`` le consomme et épargne ``loadPyodide``
+                                              (plusieurs secondes, l'essentiel du premier lancement)
 
 Les arguments et les retours sont convertis entre Python et JavaScript (dict, list, str, nombres, None) : une fonction
 du worker reçoit des listes et des dicts ordinaires et rend de même. Elle peut être ``async``.
@@ -34,11 +37,38 @@ from qtpy6.QtCore import QObject, QTimer, Signal  # QtCore en cours de chargemen
 
 REGLAGES = {}  # configurer() : indexURL
 _URL_WORKER = None
+_RESERVE = None  # prechauffer() : (worker, indexURL) — un worker neuf dont le Pyodide charge, consommé par le prochain start()
 
 
 def configurer(indexURL):
     """Ce que ``ProcessusWeb()`` utilise : le Pyodide du worker (``indexURL`` ; sans appel, celui de ``versions.json``)."""
     REGLAGES.update(indexURL=indexURL)
+
+
+def prechauffer():
+    """Monte en réserve UN worker neuf dont le Pyodide (``configurer``, sinon ``versions.json``) charge dès maintenant :
+    le prochain ``ProcessusWeb.start()`` du même Pyodide le consomme au lieu de tout payer (``loadPyodide``, plusieurs
+    secondes). À appeler aux moments calmes — le programme affiché, le précédent arrêté. Idempotent tant que la réserve
+    n'est pas consommée ; un worker de réserve n'a JAMAIS exécuté de code, et un worker consommé n'y revient jamais.
+    Si son chargement a échoué (Pyodide injoignable), l'échec ressort en erreur du ``start`` qui le consomme, et le
+    ``start`` suivant repart à froid, comme sans réserve."""
+    global _RESERVE
+    import js  # noqa: PLC0415
+
+    indexURL = _index_url()
+    if _RESERVE is not None and _RESERVE[1] == indexURL:
+        return
+    if _RESERVE is not None:  # l'indexURL a changé (configurer) : ce worker ne servira plus
+        _RESERVE[0].terminate()
+    worker = js.Worker.new(_url_worker(), type="module")
+    worker.postMessage(_objet({"prechauffer": {"indexURL": indexURL}}))
+    _RESERVE = (worker, indexURL)
+
+
+def _index_url():
+    import js  # noqa: PLC0415
+
+    return js.URL.new(REGLAGES.get("indexURL") or _pyodide(), js.location.href).href
 
 
 def _url_worker():
@@ -172,18 +202,23 @@ class ProcessusWeb(QObject):
         self.dossier_travail = dossier
 
     def start(self, programme="", arguments=(), *_):
+        global _RESERVE
         import js  # noqa: PLC0415
         from pyodide.ffi import create_proxy, to_js  # noqa: PLC0415
 
         cible, argv = _commande(arguments)
         cwd = os.path.abspath(self.dossier_travail or os.getcwd())
         dossier = os.path.dirname(os.path.abspath(cible)) if argv[0] != "-m" else cwd
-        self.worker = js.Worker.new(_url_worker(), type="module")
+        indexURL = _index_url()
+        if _RESERVE is not None and _RESERVE[1] == indexURL:  # le worker préchauffé : son Pyodide charge depuis prechauffer()
+            self.worker, _RESERVE = _RESERVE[0], None
+        else:
+            self.worker = js.Worker.new(_url_worker(), type="module")
         self._recepteur = create_proxy(self._recevoir)
         self.worker.onmessage = self._recepteur
         zip_ = to_js(_zipper([dossier, cwd, tempfile.gettempdir()]))
         self.worker.postMessage(_objet({"lancer": {
-            "indexURL": js.URL.new(REGLAGES.get("indexURL") or _pyodide(), js.location.href).href, "zip": zip_,
+            "indexURL": indexURL, "zip": zip_,
             "dossier": dossier, "argv": argv, "cwd": cwd}}), [zip_.buffer])
 
     def write(self, octets):
