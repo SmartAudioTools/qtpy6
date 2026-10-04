@@ -19,6 +19,7 @@ Le reste, qui n'a pas d'équivalent Qt, est dans ce paquet :
     dispositions                     des dispositions qui se replient quand la place manque (Disposition, Rangee)
     defilement                       ZoneDefilante : une QScrollArea qui, dans le navigateur, ne repeint que la bande qui entre
     travailleur                      le Web Worker Pyodide piloté depuis Qt (Travailleur, ProcessusWeb, configurer)
+    importer(nom, signaler)          importe un module en rendant la main à la page entre deux modules (l'avancement)
     lancer(script, args, pret)       exécute un script écrit pour le bureau, ``sys.exit(app.exec())`` compris
     lanceur                          un .py ou un .zip quelconque, dont il trouve le point d'entrée (la page du site)
     bloquant                         exec() des boîtes, menus, boucles et de l'application, et les boîtes statiques
@@ -151,6 +152,45 @@ def _dessiner_aussitot():
         };
         for (const nom of ["wheel", "pointerdown", "pointermove", "pointerup", "keydown", "keyup"])
           window.addEventListener(nom, () => vider());""")(vider)
+
+
+def importer(nom, signaler=None, periode=0.04):
+    """Importe le module ``nom`` en rendant la main à la page toutes les ``periode`` secondes, entre deux modules : un import
+    de plusieurs secondes (un téléphone) bloquait le fil de la page, qui ne se repeignait plus, et l'avancement du chargement
+    restait figé. ``signaler(n)`` reçoit le nombre de modules cherchés jusque-là (le même d'une visite à l'autre : la page
+    le retient pour en faire une fraction). L'ordre des imports ne change pas : un chercheur en tête de ``sys.meta_path``
+    suspend l'appel (JSPI) puis laisse chercher les autres. Pas de pause dans un onglet caché (le navigateur y retarde les
+    minuteries d'une seconde) ni hors d'une entrée suspendable : l'import se fait alors d'un bloc. À appeler par
+    ``callPromising`` (``preparer`` de qtpy6web.js). Rend le module."""
+    import importlib  # noqa: PLC0415
+    import time  # noqa: PLC0415
+
+    from . import bloquant  # noqa: PLC0415
+
+    if not navigateur():
+        return importlib.import_module(nom)
+    import js  # noqa: PLC0415
+    from pyodide.ffi import create_once_callable  # noqa: PLC0415
+
+    vu, pause = [0], [time.monotonic()]
+
+    class Pause:
+        @staticmethod
+        def find_spec(*_):
+            vu[0] += 1
+            if time.monotonic() - pause[0] > periode and js.document.visibilityState == "visible" and bloquant._pyodide_peut():
+                bloquant._pyodide_suspendre(lambda reprendre: js.setTimeout(create_once_callable(reprendre), 0))
+                pause[0] = time.monotonic()
+                if signaler:
+                    signaler(vu[0])
+
+    sys.meta_path.insert(0, Pause)
+    try:
+        return importlib.import_module(nom)
+    finally:
+        sys.meta_path.remove(Pause)
+        if signaler:
+            signaler(vu[0])
 
 
 def lancer(script, args=(), pret=None, module=None):

@@ -13,8 +13,10 @@
 // ni micropip) ; une adresse qui FINIT par .whl, sans requête « ?v=… » : Pyodide y lit le nom du paquet (uriToPackageData),
 // et répond « No known package with name » sinon. `env` : des variables d'environnement (QT_API : la liaison, celle du Pyodide chargé par défaut). `sur_ligne` : reçoit chaque ligne du
 // journal (print), qui va aussi dans window.journal (ce que lit qtpy6.web.sonde) et la console. `progres(fraction)` : reçoit
-// l'avancement de 0 à 1, les octets reçus de chaque fichier jusqu'à 0,9 (une copie de la réponse est lue à côté : celle que
-// Pyodide reçoit reste intacte, et le navigateur garde son cache de code compilé), puis dépaquetage, roues, 1 rendue. Le total
+// l'avancement de 0 à 1, en phases (`avancement`) : les octets reçus de chaque fichier (une copie de la réponse est lue à côté :
+// celle que Pyodide reçoit reste intacte, et le navigateur garde son cache de code compilé), le moteur, le dépaquetage et les
+// roues, puis `module`, s'il est donné : le module de l'application, importé en rendant la main à la page entre deux de ses
+// modules (qtpy6.web.importer), pour que l'avancement reste vivant ; `py.pyimport(module)` le trouve ensuite tout prêt. Le total
 // attendu : `tailles` ({nom: octets décompressés}, que la page connaît), compté dès le départ ; un fichier hors de `tailles` pèse
 // son Content-Length (juste s'il n'est pas compressé) une fois commencé. L'avancement ne recule jamais. `brotli` : les noms
 // (dernier segment de l'adresse) d'autres fichiers servis aussi compressés en Brotli (NOM.br), comme pyodide.asm.wasm et
@@ -22,6 +24,52 @@
 const t0 = performance.now();
 export const journal = [];
 let ecouter = () => {};
+
+// L'avancement de `preparer`, en quatre phases qui se suivent : les octets (des fichiers de `tailles`), le moteur (sa
+// compilation et le démarrage de Python, les octets reçus), les archives et les roues, le module de l'application (`module`).
+// Chacune a sur le cercle une part à la mesure de sa durée à la visite précédente (localStorage, DUREES à défaut) et y
+// avance de 1 − (1 − r)·e^(−t/τ) : r, sa fraction réelle quand elle en a une (octets reçus, modules importés sur ceux de la
+// dernière fois), t le temps passé dans la phase, τ sa durée attendue (triplée quand r existe : c'est lui qui mène). Ainsi
+// l'avancement ne s'arrête jamais tant que la page vit, ralentit quand une phase dure plus que prévu, et ne recule jamais
+// (demande de l'utilisateur, 04/10/2026 : « ne jamais s'arrêter complètement si des choses avancent »). `progres` est
+// appelé toutes les 100 ms et à chaque fraction réelle.
+const PHASES = ["octets", "moteur", "archives", "module"], DUREES = { octets: 8, moteur: 3, archives: 1, module: 3 };
+const MEMOIRE = "qtpy6web.avancement";
+function avancement(progres) {
+  let memoire = {};
+  try { memoire = JSON.parse(localStorage.getItem(MEMOIRE)) || {}; } catch {}  // stockage refusé (navigation privée…)
+  const attendu = PHASES.map(p => Math.max(0.2, memoire.durees?.[p] ?? DUREES[p]));
+  const total = attendu.reduce((a, b) => a + b), parts = attendu.map(d => d / total);
+  const durees = {}, reels = PHASES.map(() => null);
+  let courante = 0, depart = performance.now(), haut = 0;
+  const maj = () => {
+    const t = (performance.now() - depart) / 1000, r = reels[courante];
+    const dans = 1 - (1 - (r ?? 0)) * Math.exp(-t / (attendu[courante] * (r === null ? 1 : 3)));
+    haut = Math.max(haut, parts.slice(0, courante).reduce((a, b) => a + b, 0) + parts[courante] * Math.min(1, dans));
+    progres(haut);
+  };
+  const minuterie = setInterval(maj, 100);
+  const debut = nom => {
+    const i = PHASES.indexOf(nom);
+    if (i <= courante) return;
+    durees[PHASES[courante]] = (performance.now() - depart) / 1000;
+    PHASES.slice(courante + 1, i).forEach(p => durees[p] = 0);  // une phase sautée : son temps est dans la précédente
+    [courante, depart] = [i, performance.now()];
+    maj();
+  };
+  return {
+    debut,
+    reel: (nom, r) => { const i = PHASES.indexOf(nom); if (i === courante) { reels[i] = Math.min(1, r); maj(); } },
+    fin: modules => {
+      debut("module");
+      durees.module = (performance.now() - depart) / 1000;
+      clearInterval(minuterie);
+      progres(1);
+      try { localStorage.setItem(MEMOIRE, JSON.stringify({ durees, modules })); } catch {}
+    },
+    modules: memoire.modules,
+  };
+}
 
 // Le canevas de chaque fenêtre Qt (qt-window-canvas) est créé avec willReadFrequently : tenu en mémoire et non sur la carte
 // graphique, il reçoit l'image que Qt-WASM envoie à chaque peinture (putImageData) en 1,5 ms au lieu de 8,3 à 1800 px
@@ -119,9 +167,13 @@ function molette(conteneur) {
 }
 
 export async function preparer(conteneur, { indexURL, archives = [], roues = [], env = {}, sur_ligne, progres = () => {},
-                                            tailles = {}, brotli = [] } = {}) {
+                                            tailles = {}, brotli = [], module } = {}) {
   if (sur_ligne) ecouter = sur_ligne;
-  const { prelancer, retablir } = compter(tailles, ["pyodide.asm.wasm", "python_stdlib.zip", ...brotli], f => progres(0.9 * f));
+  const avance = avancement(progres);
+  const { prelancer, retablir } = compter(tailles, ["pyodide.asm.wasm", "python_stdlib.zip", ...brotli], f => {
+    avance.reel("octets", f);
+    if (f >= 1) avance.debut("moteur");
+  });
   window.journal = journal;
   indexURL = new URL(indexURL.endsWith("/") ? indexURL : indexURL + "/", location.href).href;
   // Les gros fichiers demandés dès maintenant : sinon le moteur attendait pyodide.mjs puis pyodide.asm.js (1,2 Mo), deux
@@ -132,15 +184,14 @@ export async function preparer(conteneur, { indexURL, archives = [], roues = [],
   const { loadPyodide } = await import(indexURL + "pyodide.mjs");
   const [py, ...donnees] = await Promise.all([loadPyodide({ indexURL, stdout: print, stderr: print }), ...zips]);
   print(`Pyodide-Qt ${py.version} chargé${donnees.length ? " ; archives " + donnees.map(d => (d.byteLength / 1024) | 0).join(", ") + " Kio" : ""}`);
+  avance.debut("archives");
   archives.forEach((a, i) => py.unpackArchive(donnees[i], "zip", { extractDir: a.dossier }));
-  progres(0.93);
   // loadPackage, et non unpackArchive, pour une roue : il précharge ses .so de façon asynchrone
   for (const roue of roues) {
     if (!roue.endsWith(".whl")) throw new Error(`roue ${roue} : l'adresse doit finir par .whl (pas de requête), Pyodide y lit le nom du paquet`);
     await py.loadPackage(new URL(roue, location.href).href);
   }
   retablir();
-  progres(0.97);
   py._module.qtContainerElements = [conteneur];  // l'API privée de Qt-WASM, isolée ici : l'élément qui sert d'écran à Qt
   molette(conteneur);
   window.qtpy6Conteneur = conteneur;  // ce que qtpy6.web.pdf lit pour caler ses <div> sur les widgets
@@ -156,7 +207,14 @@ f = s and pathlib.Path(s.submodule_search_locations[0], "web", "versions.json")
 f.read_text() if f and f.exists() else "null"`), versions = JSON.parse(attendue);
   if (versions && versions.pyodide_qt.version !== py.version)
     print(`attention : Pyodide-Qt ${py.version} là où qtpy6.web attend ${versions.pyodide_qt.version} (roues ${versions.pyodide_qt.abi})`);
-  progres(1);
+  let modules;
+  if (module) {
+    avance.debut("module");
+    const t = performance.now();
+    await py.pyimport("qtpy6.web").importer.callPromising(module, n => { modules = n; if (avance.modules) avance.reel("module", n / avance.modules); });
+    print(`${module} importé en ${((performance.now() - t) / 1000).toFixed(2)} s (${modules} modules)`);
+  }
+  avance.fin(modules);
   return py;
 }
 
