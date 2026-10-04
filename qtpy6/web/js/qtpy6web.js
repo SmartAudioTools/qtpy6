@@ -18,9 +18,9 @@
 // roues, puis `module`, s'il est donné : le module de l'application, importé en rendant la main à la page entre deux de ses
 // modules (qtpy6.web.importer), pour que l'avancement reste vivant ; `py.pyimport(module)` le trouve ensuite tout prêt. Le total
 // attendu : `tailles` ({nom: octets décompressés}, que la page connaît), compté dès le départ ; un fichier hors de `tailles` pèse
-// son Content-Length (juste s'il n'est pas compressé) une fois commencé. L'avancement ne recule jamais. `brotli` : les noms
-// (dernier segment de l'adresse) d'autres fichiers servis aussi compressés en Brotli (NOM.br), comme pyodide.asm.wasm et
-// python_stdlib.zip de Pyodide-Qt (hebergement/telecharger.sh) : voir `en_brotli`.
+// son Content-Length (juste s'il n'est pas compressé) une fois commencé. L'avancement ne recule jamais. `jumeaux` : les noms
+// (dernier segment de l'adresse) d'autres fichiers servis aussi compressés à côté (NOM.br et NOM.gz), comme pyodide.asm.wasm
+// et python_stdlib.zip de Pyodide-Qt (hebergement/telecharger.sh) : voir `en_jumeau`.
 const t0 = performance.now();
 export const journal = [];
 let ecouter = () => {};
@@ -92,29 +92,32 @@ function telecharger(url) {
   return fetch(url).then(r => { if (!r.ok) throw new Error(`${url} : ${r.status}`); return r.arrayBuffer(); });
 }
 
-// Un fichier dont l'hôte sert un jumeau Brotli (NOM.br) : celui-ci est demandé d'abord, décompressé dans la page en flux
-// (DecompressionStream, qui ne retarde pas la compilation en flux du moteur). GitHub Pages ne compresse qu'en gzip : 11,3 Mo du
-// moteur, 8,0 en Brotli, soit 0,5 s de moins à 50 Mbit/s (mesuré le 02/10/2026 sous Firefox). Rend undefined, d'où la demande
-// du fichier lui-même, sans Brotli dans le navigateur (Firefox 155 l'a, sous le nom "brotli") ou sans jumeau (en
+// Un fichier dont l'hôte sert des jumeaux compressés (NOM.br, NOM.gz) : le meilleur que le navigateur sait décompresser est
+// demandé d'abord, décompressé dans la page en flux (DecompressionStream, qui ne retarde pas la compilation en flux du moteur).
+// GitHub Pages ne compresse qu'en gzip, et pas tous les types (ni les .zip ni le JSON) : 11,3 Mo du moteur, 8,0 en Brotli, soit
+// 0,5 s de moins à 50 Mbit/s (mesuré le 02/10/2026 sous Firefox). Brotli si le navigateur l'a (Firefox 155 ; pas Chromium 153,
+// mesuré en ligne le 04/10/2026 : il téléchargeait 30 Mo au lieu de 13, dont la bibliothèque standard écrite sans compression
+// pour Brotli, 9,8 Mo) ; sinon gzip, que tous ont. Rend undefined, d'où la demande du fichier lui-même, sans jumeau (en
 // développement). Une réponse marquée DECOMPRESSE vient du service worker d'une page (celui de SmartTeacher), qui la range
 // décompressée : la décompresser à chaque ouverture coûterait 0,15 à 0,3 s de calcul.
 export const DECOMPRESSE = "X-Qtpy6-Decompresse";
-const BROTLI = (() => { try { new DecompressionStream("brotli"); return true; } catch { return false; } })();
-async function en_brotli(fetch_origine, adresse) {
-  if (!BROTLI) return;
-  const br = new URL(adresse);
-  br.pathname += ".br";
-  const reponse = await fetch_origine(br).catch(() => undefined);
+const JUMEAU = [[".br", "brotli"], [".gz", "gzip"]].find(([, format]) => {
+  try { new DecompressionStream(format); return true; } catch { return false; } });
+async function en_jumeau(fetch_origine, adresse) {
+  if (!JUMEAU) return;
+  const [extension, format] = JUMEAU, jumeau = new URL(adresse);
+  jumeau.pathname += extension;
+  const reponse = await fetch_origine(jumeau).catch(() => undefined);
   if (!reponse?.ok) return;
   if (reponse.headers.has(DECOMPRESSE)) return reponse;
-  return new Response(reponse.body.pipeThrough(new DecompressionStream("brotli")),  // application/wasm : compileStreaming l'exige
+  return new Response(reponse.body.pipeThrough(new DecompressionStream(format)),  // application/wasm : compileStreaming l'exige
     { headers: { "Content-Type": adresse.pathname.endsWith(".wasm") ? "application/wasm" : "application/octet-stream" } });
 }
 
 // Les octets reçus pendant `preparer` : chaque réponse de fetch lue en double (clone), son nom (dernier segment de l'adresse)
-// pesé par `tailles` ; et ceux de `brotli` demandés par en_brotli. Rend `prelancer(url)`, qui commence un téléchargement
+// pesé par `tailles` ; et ceux de `jumeaux` demandés par en_jumeau. Rend `prelancer(url)`, qui commence un téléchargement
 // tout de suite et le garde pour la première demande de la même adresse, et `retablir()`, qui remet le fetch d'origine.
-function compter(tailles, brotli, signaler) {
+function compter(tailles, jumeaux, signaler) {
   const fetch_origine = window.fetch;
   const fichiers = Object.fromEntries(Object.entries(tailles).map(([nom, total]) => [nom, { recu: 0, total }]));
   let haut = 0;
@@ -125,7 +128,7 @@ function compter(tailles, brotli, signaler) {
   };
   const obtenir = async (...args) => {
     const adresse = new URL(String(args[0]?.url ?? args[0]), location.href), nom = adresse.pathname.split("/").pop();
-    const reponse = brotli.includes(nom) && await en_brotli(fetch_origine, adresse) || await fetch_origine(...args);
+    const reponse = jumeaux.includes(nom) && await en_jumeau(fetch_origine, adresse) || await fetch_origine(...args);
     if (!reponse.ok || !reponse.body) return reponse;
     const fichier = fichiers[nom] = { recu: 0, total: tailles[nom] || +reponse.headers.get("Content-Length") || 1 };
     const lecteur = reponse.clone().body.getReader();
@@ -167,10 +170,10 @@ function molette(conteneur) {
 }
 
 export async function preparer(conteneur, { indexURL, archives = [], roues = [], env = {}, sur_ligne, progres = () => {},
-                                            tailles = {}, brotli = [], module } = {}) {
+                                            tailles = {}, jumeaux = [], module } = {}) {
   if (sur_ligne) ecouter = sur_ligne;
   const avance = avancement(progres);
-  const { prelancer, retablir } = compter(tailles, ["pyodide.asm.wasm", "python_stdlib.zip", ...brotli], f => {
+  const { prelancer, retablir } = compter(tailles, ["pyodide.asm.wasm", "python_stdlib.zip", ...jumeaux], f => {
     avance.reel("octets", f);
     if (f >= 1) avance.debut("moteur");
   });

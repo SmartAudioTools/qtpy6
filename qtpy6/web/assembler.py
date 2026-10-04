@@ -26,7 +26,7 @@ def assembler(archive, fichiers=(), paquets=(), distributions=(), polices=(), do
     la version de Python de Pyodide-Qt (``versions.json``) : d'une autre version, les ``.pyc`` seraient un poids mort. ``exclure`` : des débuts de noms dans le zip
     laissés dehors, ``qtpy6/web/js/pdfjs/`` typiquement (1,7 Mo, servis à côté de ``qtpy6web.js``, d'où
     ``qtpy6.web.pdf`` les charge à la première ouverture d'un PDF). ``compression`` : ``zipfile.ZIP_STORED`` pour une archive
-    servie compressée en Brotli (``brotli`` de ``preparer``), qui ne tire presque rien d'un zip déjà dégonflé. Rend la
+    servie compressée en Brotli (``jumeaux`` de ``preparer``), qui ne tire presque rien d'un zip déjà dégonflé. Rend la
     taille en octets."""
     archive = Path(archive)
     if pyc is None:
