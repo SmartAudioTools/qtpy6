@@ -4,6 +4,7 @@ l'application, les paquets purs Python dont elle dépend, ses données, ses poli
 
 import importlib
 import importlib.metadata
+import json
 import py_compile
 import sys
 import tempfile
@@ -11,7 +12,7 @@ import zipfile
 from pathlib import Path
 
 
-def assembler(archive, fichiers=(), paquets=(), distributions=(), polices=(), dossier_polices="polices", pyc=False,
+def assembler(archive, fichiers=(), paquets=(), distributions=(), polices=(), dossier_polices="polices", pyc=None,
               exclure=(), compression=zipfile.ZIP_DEFLATED):
     """Écrit le zip ``archive``. ``fichiers`` : ``{nom_dans_le_zip: chemin}``. ``paquets`` : des noms de modules
     importables, dont le dossier entier (``.py`` et données, sans ``__pycache__``) est pris là où il est, ce qui vaut pour
@@ -21,12 +22,16 @@ def assembler(archive, fichiers=(), paquets=(), distributions=(), polices=(), do
     ``__pycache__/<nom>.cpython-3XX.pyc``, compilé par CET interpréteur, que Pyodide n'a plus à compiler à l'import
     (mesures : notes/2026-09-30 - PySide6 en WebAssembly.md, « Démarrage »). Sans contrôle de la source
     (UNCHECKED_HASH : le dépaquetage change les dates) ; un autre Python que celui du navigateur ne les lit pas et
-    compile la source, gardée pour cela et pour les traces d'erreur. ``exclure`` : des débuts de noms dans le zip
+    compile la source, gardée pour cela et pour les traces d'erreur. Par défaut, ``pyc`` vaut vrai quand cet interpréteur a
+    la version de Python de Pyodide-Qt (``versions.json``) : d'une autre version, les ``.pyc`` seraient un poids mort. ``exclure`` : des débuts de noms dans le zip
     laissés dehors, ``qtpy6/web/js/pdfjs/`` typiquement (1,7 Mo, servis à côté de ``qtpy6web.js``, d'où
     ``qtpy6.web.pdf`` les charge à la première ouverture d'un PDF). ``compression`` : ``zipfile.ZIP_STORED`` pour une archive
     servie compressée en Brotli (``brotli`` de ``preparer``), qui ne tire presque rien d'un zip déjà dégonflé. Rend la
     taille en octets."""
     archive = Path(archive)
+    if pyc is None:
+        attendue = json.loads((Path(__file__).parent / "versions.json").read_text())["pyodide_qt"]["python"]
+        pyc = f"{sys.version_info.major}.{sys.version_info.minor}" == attendue
     with zipfile.ZipFile(archive, "w", compression) as z, tempfile.TemporaryDirectory() as tmp:
         def ecrire(chemin, nom):
             if nom.startswith(tuple(exclure)):

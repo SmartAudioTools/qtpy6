@@ -137,11 +137,15 @@ def test_versions_json():
 def test_assembler(tmp_path):
     (tmp_path / "a.py").write_text("x = 1\n")
     zip_ = tmp_path / "app.zip"
-    assembler.assembler(zip_, fichiers={"a.py": tmp_path / "a.py"}, paquets=("qtpy6",))
+    assembler.assembler(zip_, fichiers={"a.py": tmp_path / "a.py"}, paquets=("qtpy6",), pyc=False)
     noms = zipfile.ZipFile(zip_).namelist()
     assert "a.py" in noms and "qtpy6/web/js/travailleur.js" in noms and "qtpy6/web/versions.json" in noms
     assert "qtpy6/web/js/pdfjs/pdf.min.mjs" in noms and "qtpy6/web/js/pdfjs/pdf.worker.min.mjs" in noms
     assert not any("__pycache__" in n for n in noms)
+    # par défaut, les .pyc quand cet interpréteur a la version de Python de Pyodide-Qt, et eux seuls
+    assembler.assembler(zip_, fichiers={"a.py": tmp_path / "a.py"})
+    meme = f"{sys.version_info.major}.{sys.version_info.minor}" == json.loads((RACINE / "qtpy6/web/versions.json").read_text())["pyodide_qt"]["python"]
+    assert (f"__pycache__/a.{sys.implementation.cache_tag}.pyc" in zipfile.ZipFile(zip_).namelist()) == meme
 
 
 
