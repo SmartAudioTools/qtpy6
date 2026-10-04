@@ -14,7 +14,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from qtpy6 import QtCore, QtGui, QtWidgets
+from qtpy6 import QtCore, QtGui, QtTest, QtWidgets
 
 import qtpy6
 from qtpy6 import web
@@ -59,6 +59,100 @@ def test_feuille_tactile_concatenee(app):
     finally:
         tactile.ACTIF = False
         app.set_style_sheet("")
+
+
+def _zone_longue():
+    zone = QtWidgets.QScrollArea()
+    page = QtWidgets.QWidget()
+    page.setFixedSize(200, 3000)
+    zone.setWidget(page)
+    zone.resize(220, 300)
+    return zone, zone.verticalScrollBar()
+
+
+def _attendre(app, condition, secondes=5):
+    fin = time.monotonic() + secondes
+    while not condition() and time.monotonic() < fin:
+        app.processEvents()
+        time.sleep(0.005)
+    return condition()
+
+
+def test_defiler_au_doigt_inchange_en_natif(app):
+    """Hors navigateur, rien sans ``activer`` ; avec, la saisie de QScroller seule, sans le relais des images."""
+    zone, _ = _zone_longue()
+    tactile.defiler_au_doigt(zone)
+    assert not QtWidgets.QScroller.hasScroller(zone.viewport())
+    tactile.ACTIF = True
+    try:
+        tactile.defiler_au_doigt(zone)
+    finally:
+        tactile.ACTIF = False
+    assert QtWidgets.QScroller.hasScroller(zone.viewport())
+    assert not [o for o in zone.children() if isinstance(o, tactile._Inertie)]
+
+
+def test_inertie_part_a_la_vitesse_du_doigt_et_reste_dans_la_plage(app):
+    zone, barre = _zone_longue()
+    relais = tactile._Inertie(zone)
+    barre.setValue(100)
+    assert relais.courir(0, 400, 1000)
+    (course,) = relais.courses
+    assert (course.startValue(), course.endValue(), course.duration()) == (100, 400, 600)  # 2 x 300 px / 1000 px/s
+    pente = course.easingCurve().valueForProgress(0.001) * 300 / (0.001 * 600)  # px/ms au départ
+    assert abs(pente - 1) < 0.01
+    assert _attendre(app, lambda: barre.value() == 400)
+    assert relais.courir(0, 10**6, 1000) and relais.courses[0].endValue() == barre.maximum()  # bornée : pas de rebond
+    relais.arreter()
+    assert not relais.courir(0, barre.value(), 1000) and not relais.courir(0, 0, 0)  # rien à courir
+
+
+def test_inertie_arretee_par_le_doigt_la_plage_ou_la_destruction(app):
+    zone, barre = _zone_longue()
+    case = QtWidgets.QCheckBox("case", zone.widget())
+    zone.show()
+    QtWidgets.QScroller.grabGesture(zone.viewport(), QtWidgets.QScroller.ScrollerGestureType.TouchGesture)
+    relais = tactile._Inertie(zone)
+    relais.courir(0, 2000, 1000)
+    assert _attendre(app, lambda: barre.value() > 50)
+    doigt = QtTest.QTest.createTouchDevice()  # le doigt reposé, un vrai toucher : QScroller passe en Pressed
+    QtTest.QTest.touchEvent(zone.viewport(), doigt).press(0, QtCore.QPoint(100, 150)).commit()
+    assert not relais.courses
+    # la souris que le navigateur tire du même doigt : avalée, ce n'est pas un clic
+    QtTest.QTest.mouseClick(case, QtCore.Qt.MouseButton.LeftButton, pos=case.rect().center())
+    QtTest.QTest.touchEvent(zone.viewport(), doigt).release(0, QtCore.QPoint(100, 150)).commit()
+    assert not case.isChecked()
+    QtTest.QTest.mouseClick(case, QtCore.Qt.MouseButton.LeftButton, pos=case.rect().center())
+    assert case.isChecked()  # au repos, le clic suivant passe
+    barre = zone.verticalScrollBar()  # l'enveloppe python d'avant le toucher n'est plus valide
+    arret = barre.value()
+    _attendre(app, lambda: False, 0.1)
+    assert barre.value() == arret
+    relais.courir(0, 2000, 1000)
+    assert relais.courses[0].startValue() == arret  # repart d'où la page est
+    barre.setRange(0, 1500)  # la page change de longueur
+    assert not relais.courses
+    relais.courir(0, 1400, 1000)
+    detruites = []
+    relais.courses[0].destroyed.connect(lambda: detruites.append(1))
+    zone.deleteLater()
+    app.sendPostedEvents(None, QtCore.QEvent.Type.DeferredDelete)  # processEvents ne détruit rien hors d'une boucle
+    assert _attendre(app, lambda: detruites)  # pas de course orpheline
+
+
+def test_toucher_apres_une_course_finie_est_un_clic(app):
+    zone, barre = _zone_longue()
+    case = QtWidgets.QCheckBox("case", zone.widget())
+    zone.show()
+    QtWidgets.QScroller.grabGesture(zone.viewport(), QtWidgets.QScroller.ScrollerGestureType.TouchGesture)
+    relais = tactile._Inertie(zone)
+    relais.courir(0, 200, 2000)
+    assert _attendre(app, lambda: barre.value() == 200)  # la course finit d'elle-même
+    doigt = QtTest.QTest.createTouchDevice()
+    QtTest.QTest.touchEvent(zone.viewport(), doigt).press(0, QtCore.QPoint(100, 150)).commit()
+    QtTest.QTest.mouseClick(case, QtCore.Qt.MouseButton.LeftButton, pos=case.rect().center())
+    QtTest.QTest.touchEvent(zone.viewport(), doigt).release(0, QtCore.QPoint(100, 150)).commit()
+    assert case.isChecked()  # page au repos : le toucher est un clic
 
 
 def test_rangee_se_replie(app):

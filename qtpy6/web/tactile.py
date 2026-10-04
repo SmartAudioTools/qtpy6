@@ -3,9 +3,11 @@ montent à ``CIBLE`` (44 pt chez Apple, 48 dp chez Google) et la zone défilante
 les widgets : la feuille de style s'applique aux widgets à venir comme aux existants, mais les hauteurs déjà calculées
 par les dispositions ne sont pas toutes refaites."""
 
-from qtpy6.QtCore import QEvent, Qt
+import time
+
+from qtpy6.QtCore import QAbstractAnimation, QEasingCurve, QEvent, QObject, QPropertyAnimation, Qt
 from qtpy6.QtGui import QInputDevice, QMouseEvent
-from qtpy6.QtWidgets import QApplication, QScroller
+from qtpy6.QtWidgets import QApplication, QScroller, QWidget
 
 from . import navigateur
 
@@ -71,9 +73,102 @@ def marge(souris=2, hauteur_ligne=26):
 
 def defiler_au_doigt(zone):
     """Une ``QScrollArea`` (ou tout ``QAbstractScrollArea``) que le doigt fait défiler, comme partout ailleurs sur un
-    téléphone : sans cela, il ne fait rien. Sans effet tant que ``activer`` n'a pas été appelé."""
+    téléphone : sans cela, il ne fait rien. Sans effet tant que ``activer`` n'a pas été appelé. Dans le navigateur, la
+    course après le lâcher suit les images de l'écran (``_Inertie``)."""
     if ACTIF:
         QScroller.grabGesture(zone.viewport(), QScroller.ScrollerGestureType.TouchGesture)
+        if navigateur():
+            _Inertie(zone)
+
+
+class _Inertie(QObject):
+    """La course de ``QScroller`` une fois le doigt levé, finie au rythme des images de l'écran. ``QScroller`` avance
+    à la minuterie de Qt, que rien ne cale sur l'écran : sur un téléphone simulé (bac NSI, 412 px, densité 2,6),
+    40 % des images restaient sans mouvement (pas espacés de 32 à 48 ms) alors qu'une image coûtait 2-3 ms à dessiner
+    (``QCM/web/pyqt6/sonde_lecteur.html``, scénario ``doigt``). Au passage en ``Scrolling``, la position où ``QScroller``
+    s'arrêterait (``finalPosition``, bornée à la plage : le rebond de fin est perdu) est relevée, lui arrêté, et une
+    ``QPropertyAnimation`` de qtpy6 (menée par les images, ``qtpy6.animation``) mène chaque ascenseur jusqu'à elle en
+    décélérant : ``OutQuad`` part à la vitesse du doigt quand sa durée vaut deux fois la distance divisée par cette
+    vitesse. La vitesse est celle des positions des ascenseurs pendant les ``FENETRE`` dernières secondes du glissé :
+    ``QScroller.velocity`` est en mètres par seconde, convertis par une densité d'écran que le navigateur ne connaît
+    pas. Un doigt reposé, une plage qui change ou la zone détruite arrêtent la course ; le doigt qui l'arrête n'est pas
+    un clic : son appui et son relâchement n'atteignent pas la page (sans cela, mesuré, il cochait la case dessous 12
+    fois sur 12, QScroller seul compris : dans le navigateur, il laisse passer la souris que Qt tire du doigt). Mesuré
+    au même profil : après le lâcher, 0 image sans mouvement au lieu de 33 à 48 %, pas d'avant et d'après du même ordre
+    (20-30 px) ; écarté, ``QScrollerProperties.FrameRate`` à ``Fps60`` : encore 26 à 42 %, la minuterie restant décalée
+    des images."""
+
+    FENETRE = 0.1  # s
+
+    def __init__(self, zone):
+        super().__init__(zone)
+        self.zone, self.courses, self.trace, self.avale = zone, [], [], False
+        self.scroller = QScroller.scroller(zone.viewport())
+        self.scroller.stateChanged.connect(self._etat)
+        for barre in self._barres():
+            barre.valueChanged.connect(self._noter)
+            barre.rangeChanged.connect(self.arreter)
+
+    def _barres(self):
+        return self.zone.horizontalScrollBar(), self.zone.verticalScrollBar()
+
+    def _noter(self):
+        if self.scroller.state() == QScroller.State.Dragging:
+            self.trace.append((time.perf_counter(), *(b.value() for b in self._barres())))
+
+    def arreter(self, *_):
+        for course in self.courses:
+            course.stop()
+            course.deleteLater()
+        self.courses = []
+
+    def _etat(self, etat):
+        if etat == QScroller.State.Pressed:
+            self._avaler(any(c.state() == QAbstractAnimation.State.Running for c in self.courses))  # une course finie : clic
+            self.arreter()
+            self.trace = []
+        elif etat == QScroller.State.Scrolling:
+            maintenant = time.perf_counter()
+            recents = [p for p in self.trace if maintenant - p[0] <= self.FENETRE]
+            self.trace = []
+            if len(recents) < 2:
+                return  # trop peu de positions pour une vitesse : QScroller finit seul
+            (t0, *p0), (t1, *p1) = recents[0], recents[-1]
+            fin = self.scroller.finalPosition()
+            if self.courir(fin.x(), fin.y(), sum((b - a) ** 2 for a, b in zip(p0, p1)) ** 0.5 / max(t1 - t0, 1e-3)):
+                self.scroller.stop()
+
+    def _avaler(self, oui):
+        if oui != self.avale:
+            (QApplication.instance().installEventFilter if oui else QApplication.instance().removeEventFilter)(self)
+            self.avale = oui
+
+    def eventFilter(self, objet, evenement):
+        vue = self.zone.viewport()
+        if evenement.type() in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonDblClick, QEvent.Type.MouseButtonRelease) \
+                and isinstance(objet, QWidget) and (objet is vue or vue.isAncestorOf(objet)):
+            if evenement.type() == QEvent.Type.MouseButtonRelease:
+                self._avaler(False)
+            return True
+        return False
+
+    def courir(self, x, y, vitesse):
+        """Mène les ascenseurs vers (``x``, ``y``), bornés à leur plage, en partant à ``vitesse`` px/s ; faux s'il n'y a
+        pas de course (déjà arrivé, ou vitesse nulle)."""
+        buts = [(b, min(max(round(v), b.minimum()), b.maximum())) for b, v in zip(self._barres(), (x, y))]
+        distance = sum((but - b.value()) ** 2 for b, but in buts) ** 0.5
+        if distance < 1 or vitesse < 1:
+            return False
+        duree = min(max(round(2000 * distance / vitesse), 100), 4000)
+        self.arreter()
+        for barre, but in buts:
+            if but != barre.value():
+                course = QPropertyAnimation(barre, b"value", self, duration=duree, easingCurve=QEasingCurve.Type.OutQuad)
+                course.setStartValue(barre.value())
+                course.setEndValue(but)
+                course.start()
+                self.courses.append(course)
+        return True
 
 
 _GESTES = {QEvent.Type.TouchBegin: QEvent.Type.MouseButtonPress, QEvent.Type.TouchUpdate: QEvent.Type.MouseMove,
