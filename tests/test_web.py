@@ -971,6 +971,50 @@ def test_accept_du_selecteur_de_fichiers():
     assert _accept("*.tar.gz") == ".tar.gz"
 
 
+def test_appui_long(app):
+    """Au doigt, un doigt immobile ``DELAI`` ms saisit ; un glissé commencé avant fait défiler et ne saisit rien ; un
+    tremblement sous ``startDragDistance`` ne casse pas la prise ; la souris ne saisit jamais."""
+    zone = QtWidgets.QWidget()
+    zone.resize(200, 200)
+    prises = []
+    tactile.AppuiLong(zone, prises.append)
+    zone.show()
+    QtTest.QTest.qWaitForWindowExposed(zone)
+    doigt, fenetre = QtTest.QTest.createTouchDevice(), zone.windowHandle()
+    attente = tactile.AppuiLong.DELAI + 150
+
+    def geste(*points, avant=0):
+        QtTest.QTest.touchEvent(fenetre, doigt).press(0, QtCore.QPoint(*points[0])).commit()
+        QtTest.QTest.qWait(avant)
+        for point in points[1:]:
+            QtTest.QTest.touchEvent(fenetre, doigt).move(0, QtCore.QPoint(*point)).commit()
+        QtTest.QTest.qWait(attente)
+        QtTest.QTest.touchEvent(fenetre, doigt).release(0, QtCore.QPoint(*points[-1])).commit()
+
+    tactile.ACTIF = True
+    try:
+        QtTest.QTest.touchEvent(fenetre, doigt).press(0, QtCore.QPoint(100, 100)).commit()
+        QtTest.QTest.qWait(50)  # sans temps écoulé, Qt ne voit pas de double-clic
+        QtTest.QTest.touchEvent(fenetre, doigt).release(0, QtCore.QPoint(100, 100)).commit()
+        geste((100, 100))  # juste après un toucher : l'appui arrive en double-clic, sans MouseButtonPress
+        assert [p.toPoint() for p in prises] == [QtCore.QPoint(100, 100)]  # immobile : saisi
+        geste((100, 40), (100, 100), (100, 160))
+        assert len(prises) == 1  # glissé tout de suite : la page défile, rien n'est saisi
+        geste((100, 100), (100, 160), avant=tactile.AppuiLong.DELAI // 2)
+        assert len(prises) == 1  # glissé avant le délai : rien non plus
+        seuil = QtWidgets.QApplication.startDragDistance()
+        geste((100, 100), (100 + seuil // 2, 100))
+        assert len(prises) == 2  # un tremblement sous le seuil saisit quand même
+        QtTest.QTest.mousePress(zone, QtCore.Qt.MouseButton.LeftButton, pos=QtCore.QPoint(50, 50))
+        QtTest.QTest.qWait(attente)
+        QtTest.QTest.mouseRelease(zone, QtCore.Qt.MouseButton.LeftButton, pos=QtCore.QPoint(50, 50))
+        assert len(prises) == 2  # la souris : rien ne change
+    finally:
+        tactile.ACTIF = False
+    geste((100, 100))
+    assert len(prises) == 2  # sans ACTIF (natif), le doigt est une souris
+
+
 # ---- glisser : startDrag sans QDrag.exec (le navigateur) ----
 
 def _listes(app, mode=QtWidgets.QAbstractItemView.DragDropMode.DragDrop, n=2):

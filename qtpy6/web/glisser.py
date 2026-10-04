@@ -58,15 +58,16 @@ def startDrag(vue, actions):
     cadre = QRect()
     for index in indexes:
         cadre = cadre.united(vue.visualRect(index))
-    image = vue.viewport().grab(cadre.intersected(vue.viewport().rect()))  # peinte maintenant : l'état de glisser de la vue
-    _Glisser(vue, indexes, actions, image)
+    cadre = cadre.intersected(vue.viewport().rect())
+    image = vue.viewport().grab(cadre)  # peinte maintenant : l'état de glisser de la vue
+    _Glisser(vue, indexes, actions, image, vue.viewport().mapTo(vue.window(), cadre.topLeft()))
 
 
 class _Glisser:
     """Un glisser en cours : l'image qui suit le pointeur, puis le dépôt au relâchement."""
 
-    def __init__(self, vue, indexes, actions, image):
-        from qtpy6.QtCore import QObject, Qt  # noqa: PLC0415
+    def __init__(self, vue, indexes, actions, image, coin):
+        from qtpy6.QtCore import QObject, QPoint, Qt  # noqa: PLC0415
         from qtpy6.QtWidgets import QApplication, QLabel  # noqa: PLC0415
 
         self.vue, self.actions = vue, actions
@@ -77,7 +78,11 @@ class _Glisser:
         self.etiquette.setPixmap(image)
         self.etiquette.resize(image.size() / image.devicePixelRatio())
         self.etiquette.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        self.etiquette.hide()  # montrée au premier mouvement, centrée sous le pointeur
+        # Montrée dès la prise, un peu soulevée au-dessus des éléments pris : au doigt (``tactile.AppuiLong``), le signe que
+        # l'appui a saisi ; ensuite centrée sous le pointeur.
+        self.etiquette.move(coin + QPoint(4, -4))
+        self.etiquette.show()
+        self.etiquette.raise_()
 
         glisser = self
 
@@ -95,8 +100,6 @@ class _Glisser:
         if type_ == QEvent.Type.MouseMove:
             point = self.etiquette.parentWidget().mapFromGlobal(evenement.globalPosition().toPoint())
             self.etiquette.move(point - self.etiquette.rect().center())
-            self.etiquette.show()
-            self.etiquette.raise_()
             return True
         if type_ == QEvent.Type.MouseButtonRelease:
             self._finir()

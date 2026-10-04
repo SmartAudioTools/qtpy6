@@ -223,3 +223,52 @@ class Toucher:
         self.bouge(evenement)
         touche, self.point = self.point is not None, None
         return touche
+
+
+class AppuiLong(QObject):
+    """Au doigt (``ACTIF``), un doigt posé immobile ``DELAI`` ms sur ``widget`` le lui donne : le défilement de la page
+    (``defiler_au_doigt``) s'arrête et ``prendre(position)`` est appelé (une liste y lance son glisser) ; avant ce délai, un
+    glissé fait défiler la page comme ailleurs. La convention des téléphones pour saisir un élément d'une liste qui défile.
+    ``widget`` est celui qui reçoit la souris (le ``viewport()`` d'une vue). À la souris, rien ne change.
+
+    ``DELAI`` reste sous l'appui long des téléphones, qui ouvre le menu ou la sélection du navigateur : 400 ms sous
+    Android 12 et suivants (500 avant), environ 500 ms sous iOS. Le menu est de toute façon refusé sur l'écran de Qt
+    (``qtpy6web.js``, ``sans_menu``)."""
+
+    DELAI = 300
+
+    def __init__(self, widget, prendre):
+        from qtpy6.QtCore import QTimer  # noqa: PLC0415
+
+        super().__init__(widget)
+        self.widget, self.prendre = widget, prendre
+        self.toucher = Toucher()
+        self.minuterie = QTimer(self)
+        self.minuterie.setSingleShot(True)
+        self.minuterie.setInterval(self.DELAI)
+        self.minuterie.timeout.connect(self._prendre)
+        widget.installEventFilter(self)
+
+    def eventFilter(self, objet, evenement):
+        genre = evenement.type()
+        if genre in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonDblClick):  # un second appui rapide est un double-clic
+            if self.toucher.appui(evenement):
+                self.position = evenement.position()
+                self.minuterie.start()
+        elif genre == QEvent.Type.MouseMove:
+            self.toucher.bouge(evenement)
+            if self.toucher.point is None:
+                self.minuterie.stop()
+        elif genre == QEvent.Type.MouseButtonRelease:
+            self.minuterie.stop()
+            self.toucher.point = None
+        return False
+
+    def _prendre(self):
+        self.toucher.point = None
+        parent = self.widget
+        while parent is not None:
+            if QScroller.hasScroller(parent):
+                QScroller.scroller(parent).stop()
+            parent = parent.parentWidget()
+        self.prendre(self.position)

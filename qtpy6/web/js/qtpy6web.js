@@ -169,6 +169,15 @@ function molette(conteneur) {
   }, { capture: true, passive: false });
 }
 
+// Ni menu ni sélection du navigateur sur l'écran de Qt : un doigt qui s'y attarde (``tactile.AppuiLong`` saisit à 300 ms)
+// ne doit pas ouvrir le menu contextuel (Android, 400 ms et plus) ni la loupe ou la bulle d'iOS. Sur le conteneur
+// seulement : le reste de la page (un champ HTML) garde son menu. Le clic droit de Qt vient des pointerdown, pas de cet
+// événement.
+function sans_menu(conteneur) {
+  conteneur.addEventListener("contextmenu", e => e.preventDefault());
+  Object.assign(conteneur.style, { webkitTouchCallout: "none", webkitUserSelect: "none", userSelect: "none" });
+}
+
 export async function preparer(conteneur, { indexURL, archives = [], roues = [], env = {}, sur_ligne, progres = () => {},
                                             tailles = {}, jumeaux = [], module } = {}) {
   if (sur_ligne) ecouter = sur_ligne;
@@ -197,6 +206,7 @@ export async function preparer(conteneur, { indexURL, archives = [], roues = [],
   retablir();
   py._module.qtContainerElements = [conteneur];  // l'API privée de Qt-WASM, isolée ici : l'élément qui sert d'écran à Qt
   molette(conteneur);
+  sans_menu(conteneur);
   window.qtpy6Conteneur = conteneur;  // ce que qtpy6.web.pdf lit pour caler ses <div> sur les widgets
   window.qtpy6Js = import.meta.url;  // d'où qtpy6.web.pdf charge pdf.js quand l'archive ne l'a pas (assembler, exclure)
   py.runPython(`import json, os, sys
