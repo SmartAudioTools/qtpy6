@@ -153,9 +153,14 @@ page elle-même en a besoin (Pyodide-Qt, mesuré Firefox avec `javascript.option
 « WebAssembly stack switching not supported », rien ne démarre). Safari ne l'a qu'à partir de la 27 (bêta à la WWDC
 de juin 2026, non essayé ici) : un iPad en 26 ne lance aucune application qtpy6. Chaque `start` coûte un Pyodide (~1,4 s) :
 c'est un processus, pas un fil. Le Pyodide du worker vient de `versions.json` (jsdelivr), ou de
-`travailleur.configurer(indexURL)`. Les URL passées au worker sont relatives à la **page** (le worker naît d'un `blob:`
-et n'a pas d'adresse propre : elles sont rendues absolues côté Python) ; un `import()` de `pyodide.mjs` depuis un autre
-hôte exige CORS.
+`travailleur.configurer(indexURL, roues)` — le même Pyodide-Qt que la page, par exemple : un seul téléchargement, un
+boot de worker plus court (le moteur est déjà dans le cache HTTP). `roues` : des URL de `.whl` (finissant par `.whl`,
+Pyodide y lit le nom du paquet) pour ce que cette distribution n'a pas (son `sqlite3`, retiré de la bibliothèque
+standard : `roues` de `versions.json`, publiées par `hebergement/telecharger.sh`) ; le worker charge chacune au
+**premier `import` de son module** (un `MetaPathFinder` + `run_sync`), si bien qu'un script qui ne l'importe pas ne
+paie ni octets ni délai — le préchauffage n'en charge aucune. Les URL passées au worker sont relatives à la **page**
+(le worker naît d'un `blob:` et n'a pas d'adresse propre : elles sont rendues absolues côté Python) ; un `import()` de
+`pyodide.mjs` depuis un autre hôte exige CORS.
 
 Ce coût du premier `start` se paie d'avance : `travailleur.prechauffer()` monte en réserve UN worker neuf dont le
 Pyodide charge dès maintenant, que le prochain `start()` du même Pyodide consomme au lieu de tout payer. À appeler aux

@@ -14,7 +14,11 @@ compris (quelques secondes).
     ProcessusWeb                              ``QProcess`` dans le navigateur (``qtpy6.QtCore.QProcess`` le désigne) :
                                               ``start(sys.executable, ["-u", "script.py", …])`` lance le script en
                                               ``__main__`` dans un worker neuf, ``write`` est son stdin (JSPI)
-    configurer(indexURL)                      le Pyodide du worker, s'il ne vient pas de ``versions.json``
+    configurer(indexURL, roues)               le Pyodide du worker, s'il ne vient pas de ``versions.json`` ; ``roues`` :
+                                              des URL de roues (.whl) chargées dans le worker d'un ``ProcessusWeb`` au
+                                              premier ``import`` de leur module — pour un module absent de la
+                                              distribution (le sqlite3 de Pyodide-Qt) ; un programme qui ne l'importe
+                                              pas ne paie rien, ni octets ni délai
     prechauffer()                             monte en réserve UN worker dont le Pyodide charge dès maintenant : le
                                               prochain ``ProcessusWeb.start()`` le consomme et épargne ``loadPyodide``
                                               (plusieurs secondes, l'essentiel du premier lancement)
@@ -35,14 +39,17 @@ import zipfile
 
 from qtpy6.QtCore import QObject, QTimer, Signal  # QtCore en cours de chargement : il importe ce module pour QProcess
 
-REGLAGES = {}  # configurer() : indexURL
+REGLAGES = {}  # configurer() : indexURL, roues
 _URL_WORKER = None
 _RESERVE = None  # prechauffer() : (worker, indexURL) — un worker neuf dont le Pyodide charge, consommé par le prochain start()
 
 
-def configurer(indexURL):
-    """Ce que ``ProcessusWeb()`` utilise : le Pyodide du worker (``indexURL`` ; sans appel, celui de ``versions.json``)."""
-    REGLAGES.update(indexURL=indexURL)
+def configurer(indexURL, roues=()):
+    """Ce que ``ProcessusWeb()`` utilise : le Pyodide du worker (``indexURL`` ; sans appel, celui de ``versions.json``),
+    et des URL de roues (.whl) que le worker charge au premier ``import`` de leur module — le nom de distribution du
+    fichier (``sqlite3-1.0.0-….whl`` → ``sqlite3``). Paresseux : un script qui n'importe pas le module ne télécharge
+    rien ; le préchauffage n'en charge aucune."""
+    REGLAGES.update(indexURL=indexURL, roues=tuple(roues))
 
 
 def prechauffer():
@@ -69,6 +76,14 @@ def _index_url():
     import js  # noqa: PLC0415
 
     return js.URL.new(REGLAGES.get("indexURL") or _pyodide(), js.location.href).href
+
+
+def _roues():
+    """``{module: url absolue}`` des roues de ``configurer`` — le module est le nom de distribution du fichier."""
+    import js  # noqa: PLC0415
+
+    return {url.rsplit("/", 1)[-1].partition("-")[0]: js.URL.new(url, js.location.href).href
+            for url in REGLAGES.get("roues") or ()}
 
 
 def _url_worker():
@@ -218,7 +233,7 @@ class ProcessusWeb(QObject):
         self.worker.onmessage = self._recepteur
         zip_ = to_js(_zipper([dossier, cwd, tempfile.gettempdir()]))
         self.worker.postMessage(_objet({"lancer": {
-            "indexURL": indexURL, "zip": zip_,
+            "indexURL": indexURL, "zip": zip_, "roues": _roues(),
             "dossier": dossier, "argv": argv, "cwd": cwd}}), [zip_.buffer])
 
     def write(self, octets):

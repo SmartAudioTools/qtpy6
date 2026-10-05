@@ -5,8 +5,9 @@
 //   émis :  {pret}, {id, sortie} (ce que l'appel imprime, au fil de l'eau), {id, retour}, {id, erreur}, {erreur} (init)
 // Ou bien un processus (ProcessusWeb) : un script lancé en __main__, qui lit son stdin comme sur le bureau.
 //   reçus : {prechauffer: {indexURL}} (charger Pyodide dès maintenant, sans script : le {lancer} qui suivra l'épargne),
-//           {lancer: {indexURL, zip, dossier, argv, cwd}}, {entree: texte} (stdin), {entree: null} (fin de fichier) ;
-//           le zip porte ses chemins depuis la racine du système de fichiers, où il est dépaqueté
+//           {lancer: {indexURL, zip, dossier, argv, cwd, roues}}, {entree: texte} (stdin), {entree: null} (fin de fichier) ;
+//           le zip porte ses chemins depuis la racine du système de fichiers, où il est dépaqueté ; roues :
+//           {module: url de .whl}, chacune chargée au premier import de son module (rien sinon : ni octets ni délai)
 //   émis :  {sortie} (stdout), {sortie_erreur} (stderr), {fin: code}, {erreur} (Pyodide injoignable, JSPI absent)
 let py, module, appeler, courant = 0, file = Promise.resolve();  // courant : le numéro de l'appel en cours, 0 hors de tout appel (l'import du module)
 let prechauffe = null;  // {indexURL, py: Promise} : le Pyodide lancé par {prechauffer}, qu'un {lancer} du même indexURL reprend
@@ -54,15 +55,16 @@ function charger(indexURL) {
   return import(indexURL + "pyodide.mjs").then(({ loadPyodide }) => loadPyodide({ indexURL }));
 }
 
-async function lancer({ indexURL, zip, dossier, argv, cwd }) {
+async function lancer({ indexURL, zip, dossier, argv, cwd, roues }) {
   py = await (prechauffe?.indexURL === indexURL ? prechauffe.py : charger(indexURL));  // un échec du préchauffage ressort ici, en {erreur}
   prechauffe = null;
   const canal = cle => { const d = new TextDecoder(); return { write: o => { postMessage({ [cle]: d.decode(o, { stream: true }) }); return o.length; } }; };
   py.setStdout(canal("sortie")); py.setStderr(canal("sortie_erreur"));
   py.unpackArchive(zip, "zip", { extractDir: "/" });
-  py.globals.set("_lancement", py.toPy({ argv, cwd, dossier }));
+  self.chargerRoue = url => py.loadPackage(url, { messageCallback: () => {} });  // sans « Loading… » dans le stdout capturé
+  py.globals.set("_lancement", py.toPy({ argv, cwd, dossier, roues: roues || {} }));
   const code = await py.runPythonAsync(`
-import io, js, os, runpy, sys, traceback
+import importlib, io, js, os, runpy, sys, traceback
 from pyodide.ffi import can_run_sync, run_sync
 
 class _Entree(io.RawIOBase):  # stdin : chaque lecture attend la prochaine écriture de la page (JSPI)
@@ -80,9 +82,21 @@ class _Entree(io.RawIOBase):  # stdin : chaque lecture attend la prochaine écri
         b[:n], self.reste = self.reste[:n], self.reste[n:]
         return n
 
-def _executer(argv, cwd, dossier):
+class _Roues:  # une roue chargée au premier import de son module : find_spec télécharge (JSPI) puis laisse la main
+    def __init__(self, roues):
+        self.roues = dict(roues)
+    def find_spec(self, nom, chemin=None, cible=None):
+        url = self.roues.pop(nom, None)
+        if url:
+            run_sync(js.chargerRoue(url))
+            importlib.invalidate_caches()
+        return None  # PathFinder trouve alors le module installé par la roue
+
+def _executer(argv, cwd, dossier, roues):
     if not can_run_sync():
         raise RuntimeError("ce navigateur ne sait pas suspendre Python (JSPI) : pas de sous-processus")
+    if roues:
+        sys.meta_path.insert(0, _Roues(roues))
     # __stdin__ aussi, comme sur un bureau : un script qui enveloppe sys.stdin.buffer puis remplace sys.stdin ne doit pas
     # voir l'ancien objet ramassé, ce qui fermerait le tampon partagé (console_enfant.py de SmartTeacher)
     sys.stdin = sys.__stdin__ = io.TextIOWrapper(io.BufferedReader(_Entree()), encoding="utf-8")

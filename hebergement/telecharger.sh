@@ -12,7 +12,9 @@
 # pyside6 (défaut) : Pyodide-PySide6, construit par wasm/construire.sh (phase paquet), LGPL v3.
 # pyqt6 : Pyodide-Qt de JarrettSJohnson, GPL v3, le repli.
 # Le zip donné : une archive déjà téléchargée (sans réseau), même vérification.
-# Pour changer de version : versions.json seul (archive, sha256 = sha256sum du zip, version, abi).
+# Pour changer de version : versions.json seul (archive, sha256 = sha256sum du zip, version, abi, roues).
+# Les « roues » de versions.json (sqlite3…) : la bibliothèque standard que ce Pyodide ne contient pas, publiée à côté du
+# moteur ; le worker de qtpy6.web.travailleur les charge au premier import du module (rien si le script ne l'importe pas).
 set -eu
 LIAISON=pyside6
 case "${1:-}" in pyside6|pyqt6) LIAISON=$1; shift ;; esac
@@ -32,6 +34,14 @@ import os, zipfile
 with zipfile.ZipFile('exemple/pyodide-qt/python_stdlib.zip') as a, zipfile.ZipFile('s.zip', 'w', zipfile.ZIP_STORED) as b:
     for i in a.infolist(): b.writestr(i, a.read(i), zipfile.ZIP_STORED)
 os.replace('s.zip', 'exemple/pyodide-qt/python_stdlib.zip')"
+python3 -c "
+import json
+for r in json.load(open('qtpy6/web/versions.json'))['$CLE'].get('roues', {}).values():
+    print(r['url'], r['sha256'])" | while read -r RURL RSHA; do
+  F="exemple/pyodide-qt/${RURL##*/}"
+  curl -fL -o "$F" "$RURL"
+  echo "$RSHA  $F" | sha256sum -c -
+done
 brotli -q 11 -f exemple/pyodide-qt/pyodide.asm.wasm & MOTEUR=$!  # les deux en parallèle (une minute et demie pour le moteur)
 brotli -q 11 -f exemple/pyodide-qt/python_stdlib.zip
 gzip -9 -k -f -n exemple/pyodide-qt/pyodide.asm.wasm exemple/pyodide-qt/python_stdlib.zip
