@@ -75,6 +75,10 @@
 - `QPdfView.setPageLimit(n)` / `pageLimit()` (ajout de qtpy6, natif et navigateur) : seules les `n`
   premières pages se voient et défilent. Les liens internes du PDF (un sommaire) se suivent au clic,
   des deux côtés ; dans le navigateur, `setDocumentMargins` et `setPageSpacing` sont doublés.
+- `QPdfView.setMasks({page: [QRectF]})` / `masks()` (ajout de qtpy6, natif et navigateur) : des zones
+  de page, en points, peintes en pavés unis de 12 points (illisibles à tout zoom), et leur texte
+  exclu de la sélection, de la copie et, dans le navigateur, de la recherche. C'est un affichage,
+  pas une protection : le PDF entier reste dans le programme ou le navigateur.
 
 ## 0.2.0 — 2026-09-27
 

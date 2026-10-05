@@ -1,5 +1,6 @@
 """The binding's QtPdfWidgets, whose QPdfView selects text on the desktop (drag, Ctrl+C: Qt's own has no selection)
-and follows the document's internal links (a table of contents: Qt's own does not);
+and follows the document's internal links (a table of contents: Qt's own does not), and setMasks pixelates
+zones of the pages (an answer the reader must not see yet);
 in the browser, where Qt-WASM has no QtPdf, qtpy6.web.pdf's QPdfView, drawn by pdf.js, whose text selects and copies
 as in the browser's PDF viewer."""
 import sys
@@ -11,16 +12,17 @@ if sys.platform == 'emscripten':
 else:
     _binding.load(globals(), 'QtPdfWidgets')
     from .QtCore import QModelIndex, QPoint, QPointF, QRect, QRectF, QSize, QSizeF, Qt
-    from .QtGui import QColor, QGuiApplication, QKeySequence, QPainter, QPolygonF
+    from .QtGui import QColor, QGuiApplication, QImage, QKeySequence, QPainter, QPolygonF
     from .QtPdf import QPdfLinkModel
 
     _QPdfView = QPdfView  # noqa: F821
 
     class QPdfView(_QPdfView):
         """QPdfView, plus a selection within one page (drag with the left button, Ctrl+C copies it), internal links
-        followed on click, and ``setPageLimit``: only the first pages are shown."""
+        followed on click, ``setPageLimit``: only the first pages are shown, and ``setMasks``: zones pixelated."""
 
         LINK_MARGIN = 12  # points left above a link's destination (same in the browser: pdf_vue.js)
+        MASK_BLOCK = 12  # side of a mask's blocks, in the page's points: unreadable at any zoom (same in pdf_vue.js)
 
         def __init__(self, parent=None):
             super().__init__(parent)  # PyQt6 wants the parent, even None
@@ -30,6 +32,8 @@ else:
             self._limit = None  # setPageLimit
             self._links = QPdfLinkModel(self)  # those of one page at a time (setPage), read once per page
             self._areas = {}  # {page: _link_areas(page)}
+            self._masks = {}  # setMasks: {page: [QRectF in the page's points]}
+            self._blocks = {}  # {(page, index of the mask): QImage, one pixel per block}, read once
             self.viewport().setCursor(Qt.CursorShape.IBeamCursor)
             self.viewport().setMouseTracking(True)  # the pointing hand over a link
             self.verticalScrollBar().rangeChanged.connect(self._clamp)
@@ -44,6 +48,66 @@ else:
 
         def pageLimit(self):
             return self._limit
+
+        def setMasks(self, masks):
+            """Pixelates zones of the pages: ``masks`` is {page: [QRectF in the page's points, from its top left]}
+            (empty: none). Each zone is shown in blocks of ``MASK_BLOCK`` points, the mean colour of what they cover,
+            and its text is neither selected nor copied. A display, not a protection: the document itself is
+            unchanged. Not Qt's: a qtpy6 addition, also in the browser's QPdfView."""
+            self._masks = {page: [QRectF(r) for r in rectangles] for page, rectangles in (masks or {}).items() if rectangles}
+            self._blocks = {}
+            self._selection = None
+            self.viewport().update()
+
+        def masks(self):
+            return {page: list(rectangles) for page, rectangles in self._masks.items()}
+
+        def _masked(self, page, selection):
+            """Whether ``selection`` (a QPdfSelection of ``page``) touches a mask."""
+            return any(polygon.boundingRect().intersects(mask) for polygon in selection.bounds()
+                       for mask in self._masks.get(page, ()))
+
+        def _block_image(self, page, index):
+            """The mask's QImage, one pixel per block: the page rendered at four pixels per block, then each block
+            averaged (a smooth reduction), so that no stroke of the text survives."""
+            key = (page, index)
+            if key not in self._blocks:
+                mask, size = self._masks[page][index], self.document().pagePointSize(page)
+                scale = 4 / self.MASK_BLOCK
+                rendered = self.document().render(page, QSizeF(size * scale).toSize())
+                image = QImage(rendered.size(), QImage.Format.Format_RGB32)  # opaque: PDFium leaves the paper transparent
+                image.fill(Qt.GlobalColor.white)
+                painter = QPainter(image)
+                painter.drawImage(0, 0, rendered)
+                painter.end()
+                columns = max(1, -(-round(mask.width()) // self.MASK_BLOCK))  # whole blocks, from the mask's top left
+                rows = max(1, -(-round(mask.height()) // self.MASK_BLOCK))
+                region = QRect(round(mask.left() * scale), round(mask.top() * scale), columns * 4, rows * 4)
+                self._blocks[key] = image.copy(region).scaled(columns, rows, Qt.AspectRatioMode.IgnoreAspectRatio,
+                                                               Qt.TransformationMode.SmoothTransformation)
+            return self._blocks[key]
+
+        def _pixelate(self):
+            """Paints each mask over its page, in blocks (``setMasks``)."""
+            if not self._masks:
+                return
+            painter = QPainter(self.viewport())
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, False)
+            for page, rectangle in self._pages().items():
+                masks = self._masks.get(page)
+                if not masks or not rectangle.intersects(self.viewport().rect()):
+                    continue
+                scale = rectangle.width() / self.document().pagePointSize(page).width()
+                for index, mask in enumerate(masks):
+                    target = QRectF(rectangle.left() + mask.left() * scale, rectangle.top() + mask.top() * scale,
+                                    mask.width() * scale, mask.height() * scale)
+                    painter.save()
+                    painter.setClipRect(target)
+                    blocks = self._block_image(page, index)  # whole blocks: the last ones overflow the mask, clipped
+                    painter.drawImage(QRectF(target.left(), target.top(), blocks.width() * self.MASK_BLOCK * scale,
+                                             blocks.height() * self.MASK_BLOCK * scale), blocks)
+                    painter.restore()
+            painter.end()
 
         def _last(self):
             """The viewport rectangle of the last page shown, None when every page is."""
@@ -190,7 +254,7 @@ else:
                 page, start = self._anchor
                 _, end = self._point(event.position().toPoint(), page)
                 selection = self.document().getSelection(page, start, end)
-                self._selection = (page, selection) if selection.isValid() else None
+                self._selection = (page, selection) if selection.isValid() and not self._masked(page, selection) else None
                 self.viewport().update()
             else:
                 link = self._link(event.position().toPoint())
@@ -217,6 +281,7 @@ else:
                 painter.fillRect(QRect(0, last.bottom() + 1, self.viewport().width(), self.viewport().height()),
                                  self.palette().dark())
                 painter.end()
+            self._pixelate()
             self._veil()
             rectangle = self._selection and self._pages().get(self._selection[0])
             if rectangle:
@@ -252,7 +317,7 @@ else:
 
         def setDocument(self, document):
             self._anchor = self._selection = None
-            self._lines, self._areas = {}, {}
+            self._lines, self._areas, self._blocks = {}, {}, {}
             self._links.setDocument(document)
             if document is not None and document.parent() is self:
                 # Qt 6.11 crashes destroying a view whose document is its child (both bindings): the child dies

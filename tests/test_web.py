@@ -371,6 +371,154 @@ def test_pdf_selection_en_natif(app, tmp_path):
     vue.close()
 
 
+def test_pdf_masques_en_natif(app, tmp_path):
+    """``setMasks`` : la zone masquée se peint en pavés de ``MASK_BLOCK`` points de la page, unis, à tout zoom (un fort
+    zoom n'affine pas les pavés), et son texte ne se sélectionne plus ; le reste de la page reste intact."""
+    from qtpy6.QtPdf import QPdfDocument
+    from qtpy6.QtPdfWidgets import QPdfView
+    from qtpy6.QtTest import QTest
+
+    chemin = str(tmp_path / "cours.pdf")
+    ecrivain = QtGui.QPdfWriter(chemin)
+    peintre = QtGui.QPainter(ecrivain)
+    peintre.setFont(QtGui.QFont("DejaVu Sans", 14))
+    for i, ligne in enumerate(("Premiere ligne du cours", "Deuxieme ligne du cours")):
+        peintre.drawText(600, 1200 + 600 * i, ligne)
+    peintre.end()
+    document = QPdfDocument(None)
+    document.load(chemin)
+    vue = QPdfView(None)
+    vue.setDocument(document)
+    vue.setZoomMode(QPdfView.ZoomMode.FitToWidth)
+    lignes = vue._text_lines(0)
+    masque = lignes[0].adjusted(-6, -6, 6, 6)  # la première ligne, en points
+    vue.setMasks({0: [masque]})
+    assert vue.masks() == {0: [masque]}
+    Bouton, Aucun = QtCore.Qt.MouseButton, QtCore.Qt.KeyboardModifier.NoModifier
+
+    for largeur in (400, 1200):  # deux zooms
+        vue.resize(largeur, 600)
+        vue.show()
+        fin = time.monotonic() + 10  # QPdfView rend ses pages en arrière-plan : la deuxième ligne, non masquée, se dessine
+        while time.monotonic() < fin:
+            app.processEvents()
+            page = vue._pages()[0]
+            echelle = page.width() / document.pagePointSize(0).width()
+            image = vue.viewport().grab().toImage()
+            y = page.top() + round(lignes[1].center().y() * echelle)
+            if min(image.pixelColor(x, y).lightness() for x in range(page.left(), page.right())) < 128:
+                break
+        cote = QPdfView.MASK_BLOCK * echelle
+        x0, y0 = page.left() + masque.left() * echelle, page.top() + masque.top() * echelle
+        for colonne in range(int(masque.width() // QPdfView.MASK_BLOCK)):  # chaque pavé entier est uni
+            for rangee in range(int(masque.height() // QPdfView.MASK_BLOCK)):
+                couleurs = {image.pixel(round(x0 + (colonne + fx) * cote), round(y0 + (rangee + fy) * cote))
+                            for fx in (0.3, 0.5, 0.7) for fy in (0.3, 0.5, 0.7)}
+                assert len(couleurs) == 1, (largeur, colonne, rangee, couleurs)
+        assert min(image.pixelColor(x, y).lightness() for x in range(page.left(), page.right())) < 128  # le reste est dessiné
+        debut = page.topLeft() + QtCore.QPoint(2, 2)  # du haut de la page au bas de la deuxième ligne : touche le masque
+        bout = page.topLeft() + QtCore.QPoint(page.width() - 2, round(lignes[1].bottom() * echelle))
+        QtWidgets.QApplication.clipboard().setText("rien")
+        QTest.mousePress(vue.viewport(), Bouton.LeftButton, Aucun, debut)
+        QTest.mouseMove(vue.viewport(), bout)
+        QTest.mouseRelease(vue.viewport(), Bouton.LeftButton, Aucun, bout)
+        QTest.keyClick(vue, QtCore.Qt.Key.Key_C, QtCore.Qt.KeyboardModifier.ControlModifier)
+        assert "Premiere" not in QtWidgets.QApplication.clipboard().text()
+    vue.setMasks({})  # sans masque, la même sélection copie la première ligne
+    QTest.mousePress(vue.viewport(), Bouton.LeftButton, Aucun, debut)
+    QTest.mouseMove(vue.viewport(), bout)
+    QTest.mouseRelease(vue.viewport(), Bouton.LeftButton, Aucun, bout)
+    QTest.keyClick(vue, QtCore.Qt.Key.Key_C, QtCore.Qt.KeyboardModifier.ControlModifier)
+    assert "Premiere" in QtWidgets.QApplication.clipboard().text()
+    vue.close()
+
+
+_MASQUES_PAGE = """<!doctype html><meta charset="utf-8"><body style="margin:0"><script type="module">
+const source = await (await fetch("js/pdf_vue.js")).text();
+const { ouvrir, vue } = eval(source)(new URL("js/pdfjs/pdf.min.mjs", location).href,
+                                     new URL("js/pdfjs/pdf.worker.min.mjs", location).href);
+const octets = new Uint8Array(await (await fetch("cours.pdf")).arrayBuffer());
+window.mesurer = async (largeur, masques, pave) => {
+  const v = vue();
+  v.placer(0, 0, largeur, 900, true);
+  v.masquer(masques);
+  await v.afficher(ouvrir(octets.slice()));  // pdf.js cède le tampon à son worker
+  let fin;
+  while (!(fin = v.div.querySelector(".page .endOfContent"))) await new Promise(r => setTimeout(r, 50));
+  const cadre = v.div.querySelector(".page"), canevas = cadre.querySelector("canvas");
+  const e = Number(cadre.style.getPropertyValue("--scale-factor")) * (window.devicePixelRatio || 1);
+  const ctx = canevas.getContext("2d"), [, x, y, l, h] = masques[0], defauts = [];
+  for (let c = 0; c < Math.floor(l / pave); c++) for (let r = 0; r < Math.floor(h / pave); r++) {
+    const couleurs = new Set();
+    for (const fx of [0.3, 0.5, 0.7]) for (const fy of [0.3, 0.5, 0.7])
+      couleurs.add(ctx.getImageData(Math.round((x + (c + fx) * pave) * e), Math.round((y + (r + fy) * pave) * e), 1, 1).data.join());
+    if (couleurs.size !== 1) defauts.push([c, r, [...couleurs]]);
+  }
+  const texte = cadre.querySelector(".textLayer").textContent;
+  v.detruire();
+  return { defauts, texte };
+};
+window.pret = true;
+</script>"""
+
+
+@pytest.mark.skipif(not Path("/usr/bin/geckodriver").exists(), reason="Firefox et geckodriver requis")
+def test_pdf_masques_dans_le_navigateur(app, tmp_path):
+    """``setMasks`` dans le navigateur (``pdf_vue.js`` seul, dans Firefox, ~5 s) : la zone se peint en pavés unis de
+    ``PAVE`` points à deux zooms, et son texte quitte la couche de texte (ni sélection, ni copie, ni recherche)."""
+    import functools
+    import http.server
+    import threading
+
+    from qtpy6.QtPdf import QPdfDocument
+    from qtpy6.QtPdfWidgets import QPdfView
+    from selenium import webdriver
+
+    ecrivain = QtGui.QPdfWriter(str(tmp_path / "cours.pdf"))
+    peintre = QtGui.QPainter(ecrivain)
+    peintre.setFont(QtGui.QFont("DejaVu Sans", 14))
+    for i, ligne in enumerate(("Premiere ligne du cours", "Deuxieme ligne du cours")):
+        peintre.drawText(600, 1200 + 600 * i, ligne)
+    peintre.end()
+    document = QPdfDocument(None)
+    document.load(str(tmp_path / "cours.pdf"))
+    vue = QPdfView(None)
+    vue.setDocument(document)
+    masque = vue._text_lines(0)[0].adjusted(-6, -6, 6, 6)  # la première ligne, en points
+    (tmp_path / "js").symlink_to(RACINE / "qtpy6" / "web" / "js")
+    (tmp_path / "index.html").write_text(_MASQUES_PAGE, encoding="utf-8")
+
+    class Silencieux(http.server.SimpleHTTPRequestHandler):
+        def log_message(self, *_):
+            pass
+
+    serveur = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Silencieux, directory=str(tmp_path)))
+    threading.Thread(target=serveur.serve_forever, daemon=True).start()
+    options = webdriver.FirefoxOptions()
+    options.add_argument("--headless")
+    navigateur = webdriver.Firefox(options=options)
+    try:
+        navigateur.set_script_timeout(30)
+        navigateur.get(f"http://127.0.0.1:{serveur.server_port}/index.html")
+        debut = time.time()
+        while not navigateur.execute_script("return window.pret") and time.time() - debut < 30:
+            time.sleep(0.1)
+        zone = [0, masque.x(), masque.y(), masque.width(), masque.height()]
+        for largeur in (400, 1200):  # deux zooms
+            r = navigateur.execute_async_script(
+                "const [l, m, p, fini] = arguments; mesurer(l, m, p).then(fini, e => fini({ erreur: String(e) }))",
+                largeur, [zone], QPdfView.MASK_BLOCK)
+            assert "erreur" not in r, r
+            assert r["defauts"] == [], (largeur, r["defauts"])
+            assert "Premiere" not in r["texte"] and "Deuxieme" in r["texte"], r["texte"]
+        r = navigateur.execute_async_script("const [l, m, p, fini] = arguments; mesurer(l, m, p).then(fini)",
+                                            400, [[1, 0, 0, 10, 10]], QPdfView.MASK_BLOCK)  # un masque sur une autre page
+        assert "Premiere" in r["texte"], r["texte"]
+    finally:
+        navigateur.quit()
+        serveur.shutdown()
+
+
 def test_pdf_limite_de_pages_en_natif(app, tmp_path):
     """``setPageLimit`` : la barre de défilement s'arrête au bas de la dernière page montrée, et quand les pages
     montrées finissent plus haut que la vue, la suite est recouverte du fond."""

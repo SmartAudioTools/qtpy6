@@ -9,13 +9,14 @@ n'est ouvert, que Qt dessinerait dessous. Seul le sous-ensemble utile de l'API e
 (chemin ou QIODevice), ``status``, ``pageCount`` et leurs signaux ; ``QPdfView.setDocument`` et les modes, la page
 étant toujours ajustée à la largeur, les pages les unes sous les autres, ``setDocumentMargins`` et ``setPageSpacing`` ; les
 liens internes du PDF (un sommaire) suivis au clic, comme sur ordinateur ; et ``setPageLimit``, l'ajout de qtpy6 (les
-premières pages seules), comme sur ordinateur. Le chargement est asynchrone : ``load`` rend
+premières pages seules), et setMasks, l'autre ajout (des zones en pavés, leur texte retiré), comme sur
+ordinateur. Le chargement est asynchrone : ``load`` rend
 ``Error.None_`` avec ``status() == Loading``, puis ``statusChanged(Ready)``."""
 
 import enum
 import importlib.resources
 
-from qtpy6.QtCore import QMargins, QObject, QPoint, QTimer, Signal
+from qtpy6.QtCore import QMargins, QObject, QPoint, QRectF, QTimer, Signal
 from qtpy6.QtWidgets import QApplication, QWidget
 
 _JS = None
@@ -123,7 +124,7 @@ class QPdfView(QWidget):
         super().__init__(parent)
         self._document, self._mode_page, self._mode_zoom = None, self.PageMode.SinglePage, self.ZoomMode.Custom
         self._vue = vue = _js().vue()
-        self._place, self._limite = None, None
+        self._place, self._limite, self._masques = None, None, {}
         self._marges, self._ecart = QMargins(6, 6, 6, 6), 3  # les défauts de QPdfView
         self.destroyed.connect(lambda *_: vue.detruire())
         # Le filet : ce qu'aucun événement du widget ne signale (un ancêtre qui bouge, une boîte modale, un menu)
@@ -152,6 +153,17 @@ class QPdfView(QWidget):
 
     def pageLimit(self):
         return self._limite
+
+    def setMasks(self, masques):
+        """{page: [QRectF en points de la page, depuis son haut gauche]} : ces zones en pavés, leur texte retiré."""
+        from pyodide.ffi import to_js  # noqa: PLC0415
+
+        self._masques = {page: [QRectF(r) for r in zones] for page, zones in (masques or {}).items() if zones}
+        self._vue.masquer(to_js([[page, r.x(), r.y(), r.width(), r.height()]
+                                 for page, zones in self._masques.items() for r in zones]))
+
+    def masks(self):
+        return {page: list(zones) for page, zones in self._masques.items()}
 
     def documentMargins(self):
         return QMargins(self._marges)
