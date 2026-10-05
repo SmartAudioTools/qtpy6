@@ -58,8 +58,8 @@ def _pyodide_pomper(ns, periode=10):
     """Fait tourner la boucle d'événements de Qt : compilé avec JSPI, Qt-WASM n'envoie ni minuteries ni événements postés
     de lui-même, il attend qu'on reprenne SA boucle ``exec()`` suspendue (``onTimer`` : ``if (useAsyncify()) return;``,
     qeventdispatcher_wasm.cpp) — celle qu'on ne peut pas lancer, imbriquée elle arrête tout. Mesuré : sans pompe, un
-    ``QTimer`` s'arrête dès que la page cesse de redessiner. Un appel de la page, non promettant : les slots y sont
-    reportés (``connect``), rien n'y suspend au milieu de ``processEvents``."""
+    ``QTimer`` s'arrête dès que la page cesse de redessiner. Un appel de la page, où les slots sont reportés (``connect``) :
+    rien de Python n'y suspend au milieu de ``processEvents`` ; seul Qt peut y suspendre sa propre boucle (``qtpy6Pomper``)."""
     if _pompe:
         return
     try:
@@ -70,9 +70,16 @@ def _pyodide_pomper(ns, periode=10):
     QCoreApplication, QEvent = ns["QCoreApplication"], ns["QEvent"]
 
     def tour():
+        global _pompe_tourne
         app = QCoreApplication.instance()
         if app is not None:
-            app.processEvents()
+            # promettante (qtpy6Pomper), elle n'est pas pour autant une entrée où Python peut suspendre : un dialogue
+            # ouvert par un slot l'arrêterait, et avec elle Qt, qui doit le fermer. Les slots y restent reportés.
+            _pompe_tourne = True
+            try:
+                app.processEvents()
+            finally:
+                _pompe_tourne = False
             # les deleteLater : processEvents ne les fait jamais hors d'une boucle exec() (doc de Qt), et il n'y en a pas.
             # Mesuré (01/10/2026) : sans cela, rien de ce qui est détruit par deleteLater ne l'était, et un widget
             # resté à l'écran, son objet Python libéré, s'y peignait en widget natif (la case de SmartTeacher).
@@ -82,7 +89,10 @@ def _pyodide_pomper(ns, periode=10):
             if _suspendus == 0:
                 app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
-    _pompe.append(js.setInterval(create_proxy(tour), periode))
+    # La pompe promettante de qtpy6web.js (``boucles_qt``), quand elle est là : Qt peut y suspendre ses boucles imbriquées
+    # (QDrag.exec).
+    pomper = getattr(js, "qtpy6Pomper", None)
+    _pompe.append(pomper(create_proxy(tour), periode) if pomper else js.setInterval(create_proxy(tour), periode))
 
 
 # ``can_run_sync()`` ment pendant qu'une entrée est suspendue : un slot que Qt appelle alors y voit True, mais un
@@ -91,10 +101,11 @@ def _pyodide_pomper(ns, periode=10):
 # combien de piles attendent. Sans pile suspendue, ``can_run_sync()`` dit vrai (le script principal de runPythonAsync).
 _actif = False
 _suspendus = 0
+_pompe_tourne = False  # la pompe est dans processEvents (et Qt y a peut-être suspendu un QDrag.exec)
 
 
 def _peut_suspendre():
-    return _pyodide_peut() and (_actif or _suspendus == 0)
+    return _pyodide_peut() and (_actif or (_suspendus == 0 and not _pompe_tourne))
 
 
 def _suspendre(brancher):
@@ -340,6 +351,19 @@ def doubler_qtcore(ns):
     QEventLoop.exit = boucle_exit
     QEventLoop.quit = lambda self: boucle_exit(self, 0)
     QEventLoop.isRunning = lambda self: bool(getattr(self, "_qtpy6_fin", None))
+
+    # processEvents : jamais de suspension. Quand qtpy6web.js lui donne la JSPI (boucles_qt), Qt-WASM suspend dans tout
+    # processEvents pour laisser passer les événements du navigateur, sauf sous EventLoopExec (sendNativeEvents,
+    # qeventdispatcher_wasm.cpp) ; hors entrée promettante (runPython de la page), cette suspension tue Pyodide
+    # (« No matching WebAssembly.promising », mesuré le 05/10/2026). Les événements en attente sont envoyés quand même.
+    traiter = QCoreApplication.processEvents
+    Drapeau = QEventLoop.ProcessEventsFlag
+
+    def traiter_(*args, **kwargs):
+        drapeaux = kwargs.pop("flags", args[0] if args else Drapeau.AllEvents)
+        return traiter(drapeaux | Drapeau.EventLoopExec, *args[1:], **kwargs)
+
+    QCoreApplication.processEvents = staticmethod(traiter_)
 
     doubler_exec_application(QCoreApplication)
     QCoreApplication.quit = staticmethod(lambda: _quitter(0))

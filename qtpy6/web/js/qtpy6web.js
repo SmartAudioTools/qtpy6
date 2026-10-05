@@ -178,8 +178,167 @@ function sans_menu(conteneur) {
   Object.assign(conteneur.style, { webkitTouchCallout: "none", webkitUserSelect: "none", userSelect: "none" });
 }
 
+// Les boucles imbriquées de Qt, QDrag.exec en tête, comme sur le bureau. Qt-WASM sait les mener en suspendant sa pile
+// (QEventLoop::exec → qtSuspendJs) quand il se croit compilé avec Asyncify ; Pyodide-Qt ne l'est pas, mais la JSPI de
+// Pyodide fait la même chose : la cale `Asyncify` lui fait croire (jsHaveJspi() lit globalThis.Asyncify, haveJspi() met
+// la réponse en cache), et qtSuspendJs, enveloppé à l'instanciation du module, suspend par WebAssembly.Suspending. Une
+// suspension n'est possible que dans une entrée « promettante » : la pompe de bloquant en est une (`pompe`), le drapeau
+// `etat.promettant` le dit pendant qu'elle tourne. Ailleurs, refus : qtSuspendJs rend tout de suite, après avoir tiré les
+// minuteries à 0 ms de Qt (sinon sa boucle d'envoi des événements natifs attend une minuterie qui ne viendrait jamais).
+// PySide/PyQt rendent le GIL autour de processEvents : le reprendre pour sauver l'état de Python, le rendre pendant la
+// suspension (les autres entrées en ont besoin), le reprendre et le rendre de nouveau à la reprise.
+const suspension = { promettant: false, suspendu: false, suspensions: 0, refus: 0, M: null };
+function boucles_qt() {
+  globalThis.Asyncify ??= { handleAsync: f => f(), makeAsyncFunction: f => f };
+  const minuteries = new Map();  // id → fonction, des setTimeout à 0 ms : le repli sans suspension en tire celles de Qt
+  const st0 = setTimeout, ct0 = clearTimeout;
+  window.setTimeout = (f, d, ...a) => {
+    if (typeof f !== "function" || (d | 0) !== 0) return st0(f, d, ...a);
+    const id = st0((...b) => { minuteries.delete(id); f(...b); }, d, ...a);
+    minuteries.set(id, f);
+    return id;
+  };
+  window.clearTimeout = id => { minuteries.delete(id); ct0(id); };
+  const envelopper = imports => {
+    const env = imports && imports.env;
+    if (!env || !env.__asyncjs__qtSuspendJs) return imports;
+    const { saveState, restoreState } = env, s = suspension;
+    // Pas async : une promesse rendue hors entrée promettante serait un SuspendError
+    env.__asyncjs__qtSuspendJs = new WebAssembly.Suspending(() => {
+      const M = s.M, ctrl = M && M.qtSuspendResumeControl;
+      let etat = null, sans_gil = false;
+      if (s.promettant && ctrl) {
+        sans_gil = !M._PyGILState_Check();
+        if (sans_gil) M._PyEval_RestoreThread(M._PyGILState_GetThisThreadState());
+        etat = saveState();
+        if (!(etat && etat.stackState) && sans_gil) M._PyEval_SaveThread();
+      }
+      if (!(etat && etat.stackState)) {
+        s.refus++;
+        if (ctrl) for (const [id, f] of [...minuteries])
+          if (Object.values(ctrl.eventHandlers).includes(f)) { ct0(id); minuteries.delete(id); f(); }
+        return;
+      }
+      s.suspensions++; s.promettant = false; s.suspendu = true;
+      return new Promise(r => { ctrl.resume = r; }).then(() => {
+        restoreState(etat);
+        if (sans_gil) M._PyEval_SaveThread();
+        s.promettant = true; s.suspendu = false;
+      });
+    });
+    return imports;
+  };
+  const i0 = WebAssembly.instantiate, is0 = WebAssembly.instantiateStreaming;
+  WebAssembly.instantiate = (b, imports) => i0(b, envelopper(imports));
+  WebAssembly.instantiateStreaming = (r, imports) => is0(r, envelopper(imports));
+  window.qtpy6Pomper = pompe;  // ce que bloquant._pyodide_pomper appelle, s'il le trouve
+}
+
+// Un événement DOM que Qt met en file pendant une suspension est traité APRÈS sa diffusion : composedPath() rend alors []
+// et target est null (qwasmevent.cpp, qwasmwindow.cpp → dom::mapPoint), d'où « objHandle is null ». On les fige quand
+// l'événement entre dans la file.
+function figer_les_evenements(M) {
+  const figer = c => {
+    if (!c) return;
+    c.pendingEvents.push = function (...items) {
+      for (const it of items) {
+        const ev = it && it.arg;
+        if (!ev || typeof ev.composedPath !== "function") continue;
+        const chemin = ev.composedPath();
+        if (chemin.length) Object.defineProperty(ev, "composedPath", { value: () => chemin, configurable: true });
+        for (const k of ["target", "currentTarget"]) { const v = ev[k]; if (v) Object.defineProperty(ev, k, { value: v, configurable: true }); }
+      }
+      // Un événement mis en file hors suspension est traité par le prochain processEvents, et si celui-ci n'est pas
+      // promettant (un runPython de la page), le handler qui suspend tue Pyodide : celui du réveil de Qt (onWakeup →
+      // processEvents(AllEvents), qeventdispatcher_wasm.cpp), mesuré le 05/10/2026. On vide la file tout de suite, en
+      // promettant, avant toute autre tâche du navigateur.
+      if (suspension.tourner) queueMicrotask(suspension.tourner);
+      return Array.prototype.push.apply(this, items);
+    };
+  };
+  let c = M.qtSuspendResumeControl;
+  figer(c);
+  Object.defineProperty(M, "qtSuspendResumeControl", { configurable: true, get: () => c, set: v => { c = v; figer(v); } });
+}
+
+// La pompe de bloquant (`_pyodide_pomper`) quand `boucles_qt` est posé, promettante : Qt peut y suspendre. Une seule à la fois ; pendant une
+// suspension (un glisser en cours), c'est la boucle de Qt reprise par `ctrl.resume` qui traite les événements.
+// Posée hors de l'appel de Python qui la demande (setTimeout) : créée pendant cet appel (l'import de QtCore), la première
+// suspension de Qt tuait Pyodide (« handle is undefined », mesuré le 05/10/2026 ; la même pompe posée depuis la page, non).
+function pompe(tour, periode) {
+  setTimeout(() => pomper(tour, periode), 0);
+}
+function pomper(tour, periode) {
+  let encours = false;
+  const tourner = () => {
+    if (encours) return;
+    // Pas avant que Qt ait son contrôle de suspension (la première boucle d'événements) : appelée en promettante plus tôt,
+    // Python meurt (« handle is undefined ») ; le tour ordinaire, comme sans boucles_qt.
+    if (!(suspension.M && suspension.M.qtSuspendResumeControl)) return tour();
+    encours = true;
+    suspension.promettant = true;
+    let p;
+    try { p = tour.callPromising(); } finally { suspension.promettant = false; }
+    p.catch(e => print("pompe : " + (e.message || e))).finally(() => { encours = false; suspension.promettant = false; });
+  };
+  suspension.tourner = tourner;
+  setInterval(tourner, periode);
+}
+
+// Le glisser rejoué. QWasmDrag attend un glisser HTML5 (dragstart…dragend) que le navigateur ne lance pas : sous un doigt,
+// Firefox n'en lance aucun ; sous la souris, l'appui que Qt a déjà consommé n'en lance pas non plus, et QDrag.exec restait
+// suspendu après le relâcher (essai à la main, 05/10/2026). Pendant que Qt attend un glisser (une suspension en cours, donc
+// QDrag.exec), un doigt ou une souris qui bouge sur un élément draggable (la fenêtre Qt) le rejoue : dragstart, puis
+// dragover à chaque mouvement, drop et dragend au lever, sur l'élément sous le pointeur. Si le navigateur lance quand
+// même son propre glisser (dragstart authentique), on le lui laisse. Qt a pris le glisser quand il pose son image
+// (setDragImage) ; il refuse sinon (preventDefault), et on réessaie au mouvement suivant, 50 ms plus tard au plus tôt.
+// Le pointeur pris, ses pointermove n'atteignent plus Qt ; son pointerup, si : c'est lui qui termine QDrag.exec quand le
+// dépôt tombe hors de toute cible (« No drag target set »). Un pointercancel synthétique, ou un pointerup avalé, laissait
+// exec suspendu jusqu'à l'appui suivant (mesuré le 05/10/2026, souris et doigt).
+function glisser_rejoue(conteneur) {
+  let e = null;  // { id, type, el, racine, x0, y0, dt, pris, essai }
+  const drag = (type, el, x, y) => el.dispatchEvent(new DragEvent(type, { dataTransfer: e.dt, clientX: x, clientY: y,
+    screenX: x, screenY: y, buttons: type === "drop" || type === "dragend" ? 0 : 1, bubbles: true, cancelable: true, composed: true }));
+  const sous = (x, y) => e.racine.elementFromPoint(x, y) || e.el;
+  const avaler = ev => { ev.stopImmediatePropagation(); ev.preventDefault(); };
+  addEventListener("pointerdown", ev => {
+    e = null;
+    if (!["touch", "mouse"].includes(ev.pointerType) || !ev.isPrimary || !ev.composedPath().includes(conteneur)) return;
+    const el = ev.composedPath()[0];
+    if (el && el.closest && el.closest("[draggable=true]"))
+      e = { id: ev.pointerId, type: ev.pointerType, el, racine: el.getRootNode(), x0: ev.clientX, y0: ev.clientY, essai: 0 };
+  }, true);
+  addEventListener("pointermove", ev => {
+    if (!e || ev.pointerId !== e.id) return;
+    const { clientX: x, clientY: y } = ev;
+    if (!e.pris && e.dt && e.dt.pris) e.pris = true;
+    if (e.pris) { avaler(ev); drag("dragover", sous(x, y), x, y); return; }
+    const t = performance.now();
+    if (!suspension.suspendu || Math.hypot(x - e.x0, y - e.y0) < 8 || t - e.essai < 50) return;
+    e.essai = t;
+    const dt = e.dt = new DataTransfer(), image = dt.setDragImage.bind(dt);
+    dt.setDragImage = (...a) => { dt.pris = true; try { image(...a); } catch {} };
+    drag("dragstart", e.el, x, y);
+  }, true);
+  addEventListener("pointerup", ev => {
+    if (!e || ev.pointerId !== e.id) return;
+    if (e.pris) {
+      const { clientX: x, clientY: y } = ev;
+      drag("drop", sous(x, y), x, y);
+      drag("dragend", e.el, x, y);
+    }
+    e = null;
+  }, true);
+  addEventListener("pointercancel", ev => {
+    if (!e || ev.pointerId !== e.id || !ev.isTrusted) return;
+    if (e.pris) drag("dragend", e.el, ev.clientX, ev.clientY);  // le navigateur a repris le doigt : glisser abandonné
+    e = null;
+  }, true);
+  addEventListener("dragstart", ev => { if (ev.isTrusted && e && !e.dt) e = null; }, true);
+}
+
 export async function preparer(conteneur, { indexURL, archives = [], roues = [], env = {}, sur_ligne, progres = () => {},
-                                            tailles = {}, jumeaux = [], module } = {}) {
+                                            tailles = {}, jumeaux = [], module, boucles = true } = {}) {
   if (sur_ligne) ecouter = sur_ligne;
   const avance = avancement(progres);
   const { prelancer, retablir } = compter(tailles, ["pyodide.asm.wasm", "python_stdlib.zip", ...jumeaux], f => {
@@ -193,8 +352,13 @@ export async function preparer(conteneur, { indexURL, archives = [], roues = [],
   ["pyodide.asm.wasm", "python_stdlib.zip"].forEach(n => prelancer(indexURL + n));
   roues.forEach(r => prelancer(r));
   const zips = archives.map(a => telecharger(a.url));  // en parallèle du chargement de Pyodide
+  // Sans JSPI (Safari iOS : pas de WebAssembly.Suspending), rien n'est posé : QDrag.exec reste muet, les vues d'éléments
+  // glissent par qtpy6.web.glisser (posé dans tous les cas par QtWidgets).
+  boucles = boucles && typeof WebAssembly.Suspending === "function";
+  if (boucles) boucles_qt();  // avant que Pyodide instancie son module
   const { loadPyodide } = await import(indexURL + "pyodide.mjs");
   const [py, ...donnees] = await Promise.all([loadPyodide({ indexURL, stdout: print, stderr: print }), ...zips]);
+  if (boucles) { suspension.M = py._module; figer_les_evenements(py._module); }
   print(`Pyodide-Qt ${py.version} chargé${donnees.length ? " ; archives " + donnees.map(d => (d.byteLength / 1024) | 0).join(", ") + " Kio" : ""}`);
   avance.debut("archives");
   archives.forEach((a, i) => py.unpackArchive(donnees[i], "zip", { extractDir: a.dossier }));
@@ -207,6 +371,7 @@ export async function preparer(conteneur, { indexURL, archives = [], roues = [],
   py._module.qtContainerElements = [conteneur];  // l'API privée de Qt-WASM, isolée ici : l'élément qui sert d'écran à Qt
   molette(conteneur);
   sans_menu(conteneur);
+  if (boucles) glisser_rejoue(conteneur);
   window.qtpy6Conteneur = conteneur;  // ce que qtpy6.web.pdf lit pour caler ses <div> sur les widgets
   window.qtpy6Js = import.meta.url;  // d'où qtpy6.web.pdf charge pdf.js quand l'archive ne l'a pas (assembler, exclure)
   py.runPython(`import json, os, sys
