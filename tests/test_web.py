@@ -971,6 +971,23 @@ def test_accept_du_selecteur_de_fichiers():
     assert _accept("*.tar.gz") == ".tar.gz"
 
 
+@pytest.mark.skipif(not (RACINE / "exemple" / "pyodide-qt").exists() or not Path("/usr/bin/geckodriver").exists(),
+                    reason="Pyodide-Qt (hebergement/telecharger.sh) et Firefox requis")
+def test_boucle_de_qt_ouverte_par_une_minuterie():
+    """Dans le vrai navigateur (sonde, ~20 s) : un ``QTimer`` qui ouvre ``QDrag.exec`` (l'appui long au doigt) voit Qt
+    suspendre sa boucle imbriquée dans la tâche où ``bloquant`` reporte le slot. Avant le 05/10/2026, qtSuspendJs n'y
+    suspendait pas : refus en boucle, page figée (mesuré : la sonde tuée au bout de 200 s, contre 2 s avec le correctif)."""
+    subprocess.run([sys.executable, "exemple/construire.py"], cwd=RACINE, check=True, capture_output=True, timeout=120)
+    try:
+        r = subprocess.run([sys.executable, "-m", "qtpy6.web.sonde", "--racine", ".", "exemple/index.html?boucle",
+                            str(RACINE / "exemple" / "boucle.png"), "--delai", "60"],
+                           cwd=RACINE, capture_output=True, text=True, timeout=150)
+    except subprocess.TimeoutExpired:
+        pytest.fail("page figée : Qt ne suspend pas QDrag.exec ouvert par une minuterie")
+    ligne = next((l for l in r.stdout.splitlines() if "boucle de Qt" in l), r.stdout[-500:])
+    assert r.returncode == 0 and ", refus 0" in ligne and "suspensions 0," not in ligne, ligne
+
+
 def test_appui_long(app):
     """Au doigt, un doigt immobile ``DELAI`` ms saisit ; un glissé commencé avant fait défiler et ne saisit rien ; un
     tremblement sous ``startDragDistance`` ne casse pas la prise ; la souris ne saisit jamais."""

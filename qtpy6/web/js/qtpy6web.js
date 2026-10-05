@@ -183,11 +183,13 @@ function sans_menu(conteneur) {
 // Pyodide fait la même chose : la cale `Asyncify` lui fait croire (jsHaveJspi() lit globalThis.Asyncify, haveJspi() met
 // la réponse en cache), et qtSuspendJs, enveloppé à l'instanciation du module, suspend par WebAssembly.Suspending. Une
 // suspension n'est possible que dans une entrée « promettante » : la pompe de bloquant en est une (`pompe`), le drapeau
-// `etat.promettant` le dit pendant qu'elle tourne. Ailleurs, refus : qtSuspendJs rend tout de suite, après avoir tiré les
+// `etat.promettant` le dit pendant qu'elle tourne ; une tâche de bloquant._plus_tard aussi (`tache`, que bloquant pose), où
+// passe tout slot Python que Qt appelle dans la pompe : sans elle, un QTimer.timeout qui lance QDrag.exec (l'appui long
+// de tactile) bouclait sans fin sur des refus (mesuré le 05/10/2026), comme tout slot qui ouvrirait une boucle de Qt. Ailleurs, refus : qtSuspendJs rend tout de suite, après avoir tiré les
 // minuteries à 0 ms de Qt (sinon sa boucle d'envoi des événements natifs attend une minuterie qui ne viendrait jamais).
 // PySide/PyQt rendent le GIL autour de processEvents : le reprendre pour sauver l'état de Python, le rendre pendant la
 // suspension (les autres entrées en ont besoin), le reprendre et le rendre de nouveau à la reprise.
-const suspension = { promettant: false, suspendu: false, suspensions: 0, refus: 0, M: null };
+const suspension = { promettant: false, tache: false, qtEnTache: false, suspendu: false, suspensions: 0, refus: 0, M: null };
 function boucles_qt() {
   globalThis.Asyncify ??= { handleAsync: f => f(), makeAsyncFunction: f => f };
   const minuteries = new Map();  // id → fonction, des setTimeout à 0 ms : le repli sans suspension en tire celles de Qt
@@ -207,7 +209,8 @@ function boucles_qt() {
     env.__asyncjs__qtSuspendJs = new WebAssembly.Suspending(() => {
       const M = s.M, ctrl = M && M.qtSuspendResumeControl;
       let etat = null, sans_gil = false;
-      if (s.promettant && ctrl) {
+      const en_tache = s.tache && !s.promettant;
+      if ((s.promettant || en_tache) && ctrl) {
         sans_gil = !M._PyGILState_Check();
         if (sans_gil) M._PyEval_RestoreThread(M._PyGILState_GetThisThreadState());
         etat = saveState();
@@ -220,10 +223,11 @@ function boucles_qt() {
         return;
       }
       s.suspensions++; s.promettant = false; s.suspendu = true;
+      if (en_tache) s.qtEnTache = true;  // la pompe attend la fin de la tâche (bloquant), comme la sienne propre (encours)
       return new Promise(r => { ctrl.resume = r; }).then(() => {
         restoreState(etat);
         if (sans_gil) M._PyEval_SaveThread();
-        s.promettant = true; s.suspendu = false;
+        s.promettant = !en_tache; s.suspendu = false;
       });
     });
     return imports;
@@ -232,6 +236,7 @@ function boucles_qt() {
   WebAssembly.instantiate = (b, imports) => i0(b, envelopper(imports));
   WebAssembly.instantiateStreaming = (r, imports) => is0(r, envelopper(imports));
   window.qtpy6Pomper = pompe;  // ce que bloquant._pyodide_pomper appelle, s'il le trouve
+  window.qtpy6Suspension = suspension;  // où bloquant._pyodide_signaler pose `tache`
 }
 
 // Un événement DOM que Qt met en file pendant une suspension est traité APRÈS sa diffusion : composedPath() rend alors []
@@ -271,7 +276,9 @@ function pompe(tour, periode) {
 function pomper(tour, periode) {
   let encours = false;
   const tourner = () => {
-    if (encours) return;
+    // Ni pendant une tâche où Qt a suspendu : entre la reprise (`ctrl.resume`) et la suite de sa pile, une pompe glissée
+    // là (queueMicrotask de figer_les_evenements) la trouvait non promettante, d'où les refus en boucle (05/10/2026).
+    if (encours || suspension.qtEnTache) return;
     // Pas avant que Qt ait son contrôle de suspension (la première boucle d'événements) : appelée en promettante plus tôt,
     // Python meurt (« handle is undefined ») ; le tour ordinaire, comme sans boucles_qt.
     if (!(suspension.M && suspension.M.qtSuspendResumeControl)) return tour();

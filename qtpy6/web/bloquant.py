@@ -51,6 +51,20 @@ def _pyodide_plus_tard(f):
     asyncio.get_event_loop().call_soon(f)
 
 
+def _pyodide_signaler(actif):
+    """Dit à qtpy6web.js (``boucles_qt``) si le code en cours est une tâche promettante de ``_plus_tard`` : Qt peut alors y
+    suspendre ses propres boucles (QDrag.exec), comme dans la pompe. Sans boucles_qt, ou hors navigateur, rien."""
+    try:
+        import js  # noqa: PLC0415
+    except ImportError:
+        return
+    s = getattr(js, "qtpy6Suspension", None)
+    if s is not None:
+        s.tache = actif
+        if not actif:
+            s.qtEnTache = False
+
+
 _pompe = []
 
 
@@ -111,12 +125,14 @@ def _peut_suspendre():
 def _suspendre(brancher):
     global _actif, _suspendus
     avant, _actif = _actif, False
+    _pyodide_signaler(False)
     _suspendus += 1
     try:
         return _pyodide_suspendre(brancher)
     finally:
         _suspendus -= 1
         _actif = avant or _suspendus > 0  # repris : promettant, et le seul à pouvoir le dire tant qu'un autre attend
+        _pyodide_signaler(_actif)
 
 
 def _plus_tard(f, *args):
@@ -125,12 +141,14 @@ def _plus_tard(f, *args):
     def tache():
         global _actif
         avant, _actif = _actif, True
+        _pyodide_signaler(True)
         try:
             f(*args)
         except Exception:  # noqa: BLE001
             sys.excepthook(*sys.exc_info())
         finally:
             _actif = avant
+            _pyodide_signaler(avant)
 
     _pyodide_plus_tard(tache)
 

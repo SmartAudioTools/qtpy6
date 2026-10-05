@@ -379,6 +379,16 @@ postes visés ; (5) le temps de chargement à froid derrière le bandeau, avec l
   peut suspendre sa boucle imbriquée ; un tour à la fois, et pas avant que Qt ait son `qtSuspendResumeControl` (sinon
   « handle is undefined »). Pendant ce tour, Python ne suspend pas (`_pompe_tourne`) : un dialogue ouvert par un slot
   arrêterait Qt, qui doit le fermer.
+- **Une tâche de `_plus_tard` est aussi une entrée où Qt suspend** (05/10/2026) : un slot que Qt appelle pendant la pompe
+  (un `QTimer.timeout`, l'appui long de `tactile`) y est reporté, et s'il ouvre une boucle de Qt (`QDrag.exec`),
+  `qtSuspendJs` refusait de suspendre hors de la pompe : refus en boucle, page figée. `bloquant` pose désormais
+  `qtpy6Suspension.tache` pendant chaque tâche (`_pyodide_signaler`, retiré pendant un `_suspendre` Python), et
+  `qtSuspendJs` suspend alors aussi. Piège de la reprise : le `.then` de la suspension tourne AVANT que la pile wasm ne
+  reprenne ; un tour de pompe en microtâche passait entre les deux et remettait `promettant` à faux, la pile reprise
+  refusait en boucle. D'où `qtEnTache` : la pompe ne tourne pas tant qu'une boucle de Qt est suspendue dans une tâche.
+  Test : `test_boucle_de_qt_ouverte_par_une_minuterie` (`exemple/boucle_qt.py`, figé sans le correctif). Risque ouvert,
+  non mesuré : un `_suspendre` Python d'une AUTRE pile pendant cette suspension remet `qtEnTache` à faux, et la course
+  pourrait revenir.
 - **`processEvents` ne suspend jamais** : avec la JSPI, Qt-WASM suspend dans tout `processEvents` pour laisser passer
   les événements du navigateur, sauf sous `EventLoopExec` (`sendNativeEvents`) ; hors entrée promettante, cette
   suspension tue Pyodide (« No matching WebAssembly.promising », 05/10/2026). `bloquant` ajoute donc `EventLoopExec` à
