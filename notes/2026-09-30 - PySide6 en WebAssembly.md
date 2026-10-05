@@ -996,6 +996,10 @@ Rebuild sans lien statique (`construire.sh pyodide dynamique paquet`, 56 s) : mo
   mais du code UTILISATEUR tapé dans une console de worker le verra : le paquet pur `PySide6` s'importe, ses modules
   d'extension non.
 
+Écarté le même jour : un jumeau Brotli de `pyodide.asm.js` (194 Ko au lieu des 236 du gzip que GitHub Pages applique
+seul aux .js, mesuré). Pyodide le charge en script, pas par `fetch` : `en_jumeau` ne le voit pas, il faudrait le service
+worker (`qtpy6web.js`), pour 40 Ko, ~6 ms à 50 Mbit/s, et rien aux visites suivantes (cache).
+
 **Points ouverts :** le zip local `pyodide-pyside6-0.29.3.0.zip` a été réécrit (le statique n'existe plus que dans
 `build/dist-statique/` et `exemple/pyodide-qt`) ; publication et `versions.json` restent à faire (sha256 du zip :
 `1fe84005…14983`, à refaire si on reconstruit : py-compile date les .pyc) ; AVANT tout déploiement, vérifier que le

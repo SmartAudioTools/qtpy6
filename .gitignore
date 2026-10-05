@@ -9,5 +9,6 @@ exemple/pyodide/
 exemple/app.zip
 exemple/*.png
 .mcp.json
+push.log
 hebergement/*.zip
 site/
