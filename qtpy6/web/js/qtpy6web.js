@@ -345,6 +345,11 @@ function glisser_rejoue(conteneur) {
     if (!suspension.suspendu || Math.hypot(x - e.x0, y - e.y0) < 8 || t - e.essai < 50) return;
     e.essai = t;
     const dt = e.dt = new DataTransfer(), poser = dt.setDragImage.bind(dt);
+    // Chrome ignore l'écriture de dropEffect sur un DataTransfer construit (Firefox la garde) : Qt y lisait « none » au
+    // dragend, croyait le glisser ignoré et relançait QBasicDrag::drag, dont le relâcher déposait une seconde fois
+    // (étiquette dupliquée, 05/10/2026). La valeur que Qt pose au dragover est donc gardée ici.
+    let effet = "none";
+    Object.defineProperty(dt, "dropEffect", { get: () => effet, set: v => { effet = v; } });
     dt.setDragImage = (el, hx, hy) => {
       dt.pris = true;
       effacer();
