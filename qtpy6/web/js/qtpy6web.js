@@ -387,8 +387,7 @@ export async function preparer(conteneur, { indexURL, archives = [], roues = [],
   ["pyodide.asm.wasm", "python_stdlib.zip"].forEach(n => prelancer(indexURL + n));
   roues.forEach(r => prelancer(r));
   const zips = archives.map(a => telecharger(a.url));  // en parallèle du chargement de Pyodide
-  // Sans JSPI (Safari iOS : pas de WebAssembly.Suspending), rien n'est posé : QDrag.exec reste muet, les vues d'éléments
-  // glissent par qtpy6.web.glisser (posé dans tous les cas par QtWidgets).
+  // Sans JSPI (pas de WebAssembly.Suspending), rien n'est posé : Pyodide lui-même n'y démarre pas (web.md, QDrag.exec).
   boucles = boucles && typeof WebAssembly.Suspending === "function";
   if (boucles) boucles_qt();  // avant que Pyodide instancie son module
   const { loadPyodide } = await import(indexURL + "pyodide.mjs");

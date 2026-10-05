@@ -15,8 +15,6 @@ if PYQT6:
 if sys.platform == 'emscripten':
     from .web.bloquant import doubler_qtwidgets
     doubler_qtwidgets(globals())
-    from .web.glisser import doubler as _doubler_glisser
-    _doubler_glisser(globals())
 
 # QFileDialog's static functions: the keyword is `dir` in PySide6, `directory` in PyQt6; both work.
 _alias, _name = ('dir', 'directory') if PYQT6 else ('directory', 'dir')

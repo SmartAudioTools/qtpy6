@@ -988,6 +988,66 @@ def test_boucle_de_qt_ouverte_par_une_minuterie():
     assert r.returncode == 0 and ", refus 0" in ligne and "suspensions 0," not in ligne, ligne
 
 
+
+_GLISSER = """
+import functools, http.server, sys, threading, time
+from selenium import webdriver
+from selenium.webdriver.common.actions import interaction
+from selenium.webdriver.common.actions.action_builder import ActionBuilder
+from selenium.webdriver.common.actions.pointer_input import PointerInput
+doigt = sys.argv[1] == "doigt"
+class Silencieux(http.server.SimpleHTTPRequestHandler):
+    def log_message(self, *_):
+        pass
+serveur = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Silencieux, directory="."))
+threading.Thread(target=serveur.serve_forever, daemon=True).start()
+options = webdriver.FirefoxOptions()
+options.add_argument("--headless")
+if doigt:  # comme la sonde --tactile
+    for pref in ("ui.primaryPointerCapabilities", "ui.allPointerCapabilities"):
+        options.set_preference(pref, 1)
+    options.set_preference("dom.w3c_touch_events.enabled", 1)
+navigateur = webdriver.Firefox(options=options)
+try:
+    navigateur.get(f"http://127.0.0.1:{serveur.server_port}/exemple/index.html?glisse")
+    debut = time.time()
+    while navigateur.execute_script("return window.etat") not in ("glisse", "erreur") and time.time() - debut < 60:
+        time.sleep(0.3)
+    (x, y), _, (_, y2), _ = navigateur.execute_script("return window.centres")
+    pointeur = PointerInput(interaction.POINTER_TOUCH if doigt else interaction.POINTER_MOUSE, "p")
+    actions = ActionBuilder(navigateur, mouse=pointeur, duration=50)
+    actions.pointer_action.move_to_location(int(x), int(y)).pointer_down().pause(0.6 if doigt else 0.1)
+    for k in range(1, 11):  # A, la première ligne, descend sous le milieu de C
+        actions.pointer_action.move_to_location(int(x), int(y + (y2 + 5 - y) * k / 10))
+    actions.pointer_action.pause(0.3).pointer_up()
+    actions.perform()
+    time.sleep(1)
+    print(navigateur.execute_script("return window.ordre + '|' + (window.saisi || 'souris')"))
+finally:
+    navigateur.quit()
+    serveur.shutdown()
+"""
+
+
+@pytest.mark.skipif(not (RACINE / "exemple" / "pyodide-qt").exists() or not Path("/usr/bin/geckodriver").exists(),
+                    reason="Pyodide-Qt (hebergement/telecharger.sh) et Firefox requis")
+@pytest.mark.parametrize("pointeur", ["souris", "doigt"])
+def test_glisser_depose(pointeur):
+    """Dans le vrai navigateur (~15 s), un vrai pointeur WebDriver fait glisser A sous C dans une ``QListWidget`` en
+    ``InternalMove`` (``exemple/glisse.py``) : le ``startDrag`` de Qt dépose, à la souris comme au doigt, où l'appui
+    long ouvre ``QDrag.exec`` depuis une minuterie. Sans le correctif du 05/10/2026 (``qtSuspendJs`` dans les tâches
+    ``_plus_tard``), le doigt figeait la page (mesuré : délai dépassé, ordre inchangé) ; la souris, elle, déposait déjà."""
+    subprocess.run([sys.executable, "exemple/construire.py"], cwd=RACINE, check=True, capture_output=True, timeout=120)
+    try:
+        r = subprocess.run([sys.executable, "-c", _GLISSER, pointeur], cwd=RACINE, capture_output=True, text=True,
+                           timeout=150)
+    except subprocess.TimeoutExpired:
+        pytest.fail("page figée pendant le glisser")
+    assert r.returncode == 0, r.stderr[-800:]
+    attendu = "BCAD|" + ("appui long" if pointeur == "doigt" else "souris")  # au doigt, c'est bien l'appui long qui saisit
+    assert r.stdout.strip().splitlines()[-1] == attendu, r.stdout
+
+
 def test_appui_long(app):
     """Au doigt, un doigt immobile ``DELAI`` ms saisit ; un glissé commencé avant fait défiler et ne saisit rien ; un
     tremblement sous ``startDragDistance`` ne casse pas la prise ; la souris ne saisit jamais."""
@@ -1032,101 +1092,3 @@ def test_appui_long(app):
     assert len(prises) == 2  # sans ACTIF (natif), le doigt est une souris
 
 
-# ---- glisser : startDrag sans QDrag.exec (le navigateur) ----
-
-def _listes(app, mode=QtWidgets.QAbstractItemView.DragDropMode.DragDrop, n=2):
-    """``n`` listes côte à côte dont la ``startDrag`` est celle du navigateur (sans l'installer sur la liaison)."""
-    from qtpy6.web import glisser
-
-    class Liste(QtWidgets.QListWidget):
-        startDrag = glisser.startDrag
-
-    fenetre = QtWidgets.QWidget()
-    disposition = QtWidgets.QHBoxLayout(fenetre)
-    listes = []
-    for k in range(n):
-        liste = Liste()
-        liste.addItems([f"{'abc'[k]}{i}" for i in range(3)])
-        liste.setDragDropMode(mode)
-        liste.setDefaultDropAction(QtCore.Qt.DropAction.MoveAction)
-        disposition.addWidget(liste)
-        listes.append(liste)
-    fenetre.resize(400, 200)
-    fenetre.show()
-    QtTest.QTest.qWaitForWindowExposed(fenetre)
-    return fenetre, listes
-
-
-def _glisser(source, rang, cible, point):
-    """Le glisser de l'élément ``rang`` de ``source`` lâché en ``point`` du viewport de ``cible``."""
-    source.setCurrentRow(rang)
-    source.startDrag(source.supportedDropActions() | QtCore.Qt.DropAction.CopyAction)
-    QtTest.QTest.mouseMove(cible.viewport(), point)
-    QtTest.QTest.mouseRelease(cible.viewport(), QtCore.Qt.MouseButton.LeftButton, QtCore.Qt.KeyboardModifier.NoModifier, point)
-
-
-def _textes(liste):
-    return [liste.item(k).text() for k in range(liste.count())]
-
-
-def test_glisser_d_une_liste_a_l_autre_deplace(app):
-    fenetre, (a, b) = _listes(app)
-    _glisser(a, 0, b, b.visualItemRect(b.item(1)).center() + QtCore.QPoint(0, 3))  # moitié basse de b1
-    assert (_textes(a), _textes(b)) == (["a1", "a2"], ["b0", "b1", "a0", "b2"])  # déplacé, pas copié
-    _glisser(a, 0, b, QtCore.QPoint(5, b.viewport().height() - 2))  # le second glisser vit aussi ; sous le dernier
-    assert (_textes(a), _textes(b)) == (["a2"], ["b0", "b1", "a0", "b2", "a1"])
-    assert b.currentItem().text() == "a1"
-
-
-def test_glisser_dans_la_meme_liste(app):
-    Mode = QtWidgets.QAbstractItemView.DragDropMode
-    fenetre, (a,) = _listes(app, Mode.InternalMove, n=1)
-    _glisser(a, 0, a, a.visualItemRect(a.item(2)).center() + QtCore.QPoint(0, 3))
-    assert _textes(a) == ["a1", "a2", "a0"]
-    _glisser(a, 2, a, a.visualItemRect(a.item(0)).center() - QtCore.QPoint(0, 3))
-    assert _textes(a) == ["a0", "a1", "a2"]
-    _glisser(a, 1, a, a.visualItemRect(a.item(1)).center())  # lâché sur lui-même : rien
-    assert _textes(a) == ["a0", "a1", "a2"]
-
-
-def test_glisser_respecte_ce_que_la_vue_autorise(app):
-    Mode = QtWidgets.QAbstractItemView.DragDropMode
-    fenetre, (a, b) = _listes(app)
-    b.setDragDropMode(Mode.NoDragDrop)  # b refuse les dépôts
-    _glisser(a, 0, b, b.visualItemRect(b.item(0)).center())
-    assert (_textes(a), _textes(b)) == (["a0", "a1", "a2"], ["b0", "b1", "b2"])
-    b.setDragDropMode(Mode.InternalMove)  # b ne prend que ses propres éléments
-    _glisser(a, 0, b, b.visualItemRect(b.item(0)).center())
-    assert (_textes(a), _textes(b)) == (["a0", "a1", "a2"], ["b0", "b1", "b2"])
-    b.setDragDropMode(Mode.DragDrop)
-    a.item(0).setFlags(a.item(0).flags() & ~QtCore.Qt.ItemFlag.ItemIsDragEnabled)  # élément non déplaçable
-    _glisser(a, 0, b, b.visualItemRect(b.item(0)).center())
-    assert (_textes(a), _textes(b)) == (["a0", "a1", "a2"], ["b0", "b1", "b2"])
-    a.setDefaultDropAction(QtCore.Qt.DropAction.CopyAction)  # une copie, si la vue de départ copie
-    _glisser(a, 1, b, QtCore.QPoint(5, b.viewport().height() - 2))
-    assert (_textes(a), _textes(b)) == (["a0", "a1", "a2"], ["b0", "b1", "b2", "a1"])
-
-
-def test_glisser_rend_la_souris_apres_le_lacher(app):
-    fenetre, (a, b) = _listes(app)
-    _glisser(a, 0, b, b.visualItemRect(b.item(0)).center())
-    QtTest.QTest.mouseClick(a.viewport(), QtCore.Qt.MouseButton.LeftButton, pos=a.visualItemRect(a.item(1)).center())
-    assert a.currentRow() == 1  # le clic suivant n'est plus avalé
-
-
-def test_glisser_pas_installe_en_natif():
-    from qtpy6.web import glisser
-
-    assert QtWidgets.QListWidget.startDrag is not glisser.startDrag and not glisser.installee()
-
-
-def test_glisser_installe_dans_le_navigateur():
-    """Posée sur les classes de la liaison. Le mode paresseux de ``_binding`` (PySide6 de Pyodide) n'existe pas ici :
-    que la doublure passe par le module et non par l'espace de noms, où ``QListWidget`` n'est pas encore, se mesure
-    dans le navigateur (sonde_lecteur, ``?trace=1``)."""
-    sortie = en_navigateur("""
-        from qtpy6.QtWidgets import QListWidget, QTreeView
-        from qtpy6.web import glisser
-        print(QListWidget.startDrag is glisser.startDrag, QTreeView.startDrag is glisser.startDrag)
-    """)
-    assert sortie.split() == ["True", "True"]

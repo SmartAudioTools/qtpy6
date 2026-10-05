@@ -50,7 +50,13 @@ f.grab().save("/capture.png")
     await new Promise(r => setTimeout(r, 1000));  // la page vit pendant le glisser : Qt y suspend, sans refus
     print(`boucle de Qt : ${window.boucle_qt}, suspensions ${s.suspensions}, refus ${s.refus}`);
   }
+  if (new URLSearchParams(location.search).has("glisse")) {  // ?glisse : tests/test_web.py, test_glisser_depose
+    py.pyimport("glisse").lancer();
+    await rendu();
+    window.centres = JSON.parse(py.pyimport("glisse").centres());
+    window.etat = "glisse";  // le test fait glisser un vrai pointeur, puis lit window.ordre
+  }
   print("tas wasm : " + (py._module.HEAPU8.length / 1048576).toFixed(0) + " Mio");
-  window.etat = "fini";
+  if (window.etat != "glisse") window.etat = "fini";
 } catch (e) { print("ERREUR " + (e.message || e)); console.error(e); window.etat = "erreur"; }
 </script></body></html>
