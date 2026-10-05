@@ -42,8 +42,9 @@ for r in json.load(open('qtpy6/web/versions.json'))['$CLE'].get('roues', {}).val
   curl -fL -o "$F" "$RURL"
   echo "$RSHA  $F" | sha256sum -c -
 done
-brotli -q 11 -f exemple/pyodide-qt/pyodide.asm.wasm & MOTEUR=$!  # les deux en parallèle (une minute et demie pour le moteur)
+brotli -q 11 -f exemple/pyodide-qt/pyodide.asm.wasm & MOTEUR=$!  # en parallèle (une minute et demie pour le moteur)
+brotli -q 11 -f exemple/pyodide-qt/pyside_agrege.so & AGREGAT=$!
 brotli -q 11 -f exemple/pyodide-qt/python_stdlib.zip
-gzip -9 -k -f -n exemple/pyodide-qt/pyodide.asm.wasm exemple/pyodide-qt/python_stdlib.zip
-wait $MOTEUR
+gzip -9 -k -f -n exemple/pyodide-qt/pyodide.asm.wasm exemple/pyodide-qt/python_stdlib.zip exemple/pyodide-qt/pyside_agrege.so
+wait $MOTEUR $AGREGAT
 ls -l exemple/pyodide-qt

@@ -939,3 +939,67 @@ Point 3 du plan révisé, mené dans « tu avances un maximum en autonomie ».
   divergence de recette sans gain mesurable.
 
 Niveau de preuve : mesuré (`perf_counter` sous node, 3 tours) ; restauration vérifiée par sha256.
+
+## Qt et PySide6 en module dynamique (05/10/2026, Opus 5.5, à la demande de la session smartteacher-01)
+
+**Demande.** L'utilisateur : « tente sa séparation en paquet dynamique » (04/10), puis « tu adoptes » (05/10, 03:27)
+et, le même jour, « retire aussi le lien statique de phase_pyodide ». Brief d'intégration
+(session smartteacher-01, feu vert de fin de phase B) : « phase dynamique insérée dans
+construire.sh AVANT le py-compile », « enveloppe conditionnelle (worker → base seul) + essai .br/.gz comme preparer »,
+« jumeaux de pyside_agrege.so dans telecharger.sh », « fumée étendue qui vérifie AUSSI les .pyc dans le zip », sonde
+« sur le résultat du VRAI rebuild, pas du proto ».
+
+**Fait :**
+- `wasm/construire.sh` : `phase_pyodide` produit le module principal SANS Qt (le patch ne garde que `-lembind`) ;
+  `phase_dynamique` (entre `pyodide` et `paquet`) lie `pyside_agrege.so`, module latéral `-Oz` (archives PySide en
+  `--whole-archive`, Qt au besoin) et copie les artefacts du module principal depuis `$PYODIDE/dist` vers
+  `$RACINE/build/dynamique/dist`. `phase_paquet` empaquette ce dossier-là, avec `pyodide-base.mjs` et
+  `pyside_agrege.so` en plus. 56 s pour `pyodide dynamique paquet` rejoués.
+- `wasm/pyodide-qt.mjs` (nouveau), copié en `pyodide.mjs` ; le `pyodide.mjs` amont devient `pyodide-base.mjs`. Dans une
+  page : agrégat téléchargé en parallèle de Python (jumeau .br/.gz d'abord, comme `en_jumeau` de qtpy6web.js, réponse
+  du service worker comprise), `loadDynamicLibrary` asynchrone, fichier retiré du FS (sinon +25 Mo de tas : dynlink.c
+  ne libère jamais sa copie), chercheur `sys.meta_path` pour les six modules. Dans un worker : Pyodide seul.
+- `hebergement/telecharger.sh` : jumeaux Brotli et gzip de `pyside_agrege.so`.
+- `wasm/fumee.mjs` : passe par l'enveloppe (fausse page : `document`, `location`, `fetch` sur le disque), vérifie que
+  `json.__file__` est un `.pyc` (`os` est gelé dans CPython 3.13 : son `__file__` ne dit rien du zip), `process.exit`
+  final (la fausse page garde la boucle de node vivante).
+
+**Mesuré** (Firefox sans interface, page d'essai preparer + JSPI + worker, paquet du rebuild dépaqueté, 2 passages
+contre l'ancien tout-statique) : Pyodide-Qt chargé 0,44-0,45 s (ancien 0,53) ; worker prêt 0,97 s (1,16) ; fin
+2,52-2,53 s (2,55) ; JSPI 9-10 suspensions sur 9-10 appels ; RSS après 1 536-1 575 Mo (1 674) ; tas de la page 34,6 Mo
+(28,8). Le worker ne demande pas `pyside_agrege.so` (relevé des requêtes servies). Fumée node : OK, `pyc=True`.
+
+**Choix :**
+- *Le module principal vient directement de `make`* (`phase_pyodide`) : `patches/pyodide-pyside6.patch` ne garde que
+  `-lembind` dans `MAIN_MODULE_LDFLAGS` (le module latéral de Qt appelle les fonctions JS d'embind, que seul le module
+  principal fournit) ; plus de `$(PYSIDE6_LDFLAGS)` ni d'inittab Qt dans `main.c`. Demande de l'utilisateur, même jour :
+  « retire aussi le lien statique de phase_pyodide ». Premier jet écarté : un `make -n` rejoué sur une copie de `main.c`
+  privée de l'inittab, sans `PYSIDE6_LDFLAGS` (`phase_pyodide` reliait alors Qt en statique pour rien, ~1 min).
+  L'ancien patch a été défait dans l'arbre (`git apply -R`), l'ancien moteur statique gardé dans
+  `build/dist-statique/`. `phase_pyodide` archive encore les objets PySide et compile `qt_statique.o` : c'est
+  `phase_dynamique` qui les lie.
+- *`-O2` pour le module principal* (le défaut de la recette, `OPTFLAGS` de Makefile.envs) : le `-Oz` du service venait
+  d'un essai à la main (`journaux/oz.log`), absent de la recette. Coût : moteur 8,65 Mo au lieu de 8,47.
+- *`$PYODIDE/dist` n'est PAS échangé* contre le nouveau, contrairement au plan : `phase_dynamique` y prend
+  `pyodide.mjs` amont, `package.json`, la stdlib ; y mettre l'enveloppe ferait de la base une enveloppe au rebuild
+  suivant. Le produit est le zip de `phase_paquet` ; `$PYODIDE/dist` reste la sortie intermédiaire de `make`.
+
+Rebuild sans lien statique (`construire.sh pyodide dynamique paquet`, 56 s) : moteur 8 653 975 o, agrégat inchangé
+(25 228 382 o), zip 15 716 020 o ; fumée OK (`pyc=True`) ; sonde Firefox, 2 passages : fin 2,53-2,72 s, JSPI 11/11 et
+9/9, RSS 1 576-1 579 Mo, tas 34,6 Mo, le worker ne demande pas l'agrégat — les mêmes valeurs qu'avant.
+
+**À savoir** (relecture du Superviseur, 05/10/2026) :
+- `fumee.mjs` n'ÉCHOUE pas sur `pyc=False`, elle avertit seulement : la fumée doit aussi pouvoir tourner sur
+  `$PYODIDE/dist` (stdlib en sources .py, avant `phase_paquet`) ; l'avertissement nomme la cause.
+- Comportement CHANGÉ dans un worker : `import PySide6.QtCore` marchait (module intégré au wasm), il lève désormais
+  `ImportError` — voulu (aucun module des workers de qtpy6/SmartTeacher n'importe Qt, c'est le gain du chantier),
+  mais du code UTILISATEUR tapé dans une console de worker le verra : le paquet pur `PySide6` s'importe, ses modules
+  d'extension non.
+
+**Points ouverts :** le zip local `pyodide-pyside6-0.29.3.0.zip` a été réécrit (le statique n'existe plus que dans
+`build/dist-statique/` et `exemple/pyodide-qt`) ; publication et `versions.json` restent à faire (sha256 du zip :
+`1fe84005…14983`, à refaire si on reconstruit : py-compile date les .pyc) ; AVANT tout déploiement, vérifier que le
+cache (service worker des pages, cache HTTP) ne peut pas mélanger ancien et nouveau — l'URL `pyodide-qt/` n'est pas
+versionnée, et un ancien `pyodide.asm.wasm` en cache avec le nouveau `pyodide.mjs` (ou l'inverse : la nouvelle
+enveloppe exige `pyodide-base.mjs` et `pyside_agrege.so`, absents de l'ancien déploiement) casserait le chargement —
+stratégie de `sw.js` à relire à ce moment-là, purge ou versionnement sinon.

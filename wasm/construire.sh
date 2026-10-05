@@ -1,6 +1,6 @@
 #!/bin/bash
 # PySide6 en WebAssembly : la construction, hors réseau (les sources viennent de wasm/telecharger_sources.sh).
-#   wasm/construire.sh <phase>...    phases, dans l'ordre : emsdk qthote qt shiboken cpython pyside pyodide paquet
+#   wasm/construire.sh <phase>...    phases, dans l'ordre : emsdk qthote qt shiboken cpython pyside pyodide dynamique paquet
 # Chaque phase est rejouable et saute ce qui est déjà fait. Arbre de travail : $RACINE (hors dépôt, ~40 Go).
 set -euo pipefail
 DEP="$(cd "$(dirname "$0")/.." && pwd)"
@@ -161,8 +161,10 @@ phase_pyside() {
 }
 
 phase_pyodide() {
-  # Étape 4 : Pyodide relié avec Qt et PySide6 dedans, sur le modèle de la recette Pyodide-Qt (build_pyodide).
-  # Les cibles PySide sont des modules latéraux .so : on archive leurs objets pour les lier statiquement.
+  # Étape 4 : Pyodide amont (plus embind, patches/pyodide-pyside6.patch), avec les paquets Python purs PySide6 et
+  # shiboken6 dans sa bibliothèque standard. Qt et PySide6 n'y sont pas liés : ils vont dans le module latéral de la
+  # phase dynamique, dont on prépare ici les objets (les cibles PySide sont des modules latéraux .so : on archive
+  # leurs objets).
   emsdk_env; pyodide_env
   local lien="$RACINE/build/pyodide-lien" lib="$PYCIBLE/lib/python${PYTHON%.*}" c m
   local site="$RACINE/pyside-wasm/lib/python${PYTHON%.*}/site-packages"
@@ -174,31 +176,45 @@ phase_pyodide() {
   done
   em++ -fPIC -std=gnu++17 -DQT_STATIC -I"$QTWASM/include" -I"$QTWASM/include/QtCore" \
     -c "$DEP/wasm/qt_statique.cpp" -o "$lien/qt_statique.o"
-  # Lu par Makefile.envs (patches/pyodide-pyside6.patch). wasm-ld résout les archives sans ordre imposé.
-  # Pas de QtXml ni du port emdawnwebgpu de la recette : aucun symbole wgpu dans Qt (llvm-nm), QtXml non construit.
-  local q="$QTWASM/lib" g="$QTWASM/plugins"
-  PYSIDE6_LDFLAGS="$(echo "$lien"/*.a "$lien/qt_statique.o" \
-    "$q"/libQt6{Widgets,Gui,Core,Svg,SvgWidgets,OpenGL}.a "$q"/libQt6Bundled{Harfbuzz,Freetype,Libpng,Libjpeg,Pcre2}.a \
-    "$g"/platforms/libqwasm.a "$g"/iconengines/libqsvgicon.a "$g"/imageformats/libq{gif,ico,jpeg,svg}.a \
-    "$q"/objects-Release/{Gui,Widgets,QWasmIntegrationPlugin}_resources_*/.qt/rcc/*.o)"
-  export PYSIDE6_LDFLAGS
   patcher pyodide "$PYODIDE"
   # Les paquets Python purs dans la bibliothèque standard, zippée par make : sans annotations .pyi, ni modules latéraux
-  # .so, déjà liés statiquement dans pyodide.asm.wasm (90 Mo de zip que rien ne charge).
+  # .so, qui sont dans pyside_agrege.so (90 Mo de zip que rien ne charge).
   for m in PySide6 shiboken6; do
     rm -rf "${lib:?}/$m"; cp -r "$site/$m" "$lib/"; find "$lib/$m" \( -name '*.pyi' -o -name '*.so' \) -delete
   done
   # npm ci a été fait par telecharger_sources.sh (réseau) : on marque l'installation que make rejouerait sinon.
   [ -e "$PYODIDE/node_modules/.installed" ] || { ln -sfn src/js/node_modules/ "$PYODIDE/node_modules"
     touch "$PYODIDE/node_modules/.installed"; }
-  # make ne connaît pas les archives de Qt et de PySide : sans cela, une phase pyside rejouée ne serait pas reliée.
-  rm -f "$PYODIDE/dist/pyodide.asm.js"
   make -C "$PYODIDE" all-but-packages
-  # Un pyodide-lock.json vide : PySide6 est intégré, il n'y a aucun paquet à charger.
+  # Un pyodide-lock.json vide : PySide6 vient de pyside_agrege.so, il n'y a aucun paquet à charger.
   [ -f "$PYODIDE/dist/pyodide-lock.json" ] || "$HOTEPY" -c 'import json, sys
 json.dump({"info": {"arch": "wasm32", "platform": "emscripten_4_0_9", "version": sys.argv[1], "python": sys.argv[2],
            "abi_version": "2025_0"}, "packages": {}}, open(sys.argv[3], "w"), indent=2)' \
     "$(sed -n 's/.*"version": "\(.*\)".*/\1/p' "$PYODIDE/src/js/package.json")" "$PYTHON" "$PYODIDE/dist/pyodide-lock.json"
+}
+
+phase_dynamique() {
+  # Étape 5 : Qt et PySide6 dans un module latéral (pyside_agrege.so) que pyodide-qt.mjs charge en parallèle de Python,
+  # dans une page seulement. Mesuré sous Firefox le 05/10/2026 contre l'ancien tout-statique (Qt lié dans le module
+  # principal) : Pyodide-Qt chargé 0,45 s au lieu de 0,53, worker prêt 0,97 s au lieu de 1,16 (il ne compile plus Qt),
+  # mémoire du processus −100 à −140 Mo. Sortie dans $RACINE/build/dynamique/dist, que phase_paquet empaquette.
+  emsdk_env; pyodide_env
+  local lien="$RACINE/build/pyodide-lien" dyn="$RACINE/build/dynamique" q="$QTWASM/lib" g="$QTWASM/plugins" f
+  dossier "$dyn/dist"
+  # Archives PySide entières (--whole-archive) : rien dans le module principal ne les référence. Qt au besoin.
+  # Pas de QtXml ni du port emdawnwebgpu de la recette Pyodide-Qt : aucun symbole wgpu dans Qt (llvm-nm), QtXml non construit.
+  em++ -o "$dyn/dist/pyside_agrege.so" -sSIDE_MODULE=1 -Oz -g0 -s WASM_BIGINT -fwasm-exceptions -sSUPPORT_LONGJMP \
+    -Wl,--whole-archive "$lien"/{libshiboken,pyside6,shibokenmodule}.a "$lien"/Qt{Core,Gui,Widgets,Svg,SvgWidgets}.a \
+    "$lien/qt_statique.o" -Wl,--no-whole-archive \
+    "$q"/libQt6{Widgets,Gui,Core,Svg,SvgWidgets,OpenGL}.a "$q"/libQt6Bundled{Harfbuzz,Freetype,Libpng,Libjpeg,Pcre2}.a \
+    "$g"/platforms/libqwasm.a "$g"/iconengines/libqsvgicon.a "$g"/imageformats/libq{gif,ico,jpeg,svg}.a \
+    "$q"/objects-Release/{Gui,Widgets,QWasmIntegrationPlugin}_resources_*/.qt/rcc/*.o
+  for f in package.json pyodide.asm.js pyodide.asm.wasm pyodide.js pyodide-lock.json python_stdlib.zip test.html; do
+    cp "$PYODIDE/dist/$f" "$dyn/dist/"
+  done
+  cp "$PYODIDE/dist/pyodide.mjs" "$dyn/dist/pyodide-base.mjs"
+  cp "$DEP/wasm/pyodide-qt.mjs" "$dyn/dist/pyodide.mjs"
+  ls -l "$dyn/dist"
 }
 
 phase_paquet() {
@@ -209,13 +225,14 @@ phase_paquet() {
   # chaque chargement, mesuré (notes/2026-09-30 - PySide6 en WebAssembly.md, « Démarrage »). Prix : les traces
   # d'erreur n'affichent plus la ligne de code des modules de la bibliothèque standard.
   local pyc="$RACINE/build/paquet"
-  dossier "$pyc"; cp "$PYODIDE/dist/python_stdlib.zip" "$pyc/"
+  dossier "$pyc"; cp "$RACINE/build/dynamique/dist/python_stdlib.zip" "$pyc/"
   /DATA/Python/outils_wasm/venv-pyodide/bin/pyodide py-compile --silent --compression-level 9 "$pyc/python_stdlib.zip"
-  "$HOTEPY" - "$PYODIDE/dist" "$pyc/python_stdlib.zip" "$DEP/hebergement/LICENSE-Pyodide-PySide6.txt" "$RACINE/pyodide-pyside6-0.29.3.0.zip" <<'PY'
+  "$HOTEPY" - "$RACINE/build/dynamique/dist" "$pyc/python_stdlib.zip" "$DEP/hebergement/LICENSE-Pyodide-PySide6.txt" "$RACINE/pyodide-pyside6-0.29.3.0.zip" <<'PY'
 import hashlib, sys, zipfile
 from pathlib import Path
 dist, stdlib, licence, sortie = map(Path, sys.argv[1:])
 fichiers = [dist / n for n in ("package.json", "pyodide.asm.js", "pyodide.asm.wasm", "pyodide.js", "pyodide-lock.json",
+                               "pyodide-base.mjs", "pyside_agrege.so",
                                "pyodide.mjs", "test.html")] + [stdlib, licence]
 with zipfile.ZipFile(sortie, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
     for f in fichiers:
