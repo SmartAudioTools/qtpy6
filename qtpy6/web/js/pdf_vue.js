@@ -76,7 +76,20 @@
       const style = document.createElement("style");
       style.textContent = CSS;
       document.head.append(style);
-      lib = import(urlPdf).then(m => { m.GlobalWorkerOptions.workerSrc = urlWorker; return m; });
+      // pdf.js 6 appelle Map.getOrInsertComputed (ES2026), absent d'un navigateur plus ancien (Chrome 140 de QtWebEngine,
+      // 05/10/2026) : sans lui, page.render échoue en silence et le PDF ne paraît jamais. Posé ici et dans le worker, que
+      // charge un module Blob qui le pose avant d'importer le vrai.
+      const COMPAT = `for (const C of [Map, WeakMap]) {
+        C.prototype.getOrInsert ??= function (k, v) { if (!this.has(k)) this.set(k, v); return this.get(k); };
+        C.prototype.getOrInsertComputed ??= function (k, f) { if (!this.has(k)) this.set(k, f(k)); return this.get(k); };
+      }`;
+      new Function(COMPAT)();
+      const travailleur = URL.createObjectURL(new Blob([`${COMPAT}\nimport ${JSON.stringify(urlWorker)};`],
+                                                       { type: "text/javascript" }));
+      lib = import(urlPdf).then(m => {
+        m.GlobalWorkerOptions.workerPort = new Worker(travailleur, { type: "module" });
+        return m;
+      });
     }
     return lib;
   }

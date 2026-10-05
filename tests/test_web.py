@@ -462,9 +462,31 @@ window.pret = true;
 </script>"""
 
 
-@pytest.mark.skipif(not Path("/usr/bin/geckodriver").exists(), reason="Firefox et geckodriver requis")
-def test_pdf_masques_dans_le_navigateur(app, tmp_path):
-    """``setMasks`` dans le navigateur (``pdf_vue.js`` seul, dans Firefox, ~5 s) : la zone se peint en pavés unis de
+FIREFOX = Path("/usr/bin/geckodriver").exists()
+MOTEURS = [pytest.param("firefox", marks=pytest.mark.skipif(not FIREFOX, reason="Firefox et geckodriver requis")),
+           "chromium"]  # Blink de QtWebEngine, piloté par la sonde (``sonde.Blink``)
+
+
+def ouvrir(moteur, url):
+    """La page dans Firefox (Selenium) ou dans Blink : les deux répondent à ``execute_script`` (une promesse rendue est
+    attendue) et ``quit``."""
+    if moteur == "chromium":
+        from qtpy6.web.sonde import Blink
+
+        return Blink(url, 1000, 900)
+    from selenium import webdriver
+
+    options = webdriver.FirefoxOptions()
+    options.add_argument("--headless")
+    navigateur = webdriver.Firefox(options=options)
+    navigateur.set_script_timeout(30)
+    navigateur.get(url)
+    return navigateur
+
+
+@pytest.mark.parametrize("moteur", MOTEURS)
+def test_pdf_masques_dans_le_navigateur(app, tmp_path, moteur):
+    """``setMasks`` dans le navigateur (``pdf_vue.js`` seul, ~5 s) : la zone se peint en pavés unis de
     ``PAVE`` points à deux zooms, et son texte quitte la couche de texte (ni sélection, ni copie, ni recherche)."""
     import functools
     import http.server
@@ -472,7 +494,6 @@ def test_pdf_masques_dans_le_navigateur(app, tmp_path):
 
     from qtpy6.QtPdf import QPdfDocument
     from qtpy6.QtPdfWidgets import QPdfView
-    from selenium import webdriver
 
     ecrivain = QtGui.QPdfWriter(str(tmp_path / "cours.pdf"))
     peintre = QtGui.QPainter(ecrivain)
@@ -494,25 +515,19 @@ def test_pdf_masques_dans_le_navigateur(app, tmp_path):
 
     serveur = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Silencieux, directory=str(tmp_path)))
     threading.Thread(target=serveur.serve_forever, daemon=True).start()
-    options = webdriver.FirefoxOptions()
-    options.add_argument("--headless")
-    navigateur = webdriver.Firefox(options=options)
+    navigateur = ouvrir(moteur, f"http://127.0.0.1:{serveur.server_port}/index.html")
+    mesurer = "return mesurer({}, {}, {}).catch(e => ({{ erreur: String(e) }}))".format
     try:
-        navigateur.set_script_timeout(30)
-        navigateur.get(f"http://127.0.0.1:{serveur.server_port}/index.html")
         debut = time.time()
         while not navigateur.execute_script("return window.pret") and time.time() - debut < 30:
             time.sleep(0.1)
         zone = [0, masque.x(), masque.y(), masque.width(), masque.height()]
         for largeur in (400, 1200):  # deux zooms
-            r = navigateur.execute_async_script(
-                "const [l, m, p, fini] = arguments; mesurer(l, m, p).then(fini, e => fini({ erreur: String(e) }))",
-                largeur, [zone], QPdfView.MASK_BLOCK)
+            r = navigateur.execute_script(mesurer(largeur, json.dumps([zone]), QPdfView.MASK_BLOCK))
             assert "erreur" not in r, r
             assert r["defauts"] == [], (largeur, r["defauts"])
             assert "Premiere" not in r["texte"] and "Deuxieme" in r["texte"], r["texte"]
-        r = navigateur.execute_async_script("const [l, m, p, fini] = arguments; mesurer(l, m, p).then(fini)",
-                                            400, [[1, 0, 0, 10, 10]], QPdfView.MASK_BLOCK)  # un masque sur une autre page
+        r = navigateur.execute_script(mesurer(400, [[1, 0, 0, 10, 10]], QPdfView.MASK_BLOCK))  # un masque sur une autre page
         assert "Premiere" in r["texte"], r["texte"]
     finally:
         navigateur.quit()
@@ -1119,16 +1134,17 @@ def test_accept_du_selecteur_de_fichiers():
     assert _accept("*.tar.gz") == ".tar.gz"
 
 
-@pytest.mark.skipif(not (RACINE / "exemple" / "pyodide-qt").exists() or not Path("/usr/bin/geckodriver").exists(),
-                    reason="Pyodide-Qt (hebergement/telecharger.sh) et Firefox requis")
-def test_boucle_de_qt_ouverte_par_une_minuterie():
+@pytest.mark.skipif(not (RACINE / "exemple" / "pyodide-qt").exists(), reason="Pyodide-Qt (hebergement/telecharger.sh) requis")
+@pytest.mark.parametrize("moteur", MOTEURS)
+def test_boucle_de_qt_ouverte_par_une_minuterie(moteur):
     """Dans le vrai navigateur (sonde, ~20 s) : un ``QTimer`` qui ouvre ``QDrag.exec`` (l'appui long au doigt) voit Qt
     suspendre sa boucle imbriquée dans la tâche où ``bloquant`` reporte le slot. Avant le 05/10/2026, qtSuspendJs n'y
     suspendait pas : refus en boucle, page figée (mesuré : la sonde tuée au bout de 200 s, contre 2 s avec le correctif)."""
     subprocess.run([sys.executable, "exemple/construire.py"], cwd=RACINE, check=True, capture_output=True, timeout=120)
     try:
         r = subprocess.run([sys.executable, "-m", "qtpy6.web.sonde", "--racine", ".", "exemple/index.html?boucle",
-                            str(RACINE / "exemple" / "boucle.png"), "--delai", "60"],
+                            str(RACINE / "exemple" / f"boucle_{moteur}.png"), "--delai", "60",
+                            *(["--chromium"] if moteur == "chromium" else [])],
                            cwd=RACINE, capture_output=True, text=True, timeout=150)
     except subprocess.TimeoutExpired:
         pytest.fail("page figée : Qt ne suspend pas QDrag.exec ouvert par une minuterie")
@@ -1143,32 +1159,40 @@ from selenium import webdriver
 from selenium.webdriver.common.actions import interaction
 from selenium.webdriver.common.actions.action_builder import ActionBuilder
 from selenium.webdriver.common.actions.pointer_input import PointerInput
-doigt = sys.argv[1] == "doigt"
+from qtpy6.web import sonde
+doigt, blink = sys.argv[1] == "doigt", sys.argv[2] == "chromium"
 class Silencieux(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *_):
         pass
 serveur = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Silencieux, directory="."))
 threading.Thread(target=serveur.serve_forever, daemon=True).start()
-options = webdriver.FirefoxOptions()
-options.add_argument("--headless")
-if doigt:  # comme la sonde --tactile
-    for pref in ("ui.primaryPointerCapabilities", "ui.allPointerCapabilities"):
-        options.set_preference(pref, 1)
-    options.set_preference("dom.w3c_touch_events.enabled", 1)
-navigateur = webdriver.Firefox(options=options)
+url = f"http://127.0.0.1:{serveur.server_port}/exemple/index.html?glisse"
+if blink:  # la souris seule : la sonde n'a pas d'écran tactile sous Blink
+    navigateur = sonde.Blink(url, 1000, 900)
+else:
+    options = webdriver.FirefoxOptions()
+    options.add_argument("--headless")
+    if doigt:  # comme la sonde --tactile
+        for pref in ("ui.primaryPointerCapabilities", "ui.allPointerCapabilities"):
+            options.set_preference(pref, 1)
+        options.set_preference("dom.w3c_touch_events.enabled", 1)
+    navigateur = webdriver.Firefox(options=options)
+    navigateur.get(url)
 try:
-    navigateur.get(f"http://127.0.0.1:{serveur.server_port}/exemple/index.html?glisse")
     debut = time.time()
     while navigateur.execute_script("return window.etat") not in ("glisse", "erreur") and time.time() - debut < 60:
         time.sleep(0.3)
     (x, y), _, (_, y2), _ = navigateur.execute_script("return window.centres")
-    pointeur = PointerInput(interaction.POINTER_TOUCH if doigt else interaction.POINTER_MOUSE, "p")
-    actions = ActionBuilder(navigateur, mouse=pointeur, duration=50)
-    actions.pointer_action.move_to_location(int(x), int(y)).pointer_down().pause(0.6 if doigt else 0.1)
-    for k in range(1, 11):  # A, la première ligne, descend sous le milieu de C
-        actions.pointer_action.move_to_location(int(x), int(y + (y2 + 5 - y) * k / 10))
-    actions.pointer_action.pause(0.3).pointer_up()
-    actions.perform()
+    if blink:  # A, la première ligne, descend sous le milieu de C
+        sonde.glisser(navigateur, x, y, x, y2 + 5)
+    else:
+        pointeur = PointerInput(interaction.POINTER_TOUCH if doigt else interaction.POINTER_MOUSE, "p")
+        actions = ActionBuilder(navigateur, mouse=pointeur, duration=50)
+        actions.pointer_action.move_to_location(int(x), int(y)).pointer_down().pause(0.6 if doigt else 0.1)
+        for k in range(1, 11):
+            actions.pointer_action.move_to_location(int(x), int(y + (y2 + 5 - y) * k / 10))
+        actions.pointer_action.pause(0.3).pointer_up()
+        actions.perform()
     time.sleep(1)
     print(navigateur.execute_script("return window.ordre + '|' + (window.saisi || 'souris')"))
 finally:
@@ -1177,17 +1201,17 @@ finally:
 """
 
 
-@pytest.mark.skipif(not (RACINE / "exemple" / "pyodide-qt").exists() or not Path("/usr/bin/geckodriver").exists(),
-                    reason="Pyodide-Qt (hebergement/telecharger.sh) et Firefox requis")
-@pytest.mark.parametrize("pointeur", ["souris", "doigt"])
-def test_glisser_depose(pointeur):
+@pytest.mark.skipif(not (RACINE / "exemple" / "pyodide-qt").exists(), reason="Pyodide-Qt (hebergement/telecharger.sh) requis")
+@pytest.mark.parametrize("pointeur, moteur", [*(pytest.param(p, *m.values, marks=m.marks) for p in ("souris", "doigt")
+                                               for m in MOTEURS[:1]), ("souris", "chromium")])  # pas de doigt sous Blink
+def test_glisser_depose(pointeur, moteur):
     """Dans le vrai navigateur (~15 s), un vrai pointeur WebDriver fait glisser A sous C dans une ``QListWidget`` en
     ``InternalMove`` (``exemple/glisse.py``) : le ``startDrag`` de Qt dépose, à la souris comme au doigt, où l'appui
     long ouvre ``QDrag.exec`` depuis une minuterie. Sans le correctif du 05/10/2026 (``qtSuspendJs`` dans les tâches
     ``_plus_tard``), le doigt figeait la page (mesuré : délai dépassé, ordre inchangé) ; la souris, elle, déposait déjà."""
     subprocess.run([sys.executable, "exemple/construire.py"], cwd=RACINE, check=True, capture_output=True, timeout=120)
     try:
-        r = subprocess.run([sys.executable, "-c", _GLISSER, pointeur], cwd=RACINE, capture_output=True, text=True,
+        r = subprocess.run([sys.executable, "-c", _GLISSER, pointeur, moteur], cwd=RACINE, capture_output=True, text=True,
                            timeout=150)
     except subprocess.TimeoutExpired:
         pytest.fail("page figée pendant le glisser")

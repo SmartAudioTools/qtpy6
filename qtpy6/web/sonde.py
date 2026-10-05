@@ -5,7 +5,7 @@ Qt, par exemple) en ``<capture>_<suffixe>.png``. Le code de retour dit si l'éta
 
     python -m qtpy6.web.sonde page.html?param=x capture.png [--racine DIR] [--delai 120] [--etat fini]
                              [--taille 1000x900] [--zoom 2] [--tactile] [--visible] [--chromium]
-                             [--glisser X1,Y1,X2,Y2]
+                             [--glisser X1,Y1,X2,Y2 | --glisser page]
 
 ``page`` est relative à ``--racine`` (le dossier de la page par défaut), servie par http.server : une page ouverte en
 file:// n'a ni modules ni fetch. ``--taille`` : la fenêtre en pixels CSS (Firefox ne descend pas sous 500 de large : une
@@ -15,6 +15,9 @@ est « coarse », ce que ``tactile.detecte`` voit, et les événements touch son
 sur l'écran, avec son compositeur et sa synchronisation verticale, pour mesurer la fluidité (hors écran, Firefox cadence
 ses images seul). ``--glisser`` : une fois l'état atteint, un glissé souris réel (enfoncé en X1,Y1, dix déplacements,
 relâché en X2,Y2, en pixels CSS de la fenêtre), puis la capture : un défaut de glisser-déposer propre à un navigateur.
+``--glisser page`` : les points viennent de la page (``window.glisser = [x1, y1, x2, y2]``, posé avec l'état attendu), la
+sonde pose ``window.etat = "glissé"`` une fois le glissé fait, et attend que la page finisse (``"fini"``) : c'est la page
+qui vérifie le résultat du glissé, et un test automatique qui en dépend.
 
 Firefox par défaut, parce que Chromium n'ouvre pas sans socket Unix (son verrou d'instance unique,
 ``process_singleton_posix``), ce qu'un bac à sable peut interdire. ``--chromium`` passe par QtWebEngine, le même moteur
@@ -49,7 +52,7 @@ def main(argv=None):
     a.add_argument("--tactile", action="store_true")
     a.add_argument("--visible", action="store_true", help="une vraie fenêtre sur l'écran, pas hors écran")
     a.add_argument("--chromium", action="store_true", help="le moteur Blink de QtWebEngine au lieu de Firefox")
-    a.add_argument("--glisser", help="X1,Y1,X2,Y2 : un glissé souris une fois l'état atteint")
+    a.add_argument("--glisser", help="X1,Y1,X2,Y2, ou page (window.glisser) : un glissé souris une fois l'état atteint")
     o = a.parse_args(argv)
     if o.chromium and (o.zoom or o.tactile or o.visible):
         a.error("--chromium : ni --zoom, ni --tactile, ni --visible")
@@ -72,17 +75,17 @@ def main(argv=None):
     url = f"http://127.0.0.1:{serveur.server_port}/{relatif}{'?' + requete if requete else ''}"
     largeur, hauteur = o.taille.split("x")
     navigateur = Blink(url, int(largeur), int(hauteur)) if o.chromium else firefox(o, largeur, hauteur, url)
+    attendu = o.etat
     try:
         debut = time.time()
-        while time.time() - debut < o.delai:
-            etat = navigateur.execute_script("return window.etat")
-            if etat in (o.etat, "erreur"):
-                break
-            time.sleep(0.5)
-        else:
-            etat = "délai dépassé"
+        etat = attendre(navigateur, o.etat, debut + o.delai)
         if o.glisser and etat == o.etat:
-            glisser(navigateur, *map(float, o.glisser.split(",")))
+            points = navigateur.execute_script("return window.glisser") if o.glisser == "page" else o.glisser.split(",")
+            glisser(navigateur, *map(float, points))
+            if o.glisser == "page":
+                navigateur.execute_script("window.etat = 'glissé'")
+                attendu = "fini"
+                etat = attendre(navigateur, attendu, debut + o.delai)
         print("\n".join(navigateur.execute_script("return window.journal || []")))
         print("état :", etat, "; fenêtre", *navigateur.execute_script("return [innerWidth, innerHeight, devicePixelRatio]"),
               "; tactile" if navigateur.execute_script("return matchMedia('(any-pointer: coarse)').matches") else "; souris",
@@ -93,7 +96,17 @@ def main(argv=None):
     finally:
         navigateur.quit()
         serveur.shutdown()
-    return etat == o.etat
+    return etat == attendu
+
+
+def attendre(navigateur, etat, fin):
+    """`window.etat` relu jusqu'à `etat` ou "erreur", ou "délai dépassé" à l'heure `fin`."""
+    while time.time() < fin:
+        lu = navigateur.execute_script("return window.etat")
+        if lu in (etat, "erreur"):
+            return lu
+        time.sleep(0.5)
+    return "délai dépassé"
 
 
 def firefox(o, largeur, hauteur, url):
