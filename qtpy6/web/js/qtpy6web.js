@@ -193,10 +193,12 @@ function molette(conteneur) {
 // Ni menu ni sélection du navigateur sur l'écran de Qt : un doigt qui s'y attarde (``tactile.AppuiLong`` saisit à 300 ms)
 // ne doit pas ouvrir le menu contextuel (Android, 400 ms et plus) ni la loupe ou la bulle d'iOS. Sur le conteneur
 // seulement : le reste de la page (un champ HTML) garde son menu. Le clic droit de Qt vient des pointerdown, pas de cet
-// événement.
+// événement. Ni défilement ni zoom du navigateur sous le doigt (touch-action) : sans cela Chrome prend tout glissé pour
+// lui, envoie pointercancel au premier mouvement et Qt perd le doigt — rien ne défilait au doigt sous Chromium avec un
+// vrai écran tactile (05/10/2026 ; la sonde --tactile, Firefox seulement, ne le voyait pas).
 function sans_menu(conteneur) {
   conteneur.addEventListener("contextmenu", e => e.preventDefault());
-  Object.assign(conteneur.style, { webkitTouchCallout: "none", webkitUserSelect: "none", userSelect: "none" });
+  Object.assign(conteneur.style, { webkitTouchCallout: "none", webkitUserSelect: "none", userSelect: "none", touchAction: "none" });
 }
 
 // Les boucles imbriquées de Qt, QDrag.exec en tête, comme sur le bureau. Qt-WASM sait les mener en suspendant sa pile

@@ -63,6 +63,8 @@ def activer(app=None, cible=CIBLE, case=None):
         f"QPushButton {{ min-height: {cible}px; padding: 0px 6px; }} QComboBox, QLineEdit {{ min-height: {cible - 6}px; }}"
         f"QCheckBox::indicator, QRadioButton::indicator {{ width: {case}px; height: {case}px; }}"
         f"QComboBox QAbstractItemView::item {{ min-height: {cible}px; }} QScrollBar:vertical {{ width: 18px; }}"))
+    while _EN_ATTENTE:
+        defiler_au_doigt(_EN_ATTENTE.pop(0))
 
 
 def marge(souris=2, hauteur_ligne=26):
@@ -73,12 +75,20 @@ def marge(souris=2, hauteur_ligne=26):
 
 def defiler_au_doigt(zone):
     """Une ``QScrollArea`` (ou tout ``QAbstractScrollArea``) que le doigt fait défiler, comme partout ailleurs sur un
-    téléphone : sans cela, il ne fait rien. Sans effet tant que ``activer`` n'a pas été appelé. Dans le navigateur, la
-    course après le lâcher suit les images de l'écran (``_Inertie``)."""
-    if ACTIF:
-        QScroller.grabGesture(zone.viewport(), QScroller.ScrollerGestureType.TouchGesture)
-        if navigateur():
-            _Inertie(zone)
+    téléphone : sans cela, il ne fait rien. Avant ``activer``, la zone attend : ``activer`` l'accroche (un écran que le
+    navigateur ne dit pas tactile, Chromium sous Linux, n'est activé qu'au premier doigt, souvent après la construction
+    de la page : sans cette attente, rien n'y défilait au doigt, 05/10/2026). Dans le navigateur, la course après le
+    lâcher suit les images de l'écran (``_Inertie``)."""
+    if not ACTIF:
+        _EN_ATTENTE.append(zone)
+        zone.destroyed.connect(lambda *_: _EN_ATTENTE.remove(zone) if zone in _EN_ATTENTE else None)
+        return
+    QScroller.grabGesture(zone.viewport(), QScroller.ScrollerGestureType.TouchGesture)
+    if navigateur():
+        _Inertie(zone)
+
+
+_EN_ATTENTE = []  # les zones de ``defiler_au_doigt`` construites avant ``activer``
 
 
 class _Inertie(QObject):
