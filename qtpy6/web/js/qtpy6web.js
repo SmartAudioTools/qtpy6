@@ -295,14 +295,35 @@ function pomper(tour, periode) {
 // Le pointeur pris, ses pointermove n'atteignent plus Qt ; son pointerup, si : c'est lui qui termine QDrag.exec quand le
 // dépôt tombe hors de toute cible (« No drag target set »). Un pointercancel synthétique, ou un pointerup avalé, laissait
 // exec suspendu jusqu'à l'appui suivant (mesuré le 05/10/2026, souris et doigt).
+// Le navigateur ne dessine l'image d'un glisser que pour le sien : celle que Qt donne à setDragImage (canvas du pixmap du
+// QDrag, son texte, ou le logo Qt) est recopiée dans un élément fixe qui suit le pointeur, sans souris (pointer-events),
+// donc invisible à elementFromPoint ; Qt retire l'original à la fin du glisser, d'où la copie.
 function glisser_rejoue(conteneur) {
   let e = null;  // { id, type, el, racine, x0, y0, dt, pris, essai }
+  let image = null;  // { el, hx, hy } : la copie qui suit le pointeur
+  const effacer = () => { if (image) image.el.remove(); image = null; };
+  const placer = (x, y) => { if (image) image.el.style.transform = `translate(${x - image.hx}px, ${y - image.hy}px)`; };
+  const copier = (src, hx, hy) => {
+    let el;
+    if (src instanceof HTMLCanvasElement) {
+      el = document.createElement("canvas");
+      [el.width, el.height] = [src.width, src.height];
+      el.getContext("2d").drawImage(src, 0, 0);
+      [el.style.width, el.style.height] = [src.style.width, src.style.height];
+    } else el = src.cloneNode(true);
+    el.removeAttribute("class");  // hidden-drag-image : Qt la cache
+    Object.assign(el.style, { position: "fixed", left: "0", top: "0", margin: "0", pointerEvents: "none", opacity: "0.8",
+                              zIndex: "2147483647" });
+    document.body.appendChild(el);
+    image = { el, hx: +hx || 0, hy: +hy || 0 };
+  };
   const drag = (type, el, x, y) => el.dispatchEvent(new DragEvent(type, { dataTransfer: e.dt, clientX: x, clientY: y,
     screenX: x, screenY: y, buttons: type === "drop" || type === "dragend" ? 0 : 1, bubbles: true, cancelable: true, composed: true }));
   const sous = (x, y) => e.racine.elementFromPoint(x, y) || e.el;
   const avaler = ev => { ev.stopImmediatePropagation(); ev.preventDefault(); };
   addEventListener("pointerdown", ev => {
     e = null;
+    effacer();
     if (!["touch", "mouse"].includes(ev.pointerType) || !ev.isPrimary || !ev.composedPath().includes(conteneur)) return;
     const el = ev.composedPath()[0];
     if (el && el.closest && el.closest("[draggable=true]"))
@@ -312,12 +333,17 @@ function glisser_rejoue(conteneur) {
     if (!e || ev.pointerId !== e.id) return;
     const { clientX: x, clientY: y } = ev;
     if (!e.pris && e.dt && e.dt.pris) e.pris = true;
-    if (e.pris) { avaler(ev); drag("dragover", sous(x, y), x, y); return; }
+    if (e.pris) { avaler(ev); placer(x, y); drag("dragover", sous(x, y), x, y); return; }
     const t = performance.now();
     if (!suspension.suspendu || Math.hypot(x - e.x0, y - e.y0) < 8 || t - e.essai < 50) return;
     e.essai = t;
-    const dt = e.dt = new DataTransfer(), image = dt.setDragImage.bind(dt);
-    dt.setDragImage = (...a) => { dt.pris = true; try { image(...a); } catch {} };
+    const dt = e.dt = new DataTransfer(), poser = dt.setDragImage.bind(dt);
+    dt.setDragImage = (el, hx, hy) => {
+      dt.pris = true;
+      effacer();
+      try { copier(el, hx, hy); placer(x, y); } catch (err) { print("image du glisser : " + (err.message || err)); }
+      try { poser(el, hx, hy); } catch {}
+    };
     drag("dragstart", e.el, x, y);
   }, true);
   addEventListener("pointerup", ev => {
@@ -328,11 +354,13 @@ function glisser_rejoue(conteneur) {
       drag("dragend", e.el, x, y);
     }
     e = null;
+    effacer();
   }, true);
   addEventListener("pointercancel", ev => {
     if (!e || ev.pointerId !== e.id || !ev.isTrusted) return;
     if (e.pris) drag("dragend", e.el, ev.clientX, ev.clientY);  // le navigateur a repris le doigt : glisser abandonné
     e = null;
+    effacer();
   }, true);
   addEventListener("dragstart", ev => { if (ev.isTrusted && e && !e.dt) e = null; }, true);
 }
