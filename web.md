@@ -153,8 +153,11 @@ page elle-même en a besoin (Pyodide-Qt, mesuré Firefox avec `javascript.option
 « WebAssembly stack switching not supported », rien ne démarre). Safari ne l'a qu'à partir de la 27 (bêta à la WWDC
 de juin 2026, non essayé ici) : un iPad en 26 ne lance aucune application qtpy6. Chaque `start` coûte un Pyodide (~1,4 s) :
 c'est un processus, pas un fil. Le Pyodide du worker vient de `versions.json` (jsdelivr), ou de
-`travailleur.configurer(indexURL, roues)` — le même Pyodide-Qt que la page, par exemple : un seul téléchargement, un
-boot de worker plus court (le moteur est déjà dans le cache HTTP). `roues` : des URL de `.whl` (finissant par `.whl`,
+`travailleur.configurer(indexURL, roues, filtre)` — le même Pyodide-Qt que la page, par exemple : un seul téléchargement, un
+boot de worker plus court (le moteur est déjà dans le cache HTTP). `filtre` : un prédicat `chemin -> bool` appliqué aux
+FICHIERS des dossiers recopiés (les dossiers restent tous) — c'est l'application qui sait lesquels son enfant importe,
+qtpy6 ne devine pas ; SmartTeacher y réduit le zip de chaque `start` de 6,2 Mo à 0,23 Mo (−96 %, mesuré le 05/10/2026).
+`roues` : des URL de `.whl` (finissant par `.whl`,
 Pyodide y lit le nom du paquet) pour ce que cette distribution n'a pas (son `sqlite3`, retiré de la bibliothèque
 standard : `roues` de `versions.json`, publiées par `hebergement/telecharger.sh`) ; le worker charge chacune au
 **premier `import` de son module** (un `MetaPathFinder` + `run_sync`), si bien qu'un script qui ne l'importe pas ne

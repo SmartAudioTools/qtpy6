@@ -14,11 +14,12 @@ compris (quelques secondes).
     ProcessusWeb                              ``QProcess`` dans le navigateur (``qtpy6.QtCore.QProcess`` le désigne) :
                                               ``start(sys.executable, ["-u", "script.py", …])`` lance le script en
                                               ``__main__`` dans un worker neuf, ``write`` est son stdin (JSPI)
-    configurer(indexURL, roues)               le Pyodide du worker, s'il ne vient pas de ``versions.json`` ; ``roues`` :
+    configurer(indexURL, roues, filtre)       le Pyodide du worker, s'il ne vient pas de ``versions.json`` ; ``roues`` :
                                               des URL de roues (.whl) chargées dans le worker d'un ``ProcessusWeb`` au
                                               premier ``import`` de leur module — pour un module absent de la
                                               distribution (le sqlite3 de Pyodide-Qt) ; un programme qui ne l'importe
-                                              pas ne paie rien, ni octets ni délai
+                                              pas ne paie rien, ni octets ni délai ; ``filtre`` : quels fichiers copier
+                                              dans le worker (voir ``configurer``)
     prechauffer()                             monte en réserve UN worker dont le Pyodide charge dès maintenant : le
                                               prochain ``ProcessusWeb.start()`` le consomme et épargne ``loadPyodide``
                                               (plusieurs secondes, l'essentiel du premier lancement)
@@ -39,17 +40,20 @@ import zipfile
 
 from qtpy6.QtCore import QObject, QTimer, Signal  # QtCore en cours de chargement : il importe ce module pour QProcess
 
-REGLAGES = {}  # configurer() : indexURL, roues
+REGLAGES = {}  # configurer() : indexURL, roues, filtre
 _URL_WORKER = None
 _RESERVE = None  # prechauffer() : (worker, indexURL) — un worker neuf dont le Pyodide charge, consommé par le prochain start()
 
 
-def configurer(indexURL, roues=()):
+def configurer(indexURL, roues=(), filtre=None):
     """Ce que ``ProcessusWeb()`` utilise : le Pyodide du worker (``indexURL`` ; sans appel, celui de ``versions.json``),
-    et des URL de roues (.whl) que le worker charge au premier ``import`` de leur module — le nom de distribution du
-    fichier (``sqlite3-1.0.0-….whl`` → ``sqlite3``). Paresseux : un script qui n'importe pas le module ne télécharge
-    rien ; le préchauffage n'en charge aucune."""
-    REGLAGES.update(indexURL=indexURL, roues=tuple(roues))
+    des URL de roues (.whl) que le worker charge au premier ``import`` de leur module — le nom de distribution du
+    fichier (``sqlite3-1.0.0-….whl`` → ``sqlite3``) ; paresseux : un script qui n'importe pas le module ne télécharge
+    rien, le préchauffage n'en charge aucune. ``filtre`` : quels FICHIERS copier dans le worker —
+    ``filtre(chemin absolu) -> bool``, appelé pour chaque fichier des dossiers embarqués (script, cwd, temporaire) ;
+    ``None`` les copie tous. Les dossiers eux-mêmes sont toujours créés : l'application écarte ainsi ce que l'enfant
+    n'importe jamais (polices, données du parent) au lieu de le zipper à chaque ``start``."""
+    REGLAGES.update(indexURL=indexURL, roues=tuple(roues), filtre=filtre)
 
 
 def prechauffer():
@@ -231,7 +235,7 @@ class ProcessusWeb(QObject):
             self.worker = js.Worker.new(_url_worker(), type="module")
         self._recepteur = create_proxy(self._recevoir)
         self.worker.onmessage = self._recepteur
-        zip_ = to_js(_zipper([dossier, cwd, tempfile.gettempdir()]))
+        zip_ = to_js(_zipper([dossier, cwd, tempfile.gettempdir()], REGLAGES.get("filtre")))
         self.worker.postMessage(_objet({"lancer": {
             "indexURL": indexURL, "zip": zip_, "roues": _roues(),
             "dossier": dossier, "argv": argv, "cwd": cwd}}), [zip_.buffer])
@@ -300,16 +304,18 @@ def _commande(arguments):
     return args[0], [os.path.abspath(args[0]), *args[1:]]
 
 
-def _zipper(dossiers):
+def _zipper(dossiers, filtre=None):
     """Les ``dossiers``, zippés sans compression avec leurs chemins depuis la racine (le worker les dépaquette au même
     endroit) ; un fichier de deux dossiers imbriqués n'y est qu'une fois. Les dossiers aussi ont leur entrée : un dossier
-    vide que le parent a créé pour l'enfant (``tempfile.mkdtemp``) doit exister de l'autre côté."""
+    vide que le parent a créé pour l'enfant (``tempfile.mkdtemp``) doit exister de l'autre côté. ``filtre`` ne s'applique
+    qu'aux fichiers : il écarte ceux pour lesquels il rend faux."""
     tampon, vus = io.BytesIO(), set()
     with zipfile.ZipFile(tampon, "w", zipfile.ZIP_STORED) as z:
         for dossier in dossiers:
             for racine, sous, fichiers in os.walk(dossier):
                 sous[:] = [d for d in sous if d != "__pycache__"]
-                for chemin in [racine, *(os.path.join(racine, f) for f in fichiers)]:
+                retenus = [f for f in fichiers if filtre is None or filtre(os.path.join(racine, f))]
+                for chemin in [racine, *(os.path.join(racine, f) for f in retenus)]:
                     if chemin not in vus:
                         vus.add(chemin)
                         z.write(chemin, os.path.relpath(chemin, "/"))
