@@ -10,5 +10,6 @@ exemple/app.zip
 exemple/*.png
 .mcp.json
 push.log
+telecharger.log
 hebergement/*.zip
 site/
