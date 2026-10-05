@@ -1,6 +1,6 @@
 """Le site d'une application qtpy6 écrite pour le bureau, sans rien y changer : ``python -m qtpy6.web.construire app.py``
 écrit dans ``site/`` la page (``js/gabarit.html``, qui lance le script comme ``python app.py`` : ``qtpy6.web.lancer``),
-le chargeur ``qtpy6web.js`` et ``app.zip`` (le dossier du script, qtpy6 et ce qu'on y ajoute). Reste à servir ``site/``
+les fichiers de qtpy6 (``deposer`` : le chargeur ``qtpy6web.js``, le service worker, pdf.js) et ``app.zip`` (le dossier du script, qtpy6 et ce qu'on y ajoute). Reste à servir ``site/``
 (ou le vérifier : ``python -m qtpy6.web.sonde site/index.html capture.png``).
 
     python -m qtpy6.web.construire app.py [site] [--pyodide URL] [--paquet nom]… [--distribution nom]… [--police f]…
@@ -26,8 +26,24 @@ PYODIDE_QT = "https://smartaudiotools.github.io/qtpy6/pyodide-qt/"
 DOSSIER = "/home/pyodide/app"
 
 
+FICHIERS_JS = ("qtpy6web.js", "sw.js", "pdfjs/pdf.min.mjs", "pdfjs/pdf.worker.min.mjs")
+
+
+def deposer(site):
+    """Dépose dans ``site`` (le dossier de la page) les fichiers de qtpy6 que la page charge par URL : le chargeur
+    ``qtpy6web.js``, le service worker ``sw.js`` (``service_worker`` de qtpy6web.js : il ne contrôle que son dossier et ce
+    qui est en dessous, d'où sa place à côté de la page) et pdf.js sous ``pdfjs/`` (hors de l'archive : ``assembler``,
+    ``exclure``). Une application qui écrit sa propre page appelle ceci plutôt que de recopier une liste qui changerait
+    sans elle. Le contenu seul, sans copystat (refusé sur des fichiers d'un autre compte)."""
+    site = Path(site)
+    js = importlib.resources.files("qtpy6.web") / "js"
+    for nom in FICHIERS_JS:
+        (site / nom).parent.mkdir(parents=True, exist_ok=True)
+        (site / nom).write_bytes(js.joinpath(nom).read_bytes())
+
+
 def construire(script, site="site", pyodide=PYODIDE_QT, paquets=(), distributions=(), polices=(), roues=(), titre=None):
-    """Écrit ``site/index.html``, ``site/qtpy6web.js`` et ``site/app.zip`` ; rend la taille de l'archive en octets."""
+    """Écrit ``site/index.html``, ``site/app.zip`` et les fichiers de ``deposer`` ; rend la taille de l'archive en octets."""
     script, site = Path(script).resolve(), Path(site).resolve()
     site.mkdir(parents=True, exist_ok=True)
     racine = script.parent
@@ -35,7 +51,7 @@ def construire(script, site="site", pyodide=PYODIDE_QT, paquets=(), distribution
                 if p.is_file() and site not in p.parents and "__pycache__" not in p.parts
                 and not any(part.startswith(".") for part in p.relative_to(racine).parts)}
     taille = assembler(site / "app.zip", fichiers, paquets=("qtpy6", *paquets), distributions=distributions,
-                       polices=polices)
+                       polices=polices, exclure=["qtpy6/web/js/pdfjs/"])  # pdf.js : à côté de la page (deposer)
     for roue in roues:
         shutil.copyfile(roue, site / Path(roue).name)
     js = importlib.resources.files("qtpy6.web") / "js"
@@ -47,7 +63,7 @@ def construire(script, site="site", pyodide=PYODIDE_QT, paquets=(), distribution
         assert page.count(avant) == 1, avant  # le gabarit a changé sans ce module
         page = page.replace(avant, apres)
     (site / "index.html").write_text(page, encoding="utf-8")
-    (site / "qtpy6web.js").write_text((js / "qtpy6web.js").read_text(encoding="utf-8"), encoding="utf-8")
+    deposer(site)
     return taille
 
 
@@ -63,7 +79,7 @@ def main(argv=None):
     a.add_argument("--titre")
     o = a.parse_args(argv)
     taille = construire(o.script, o.site, o.pyodide, o.paquet, o.distribution, o.police, o.roue, o.titre)
-    print(f"{o.site}/ : index.html, qtpy6web.js, app.zip ({taille // 1024} Kio)")
+    print(f"{o.site}/ : index.html, {', '.join(FICHIERS_JS)}, app.zip ({taille // 1024} Kio)")
 
 
 if __name__ == "__main__":

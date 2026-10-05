@@ -1152,6 +1152,105 @@ def test_boucle_de_qt_ouverte_par_une_minuterie(moteur):
     assert r.returncode == 0 and ", refus 0" in ligne and "suspensions 0," not in ligne, ligne
 
 
+SW = RACINE / "qtpy6" / "web" / "js" / "sw.js"  # le service worker servi à exemple/sw.js (un essai peut en servir un autre)
+
+
+def visites_du_service_worker(moteur, sw=SW):
+    """L'exemple sous ``?auto&sw=…`` (la page enregistre ``sw`` par ``service_worker``, le worker est sur Pyodide-Qt) : visite 1,
+    le cache rempli par ``garder``, visite 2 rechargée et servie par lui, visite 3 sous une autre version (le cache de la
+    première effacé). Rend, par visite, ce qu'on en dit ; une visite ratée finit par « KO »."""
+    import functools
+    import http.server
+    import threading
+
+    class Gestionnaire(http.server.SimpleHTTPRequestHandler):
+        def log_message(self, *_):
+            pass
+
+        def do_GET(self):
+            if self.path.split("?")[0] != "/exemple/sw.js":
+                return super().do_GET()
+            corps = Path(sw).read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/javascript")
+            self.send_header("Content-Length", str(len(corps)))
+            self.end_headers()
+            self.wfile.write(corps)
+
+    def attendre(condition, secondes):
+        limite = time.time() + secondes
+        while time.time() < limite:
+            if condition():
+                return True
+            time.sleep(0.5)
+        return False
+
+    def js(code):  # un corps de fonction async, dans les deux moteurs
+        return navigateur.execute_script(f"return (async () => {{ {code} }})()")
+
+    def visite(n):
+        if not attendre(lambda: js("return window.etat") in ("fini", "erreur"), 180):
+            return f"visite {n} : KO, la page n'a pas fini (état {js('return window.etat')!r})"
+        journal = js("return window.journal")
+        echo = next((l for l in journal if "écho au bout de" in l), "pas d'écho : " + " | ".join(journal[-6:]))
+        controlee = js("return !!navigator.serviceWorker.controller")
+        ok = controlee and "retour de l'appel 1" in echo and "erreur" not in echo
+        return f"visite {n} ({'contrôlée' if controlee else 'PAS contrôlée'}) : {echo}{'' if ok else ' : KO'}"
+
+    def caches():
+        return js("const r = {}; for (const k of await caches.keys()) r[k] = (await (await caches.open(k)).keys()).length;"
+                  " return r")
+
+    def aller(url):
+        js("window.ancienne = true")  # attendre la NOUVELLE page, pas l'état de celle qu'on quitte
+        if moteur == "chromium":
+            navigateur.cdp("Page.navigate", url=url)
+        else:
+            navigateur.get(url)
+        attendre(lambda: not js("return window.ancienne"), 30)
+
+    subprocess.run([sys.executable, "exemple/construire.py"], cwd=RACINE, check=True, capture_output=True, timeout=120)
+    serveur = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Gestionnaire, directory=str(RACINE)))
+    threading.Thread(target=serveur.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{serveur.server_port}/exemple/index.html?auto&sw="
+    navigateur = ouvrir(moteur, url + "1")
+    dit = []
+    try:
+        dit.append(visite(1))
+        # garder() confie la liste au service worker, qui la range en tâche de fond : attendre que le cache cesse de grandir
+        tailles = [-1]
+        attendre(lambda: tailles.append(sum(caches().values())) or tailles[-1] == tailles[-2] > 0, 60)
+        aller(url + "1")
+        dit.append(visite(2) + f" ; cache : {tailles[-1]} entrées")
+        # contrôlée dès le chargement, cache vide (purgé par le navigateur, ou effacé à l'activation d'une version) : la page
+        # demande ses jumeaux AU service worker, puis le worker le fichier brut. À la visite 1, claim arrive trop tard pour
+        # voir les jumeaux de la page : sans cette visite-ci, le sw.js fautif de la rév. 564 passait
+        js("for (const k of await caches.keys()) await caches.delete(k)")
+        aller(url + "1")
+        dit.append(visite("2 bis, cache vide"))
+        aller(url + "2")
+        dit.append(visite(3))
+        attendre(lambda: len(caches()) == 1, 30)
+        restes = caches()
+        dit.append(f"caches après la version 2 : {restes}" + ("" if len(restes) == 1 and "v=2" in list(restes)[0] else " : KO"))
+    finally:
+        navigateur.quit()
+        serveur.shutdown()
+    return dit
+
+
+@pytest.mark.skipif(not (RACINE / "exemple" / "pyodide-qt").exists(), reason="Pyodide-Qt (hebergement/telecharger.sh) requis")
+@pytest.mark.parametrize("moteur", MOTEURS)
+def test_service_worker(moteur):
+    """Le service worker de qtpy6 (``js/sw.js``, ~10 s par moteur) : le worker d'une page servie par lui démarre, à la
+    première visite comme à la suivante (servie par le cache), et une nouvelle version efface le cache de l'ancienne. Blink
+    charge les jumeaux .gz, Firefox les .br. Avant le 05/10/2026 (sw.js de SmartTeacher, rév. 546 à 564), le jumeau rangé
+    brut était servi au worker pour pyodide.asm.wasm : worker muet, vu seulement en ligne ; ici, la visite « 2 bis »
+    échoue avec ce sw.js-là dans les deux moteurs."""
+    dit = visites_du_service_worker(moteur)
+    assert not any(l.endswith("KO") for l in dit), "\n".join(dit)
+
+
 
 _GLISSER = """
 import functools, http.server, sys, threading, time

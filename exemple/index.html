@@ -13,9 +13,14 @@
 <script type="module">
 // L'exemple, servi depuis la racine du dépôt (python -m qtpy6.web.sonde --racine . exemple/index.html capture.png, ou
 // python -m http.server à la racine) : le gabarit js/gabarit.html, plus ?auto qui clique le bouton et attend l'écho.
-import { preparer, print, rendu } from "../qtpy6/web/js/qtpy6web.js";
+// ?sw=VERSION (tests/test_web.py, test_service_worker) : le service worker de qtpy6 (exemple/sw.js, que le test sert depuis
+// qtpy6/web/js/sw.js), le worker sur Pyodide-Qt comme la page (ses jumeaux .br/.gz), et ce qui est chargé confié au cache.
+import { preparer, print, rendu, service_worker } from "../qtpy6/web/js/qtpy6web.js";
 window.etat = "en cours";
 const attente = document.getElementById("attente"), qt = document.getElementById("qt");
+const params = new URLSearchParams(location.search);
+const garder = params.has("sw") ? service_worker("./sw.js?v=" + params.get("sw"), { cache: "exemple", pyodide: "./pyodide-qt/" })
+                                : undefined;
 try {
   const py = await preparer(qt, {
     indexURL: "./pyodide-qt/",
@@ -23,6 +28,7 @@ try {
     sur_ligne: l => attente.textContent = l,
   });
   const t0 = performance.now();
+  if (garder) py.runPython('import compteur; compteur.PYODIDE_WORKER = "pyodide-qt/"');
   py.pyimport("compteur").demarrer();
   print(`fenêtre montrée : ${(performance.now() - t0).toFixed(0)} ms`);
   qt.hidden = false; attente.remove();
@@ -56,6 +62,7 @@ f.grab().save("/capture.png")
     window.centres = JSON.parse(py.pyimport("glisse").centres());
     window.etat = "glisse";  // le test fait glisser un vrai pointeur, puis lit window.ordre
   }
+  garder?.(u => u.startsWith(new URL("./", location.href).href));  // Pyodide-Qt et app.zip, pas qtpy6web.js (hors de la portée)
   print("tas wasm : " + (py._module.HEAPU8.length / 1048576).toFixed(0) + " Mio");
   if (window.etat != "glisse") window.etat = "fini";
 } catch (e) { print("ERREUR " + (e.message || e)); console.error(e); window.etat = "erreur"; }

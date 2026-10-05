@@ -32,6 +32,7 @@ class Compteur(QtWidgets.QWidget):
 
 
 FENETRE = WORKER = None
+PYODIDE_WORKER = "pyodide/"  # le Pyodide du worker, relatif à la page ; « pyodide-qt/ » sous ?sw (index.html)
 
 
 def dire(texte):
@@ -46,7 +47,7 @@ def demarrer():
     FENETRE = Compteur()
     if navigateur():
         FENETRE.show_full_screen()  # tout le conteneur de la page
-        WORKER = Travailleur("pyodide/", [("app.zip", "/home/pyodide/app")], "echo", parent=FENETRE)  # URL relatives à la page
+        WORKER = Travailleur(PYODIDE_WORKER, [("app.zip", "/home/pyodide/app")], "echo", parent=FENETRE)  # URL relatives à la page
         WORKER.pret.connect(lambda: dire("worker prêt\n"))
         WORKER.sortie.connect(lambda n, texte: dire(texte))
         WORKER.termine.connect(lambda n, retour: dire(f"retour de l'appel {n} : {retour!r}\n"))

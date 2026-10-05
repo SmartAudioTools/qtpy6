@@ -98,7 +98,7 @@ function telecharger(url) {
 // 0,5 s de moins à 50 Mbit/s (mesuré le 02/10/2026 sous Firefox). Brotli si le navigateur l'a (Firefox 155 ; pas Chromium 153,
 // mesuré en ligne le 04/10/2026 : il téléchargeait 30 Mo au lieu de 13, dont la bibliothèque standard écrite sans compression
 // pour Brotli, 9,8 Mo) ; sinon gzip, que tous ont. Rend undefined, d'où la demande du fichier lui-même, sans jumeau (en
-// développement). Une réponse marquée DECOMPRESSE vient du service worker d'une page (celui de SmartTeacher), qui la range
+// développement). Une réponse marquée DECOMPRESSE vient du service worker de la page (sw.js, `service_worker`), qui la range
 // décompressée : la décompresser à chaque ouverture coûterait 0,15 à 0,3 s de calcul.
 export const DECOMPRESSE = "X-Qtpy6-Decompresse";
 const JUMEAU = [[".br", "brotli"], [".gz", "gzip"]].find(([, format]) => {
@@ -112,6 +112,27 @@ async function en_jumeau(fetch_origine, adresse) {
   if (reponse.headers.has(DECOMPRESSE)) return reponse;
   return new Response(reponse.body.pipeThrough(new DecompressionStream(format)),  // application/wasm : compileStreaming l'exige
     { headers: { "Content-Type": adresse.pathname.endsWith(".wasm") ? "application/wasm" : "application/octet-stream" } });
+}
+
+// Le service worker de la page (js/sw.js, que qtpy6.web.construire.deposer met À CÔTÉ de la page : il ne contrôle que son
+// dossier et ce qui est en dessous) : la visite suivante a, sans aucune requête, ce que la page lui a confié.
+//   const garder = service_worker("./sw.js?v=…", { cache: "mon_appli", pyodide: "./pyodide-qt/" });
+//   … une fois la page prête : garder(url => …)   (les adresses chargées, performance, que ce filtre retient)
+// `cache` : le nom de l'application, début du nom de ses caches (ses autres caches, « NOM?… », sont effacés à l'activation : changer
+// la requête du script, ?v=… à chaque déploiement, repart sur un cache neuf). `pyodide` : le Pyodide des workers
+// (Travailleur), dont sw.js sert aux workers neufs les fichiers bruts depuis l'entrée de leur jumeau. Enregistré sur un
+// navigateur qui n'en a pas (ou un contexte non sûr, http hors 127.0.0.1) : rien, et `garder` ne fait rien.
+export function service_worker(script, { cache = "qtpy6", pyodide, erreur = console.error } = {}) {
+  const sw = navigator.serviceWorker;
+  if (!sw) return () => {};
+  const url = new URL(script, location.href);
+  url.searchParams.set("cache", cache);
+  if (pyodide) url.searchParams.set("p", new URL(pyodide, location.href).href);
+  sw.register(url).catch(erreur);
+  return (filtre = () => true) => {
+    const urls = performance.getEntriesByType("resource").map(r => r.name).filter(filtre);
+    sw.ready.then(r => r.active?.postMessage(urls)).catch(erreur);
+  };
 }
 
 // Les octets reçus pendant `preparer` : chaque réponse de fetch lue en double (clone), son nom (dernier segment de l'adresse)
