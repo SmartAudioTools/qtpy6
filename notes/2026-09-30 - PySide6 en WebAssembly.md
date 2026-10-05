@@ -1001,9 +1001,13 @@ seul aux .js, mesuré). Pyodide le charge en script, pas par `fetch` : `en_jumea
 worker (`qtpy6web.js`), pour 40 Ko, ~6 ms à 50 Mbit/s, et rien aux visites suivantes (cache).
 
 **Points ouverts :** le zip local `pyodide-pyside6-0.29.3.0.zip` a été réécrit (le statique n'existe plus que dans
-`build/dist-statique/` et `exemple/pyodide-qt`) ; publication et `versions.json` restent à faire (sha256 du zip :
-`1fe84005…14983`, à refaire si on reconstruit : py-compile date les .pyc) ; AVANT tout déploiement, vérifier que le
-cache (service worker des pages, cache HTTP) ne peut pas mélanger ancien et nouveau — l'URL `pyodide-qt/` n'est pas
-versionnée, et un ancien `pyodide.asm.wasm` en cache avec le nouveau `pyodide.mjs` (ou l'inverse : la nouvelle
-enveloppe exige `pyodide-base.mjs` et `pyside_agrege.so`, absents de l'ancien déploiement) casserait le chargement —
-stratégie de `sw.js` à relire à ce moment-là, purge ou versionnement sinon.
+`build/dist-statique/` et `exemple/pyodide-qt`) ; zip publié le 05/10/2026 à 9 h 37
+(asset de la release remplacé, taille et empreinte `1fe84005…14983` relues par l'API GitHub), `versions.json` reporté
+(à refaire si on reconstruit : py-compile date les .pyc). Cache, relu avant le push (`sw.js` et `deployer.sh` de
+SmartTeacher, par lecture) : le cache du service worker est nommé par la version de la PAGE (`?v=` = `date +%s` de
+`deployer.sh`), pas par celle de Pyodide-Qt, et se remplit fichier par fichier ; une page déjà déployée garde donc
+l'ancien Pyodide-Qt tant qu'il est entier en cache, mais un cache partiel (ancien `pyodide.mjs` sans son
+`pyodide.asm.wasm`, ou l'inverse) mélangerait les deux. Remède retenu : REDÉPLOYER SmartTeacher dès que l'action Pages
+de qtpy6 a publié (nouvelle version de page → caches effacés à l'activation, `tailles.json` aux nouvelles tailles).
+Restent les dix minutes de `max-age=600` du cache HTTP, sur une visite qui tomberait pendant la bascule. `qtpy6web.js`
+n'a pas changé (da48702 ne le touche pas) : l'enveloppe se suffit, une page déjà déployée la charge telle quelle.
