@@ -1,6 +1,7 @@
 """The binding's QtPdfWidgets, whose QPdfView selects text on the desktop (drag, Ctrl+C: Qt's own has no selection)
 and follows the document's internal links (a table of contents: Qt's own does not), and setMasks pixelates
-zones of the pages (an answer the reader must not see yet);
+zones of the pages (an answer the reader must not see yet), setCopyZones limits selection and copy to zones (the
+code of a document) and setCopyFilter rewrites what is copied;
 in the browser, where Qt-WASM has no QtPdf, qtpy6.web.pdf's QPdfView, drawn by pdf.js, whose text selects and copies
 as in the browser's PDF viewer."""
 import sys
@@ -19,10 +20,12 @@ else:
 
     class QPdfView(_QPdfView):
         """QPdfView, plus a selection within one page (drag with the left button, Ctrl+C copies it), internal links
-        followed on click, ``setPageLimit``: only the first pages are shown, and ``setMasks``: zones pixelated."""
+        followed on click, ``setPageLimit``: only the first pages are shown, ``setMasks``: zones pixelated,
+        ``setCopyZones``: only text inside these zones selects, ``setCopyFilter``: what Ctrl+C copies is rewritten."""
 
         LINK_MARGIN = 12  # points left above a link's destination (same in the browser: pdf_vue.js)
         MASK_BLOCK = 12  # side of a mask's blocks, in the page's points: unreadable at any zoom (same in pdf_vue.js)
+        COPY_MARGIN = 3  # points a selected line's box may go past its copy zone (same in pdf_vue.js)
 
         def __init__(self, parent=None):
             super().__init__(parent)  # PyQt6 wants the parent, even None
@@ -34,6 +37,7 @@ else:
             self._areas = {}  # {page: _link_areas(page)}
             self._masks = {}  # setMasks: {page: [QRectF in the page's points]}
             self._blocks = {}  # {(page, index of the mask): QImage, one pixel per block}, read once
+            self._copy_zones = self._copy_filter = None  # setCopyZones, setCopyFilter
             self.viewport().setCursor(Qt.CursorShape.IBeamCursor)
             self.viewport().setMouseTracking(True)  # the pointing hand over a link
             self.verticalScrollBar().rangeChanged.connect(self._clamp)
@@ -62,10 +66,38 @@ else:
         def masks(self):
             return {page: list(rectangles) for page, rectangles in self._masks.items()}
 
+        def setCopyZones(self, zones):
+            """Only the text inside zones of the pages selects and copies: ``zones`` is {page: [QRectF in the page's
+            points, from its top left]}, {} for none, None (the default) for all of it. A selection that leaves the
+            zones is dropped, not cut. Not Qt's: a qtpy6 addition, also in the browser's QPdfView."""
+            self._copy_zones = None if zones is None else {page: [QRectF(r) for r in rectangles]
+                                                           for page, rectangles in zones.items() if rectangles}
+            self._selection = None
+            self.viewport().update()
+
+        def copyZones(self):
+            return None if self._copy_zones is None else {page: list(r) for page, r in self._copy_zones.items()}
+
+        def setCopyFilter(self, function):
+            """``function(text) -> text`` rewrites what Ctrl+C copies (None: as is). Not Qt's: a qtpy6 addition, also
+            in the browser's QPdfView."""
+            self._copy_filter = function
+
+        def copyText(self):
+            """The selected text as Ctrl+C copies it ("" without a selection)."""
+            text = self._selection[1].text() if self._selection is not None else ""
+            return self._copy_filter(text) if text and self._copy_filter is not None else text
+
         def _masked(self, page, selection):
-            """Whether ``selection`` (a QPdfSelection of ``page``) touches a mask."""
-            return any(polygon.boundingRect().intersects(mask) for polygon in selection.bounds()
-                       for mask in self._masks.get(page, ()))
+            """Whether ``selection`` (a QPdfSelection of ``page``) touches a mask, or leaves the copy zones (one line's
+            box at a time, ``COPY_MARGIN`` points of leeway: the text's box is not the font's). Its two corners, not the
+            box: an underscore's has no height, and QRectF.contains refuses an empty rectangle."""
+            boxes = [polygon.boundingRect() for polygon in selection.bounds()]
+            m = self.COPY_MARGIN
+            return (any(box.intersects(mask) for box in boxes for mask in self._masks.get(page, ()))
+                    or self._copy_zones is not None and not all(
+                        any(zone.adjusted(-m, -m, m, m).contains(box.topLeft()) and zone.adjusted(-m, -m, m, m).contains(
+                            box.bottomRight()) for zone in self._copy_zones.get(page, ())) for box in boxes))
 
         def _block_image(self, page, index):
             """The mask's QImage, one pixel per block: the page rendered at four pixels per block, then each block
@@ -268,7 +300,7 @@ else:
 
         def keyPressEvent(self, event):
             if event.matches(QKeySequence.StandardKey.Copy) and self._selection is not None:
-                QGuiApplication.clipboard().setText(self._selection[1].text())
+                QGuiApplication.clipboard().setText(self.copyText())
                 event.accept()
             else:
                 super().keyPressEvent(event)

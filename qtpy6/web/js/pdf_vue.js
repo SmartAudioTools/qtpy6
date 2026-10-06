@@ -126,6 +126,13 @@
       this.div.addEventListener("mousedown", e => e.target.closest?.(".textLayer")?.classList.add("selecting"));
       this.relacher = () => this.div.querySelectorAll(".selecting").forEach(t => t.classList.remove("selecting"));
       document.addEventListener("mouseup", this.relacher);
+      this.zonesCopie = null;
+      this.filtre = null;
+      this.div.addEventListener("copy", e => {
+        if (!this.filtre) return;
+        e.clipboardData.setData("text/plain", this.filtre(document.getSelection().toString()));
+        e.preventDefault();
+      });
     }
 
     async afficher(doc) {  // un PDFDocumentProxy, sa promesse (celle d'ouvrir) ou null
@@ -171,6 +178,17 @@
     limiter(nombre) {
       this.limite = nombre ?? null;
       if (this.doc) this.mettreEnPage();
+    }
+
+    // setCopyZones : seul le texte de ces zones se sélectionne et se copie (null : tout) ; setCopyFilter : texte → texte
+    copiables(liste) {  // [[page, x, y, l, h], …] ou null
+      this.zonesCopie = liste === null ? null : new Map();
+      for (const [page, ...zone] of liste ?? []) this.zonesCopie.set(page, [...(this.zonesCopie.get(page) ?? []), zone]);
+      if (this.doc) this.mettreEnPage();
+    }
+
+    filtrer(fonction) {
+      this.filtre = fonction;
     }
 
     masquer(liste) {  // [[page, x, y, l, h], …]
@@ -248,6 +266,15 @@
           const r = span.getBoundingClientRect(), [gauche, haut] = [r.left - origine.left, r.top - origine.top];
           if (masques.some(([x, y, l, h]) => gauche < (x + l) * echelle && x * echelle < gauche + r.width
                                              && haut < (y + h) * echelle && y * echelle < haut + r.height)) span.remove();
+        }
+      }
+      if (this.zonesCopie) {  // hors des zones de copie, le texte ne se sélectionne pas (COPY_MARGIN de QtPdfWidgets.py)
+        const zones = this.zonesCopie.get(page.pageNumber - 1) ?? [], m = 3, origine = cadre.getBoundingClientRect();
+        for (const span of texte.querySelectorAll("span")) {
+          const r = span.getBoundingClientRect(), [gauche, haut] = [r.left - origine.left, r.top - origine.top];
+          if (!zones.some(([x, y, l, h]) => (x - m) * echelle <= gauche && gauche + r.width <= (x + l + m) * echelle
+                                            && (y - m) * echelle <= haut && haut + r.height <= (y + h + m) * echelle))
+            span.style.userSelect = "none";
         }
       }
       const fin = document.createElement("div");

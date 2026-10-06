@@ -9,9 +9,10 @@ n'est ouvert, que Qt dessinerait dessous. Seul le sous-ensemble utile de l'API e
 (chemin ou QIODevice), ``status``, ``pageCount`` et leurs signaux ; ``QPdfView.setDocument`` et les modes, la page
 étant toujours ajustée à la largeur, les pages les unes sous les autres, ``setDocumentMargins`` et ``setPageSpacing`` ; les
 liens internes du PDF (un sommaire) suivis au clic, comme sur ordinateur ; et ``setPageLimit``, l'ajout de qtpy6 (les
-premières pages seules), et setMasks, l'autre ajout (des zones en pavés, leur texte retiré), comme sur
-ordinateur. Le chargement est asynchrone : ``load`` rend
-``Error.None_`` avec ``status() == Loading``, puis ``statusChanged(Ready)``."""
+premières pages seules), setMasks (des zones en pavés, leur texte retiré), setCopyZones (seul le texte de ces zones
+se sélectionne) et setCopyFilter (ce que copie le navigateur, réécrit), les autres ajouts, comme sur
+ordinateur. Le chargement est asynchrone : ``load`` rend ``Error.None_`` avec ``status() == Loading``, puis
+``statusChanged(Ready)``."""
 
 import enum
 import importlib.resources
@@ -125,6 +126,7 @@ class QPdfView(QWidget):
         self._document, self._mode_page, self._mode_zoom = None, self.PageMode.SinglePage, self.ZoomMode.Custom
         self._vue = vue = _js().vue()
         self._place, self._limite, self._masques = None, None, {}
+        self._zones_copie = self._filtre = None  # setCopyZones, setCopyFilter
         self._marges, self._ecart = QMargins(6, 6, 6, 6), 3  # les défauts de QPdfView
         self.destroyed.connect(lambda *_: vue.detruire())
         # Le filet : ce qu'aucun événement du widget ne signale (un ancêtre qui bouge, une boîte modale, un menu)
@@ -164,6 +166,24 @@ class QPdfView(QWidget):
 
     def masks(self):
         return {page: list(zones) for page, zones in self._masques.items()}
+
+    def setCopyZones(self, zones):
+        """{page: [QRectF en points]} : seul leur texte se sélectionne et se copie ; {} aucun, None tout (le défaut)."""
+        from pyodide.ffi import to_js  # noqa: PLC0415
+
+        self._zones_copie = None if zones is None else {page: [QRectF(r) for r in z] for page, z in zones.items() if z}
+        self._vue.copiables(None if zones is None else to_js(
+            [[page, r.x(), r.y(), r.width(), r.height()] for page, z in self._zones_copie.items() for r in z]))
+
+    def copyZones(self):
+        return None if self._zones_copie is None else {page: list(z) for page, z in self._zones_copie.items()}
+
+    def setCopyFilter(self, fonction):
+        """``fonction(texte) -> texte`` réécrit ce que copie le navigateur (None : tel quel)."""
+        from pyodide.ffi import create_proxy  # noqa: PLC0415
+
+        self._filtre = fonction and create_proxy(fonction)  # gardé : le proxy vit autant que la vue
+        self._vue.filtrer(self._filtre)
 
     def documentMargins(self):
         return QMargins(self._marges)
