@@ -217,8 +217,9 @@ def test_scaled(app, monkeypatch):
 def env_file(tmp_path, monkeypatch):
     path = tmp_path / 'env' / 'QtEnvironment.sh'
     monkeypatch.setattr(_env, '_ENV_FILE', str(path))
-    for key in ('QT_API', 'QT_SCALE', 'QT_FONT', 'QT_FONT_SIZE'):
+    for key in ('QT_API', 'QT_SCALE', 'QT_FONT', 'QT_FONT_SIZE', 'QT_STYLE'):
         monkeypatch.delenv(key, raising=False)
+        monkeypatch.delenv('QTPY6_LOGIN_' + key, raising=False)
     return path
 
 
@@ -231,9 +232,15 @@ def test_env_file(env_file, monkeypatch):
     assert os.environ['QT_FONT'] == 'Noto Sans' and qtpy6.get_env('QT_FONT') == 'Noto Sans'
     monkeypatch.delenv('QT_FONT')
     assert qtpy6.get_env('QT_FONT') == 'Noto Sans'
-    assert env_file.read_text() == "export QT_FONT='Noto Sans'\nexport QT_SCALE=1.5\n"
+    assert env_file.read_text() == ("export QT_FONT='Noto Sans' QTPY6_LOGIN_QT_FONT='Noto Sans'\n"
+                                    "export QT_SCALE=1.5 QTPY6_LOGIN_QT_SCALE=1.5\n")
     monkeypatch.setenv('QT_FONT', 'Serif')
-    assert qtpy6.get_env('QT_FONT') == 'Serif'  # the environment comes first
+    monkeypatch.setenv('QTPY6_LOGIN_QT_FONT', 'Serif')  # the value of the login, changed since: the file wins
+    assert qtpy6.get_env('QT_FONT') == 'Noto Sans'
+    monkeypatch.setenv('QT_FONT', 'Ubuntu')  # differs from its login copy: set on purpose, it wins
+    assert qtpy6.get_env('QT_FONT') == 'Ubuntu'
+    monkeypatch.setenv('QT_STYLE', 'Fusion')  # no login copy: set on purpose too
+    assert qtpy6.get_env('QT_STYLE') == 'Fusion'
 
 
 @pytest.mark.skipif(os.name == 'nt', reason='the registry is not a file')
@@ -246,7 +253,7 @@ def test_env_file_written_by_hand(env_file):
     assert qtpy6.get_env('QT_SCALE', 'auto') == 'auto'  # no `export`
     assert qtpy6.get_env('OTHER') == 'x=y' and qtpy6.get_env('QT_API') == ''
     qtpy6.set_env('QT_FONT', 'a"b')
-    assert env_file.read_text() == '# Qt\n\nexport QT_FONT_SIZE=12  # points\nexport QT_FONT=\'a"b\'\n' \
+    assert env_file.read_text() == '# Qt\n\nexport QT_FONT_SIZE=12  # points\nexport QT_FONT=\'a"b\' QTPY6_LOGIN_QT_FONT=\'a"b\'\n' \
                                    'QT_SCALE=2\nexport OTHER=x=y\nexport QT_API=\n'
     assert qtpy6.get_env('QT_FONT') == 'a"b'
 
@@ -258,11 +265,14 @@ def test_selector(app, env_file):
     from qtpy6.QtSelector import QtSelector
     widget = QtSelector()
     combos = widget.find_children(QtWidgets.QComboBox)
-    assert [combo.current_text() for combo in combos] == ['auto', 'auto', 'default', 'default']
+    assert [combo.current_text() for combo in combos] == ['auto', 'auto', 'default', 'default', 'default']
     combos[1].set_current_text('2.0')
     assert qtpy6.get_env('QT_SCALE') == '2.0' and 'QT_SCALE=2.0' in env_file.read_text()
     combos[3].set_current_text('80 pixels')
     assert qtpy6.get_env('QT_FONT_SIZE') == '80 pixels'
+    assert 'Fusion' in [combos[4].item_text(i) for i in range(combos[4].count())]
+    combos[4].set_current_text('Fusion')
+    assert qtpy6.get_env('QT_STYLE') == 'Fusion'
 
 
 @pytest.mark.skipif(os.name == 'nt', reason='the registry is not a file')

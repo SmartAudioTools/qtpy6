@@ -1,5 +1,5 @@
 """The Windows branch of qtpy6._env, on any OS: `_env.py` is executed again with `os.name`
-set to 'nt' against fake `nt`, `winreg`, `ctypes.windll` and `setx`. That proves the code
+set to 'nt' against fake `winreg`, `ctypes.windll` and `setx`. That proves the code
 runs and takes the right branches, not that Windows behaves like the fakes."""
 import ctypes
 import importlib.util
@@ -59,10 +59,8 @@ def windows(monkeypatch):
         monkeypatch.setattr(subprocess, 'STARTF_USESHOWWINDOW', 1, raising=False)
         monkeypatch.setattr(subprocess, 'Popen', lambda args, startupinfo: calls.append((args, startupinfo.dwFlags)))
         monkeypatch.setitem(sys.modules, 'winreg', Registry(hkcu=hkcu, hklm=hklm))
-        # nt.environ is what the process was started with; QT_FONT is then redefined from Python.
-        started_with = {key.upper(): value for key, value in os.environ.items()}
-        monkeypatch.setitem(sys.modules, 'nt', types.SimpleNamespace(environ=started_with))
-        monkeypatch.setenv('QT_FONT', 'from python')
+        for key in [key for key in os.environ if key.startswith(('QT_', 'QTPY6_LOGIN_'))]:
+            monkeypatch.delenv(key)  # QT_API, posed by qtpy6 at import, would be taken for a value set on purpose
         spec = importlib.util.spec_from_file_location('qtpy6_env_on_windows', ENV_PY)
         module = importlib.util.module_from_spec(spec)
         with monkeypatch.context() as context:
@@ -73,8 +71,12 @@ def windows(monkeypatch):
 
 
 def test_get_env(windows, monkeypatch):
-    env, _ = windows(hkcu={'QT_SCALE': '1.5'}, hklm={'QT_SCALE': '2', 'QT_API': 'PyQt6'})
-    assert env.get_env('QT_FONT') == 'from python'  # redefined in this process: wins over the registry
+    env, _ = windows(hkcu={'QT_SCALE': '1.5', 'QT_FONT': 'Serif'}, hklm={'QT_SCALE': '2', 'QT_API': 'PyQt6'})
+    monkeypatch.setenv('QT_FONT', 'inherited')
+    monkeypatch.setenv('QTPY6_LOGIN_QT_FONT', 'inherited')  # the value of the login: the registry wins
+    assert env.get_env('QT_FONT') == 'Serif'
+    monkeypatch.setenv('QT_FONT', 'set on purpose')  # differs from its login copy: wins over the registry
+    assert env.get_env('QT_FONT') == 'set on purpose'
     assert env.get_env('QT_SCALE') == '1.5'  # the user's registry wins over the machine's
     assert env.get_env('QT_API') == 'PyQt6'
     monkeypatch.setenv('QT_FONT_SIZE', 'inherited')  # not in the registry: from the environment
@@ -90,8 +92,9 @@ def test_get_env_without_user_key(windows):
 def test_set_env(windows):
     env, calls = windows()
     env.set_env('QT_SCALE', '2.0')
-    assert os.environ['QT_SCALE'] == '2.0'
-    assert calls[-1] == (['setx', 'QT_SCALE', '2.0'], subprocess.STARTF_USESHOWWINDOW)  # no console window
+    assert os.environ['QT_SCALE'] == os.environ['QTPY6_LOGIN_QT_SCALE'] == '2.0'
+    assert calls[-2:] == [(['setx', 'QT_SCALE', '2.0'], subprocess.STARTF_USESHOWWINDOW),  # no console window
+                          (['setx', 'QTPY6_LOGIN_QT_SCALE', '2.0'], subprocess.STARTF_USESHOWWINDOW)]
 
 
 @pytest.mark.parametrize('shcore, expected', [('ok', ('shcore', 2)), ('absent', 'user32'), ('fails', 'user32')])

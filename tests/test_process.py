@@ -20,7 +20,7 @@ INSTALLED = [api for api, name in API_NAMES.items() if importlib.util.find_spec(
 
 def run(code, home, *options, **env):
     """`code` in a fresh interpreter whose session file is under `home`: (return code, stdout, stderr)."""
-    environment = {key: value for key, value in os.environ.items() if not key.startswith('QT_')}
+    environment = {key: value for key, value in os.environ.items() if not key.startswith(('QT_', 'QTPY6_LOGIN_'))}
     environment.update(QT_QPA_PLATFORM='offscreen', HOME=str(home), **env,
                        PYTHONPATH=os.pathsep.join(filter(None, [PACKAGE_DIR, os.environ.get('PYTHONPATH')])))
     result = subprocess.run([sys.executable, *options, '-c', textwrap.dedent(code)],
@@ -93,6 +93,19 @@ def test_font_settings(api, tmp_path):
     assert run(FONT, tmp_path, QT_API=api, QT_FONT_SIZE='20 pixels')[:2] == (0, f'{default_family(api, tmp_path)} -1.0 20')
     session_file(tmp_path, QT_FONT='Serif', QT_FONT_SIZE='"9 PIXELS"')
     assert run(FONT, tmp_path, QT_API=api)[:2] == (0, 'Serif -1.0 9')
+    # The value of the login, still in the environment of what the desktop starts: the file wins.
+    login = dict(QT_FONT='DejaVu Sans', QTPY6_LOGIN_QT_FONT='DejaVu Sans')
+    assert run(FONT, tmp_path, QT_API=api, **login)[:2] == (0, 'Serif -1.0 9')
+
+
+@pytest.mark.parametrize('api', INSTALLED)
+def test_style_setting(api, tmp_path):
+    style = 'from qtpy6 import QtWidgets; app = QtWidgets.QApplication([]); print(app.style().name())'
+    assert run(style, tmp_path, QT_API=api, QT_STYLE='Windows')[:2] == (0, 'windows')
+    session_file(tmp_path, QT_STYLE='Fusion')
+    assert run(style, tmp_path, QT_API=api)[:2] == (0, 'fusion')
+    # `QT_STYLE=Windows python app.py` from a terminal opened at login: set on purpose, it wins over the file.
+    assert run(style, tmp_path, QT_API=api, QT_STYLE='Windows', QTPY6_LOGIN_QT_STYLE='Fusion')[:2] == (0, 'windows')
 
 
 def default_family(api, home):

@@ -9,8 +9,9 @@ top of PySide6 or PyQt6.
     app.exec()
 
 The binding is the one already imported if any (a process cannot switch),
-else the ``QT_API`` setting (``pyside6``, ``pyqt6`` or ``auto``; environment
-variable, or the session setting written by the QtSelector widget), else the
+else the ``QT_API`` setting (``pyside6``, ``pyqt6`` or ``auto``; the session
+setting written by the QtSelector widget, unless the environment variable was set
+after the login), else the
 first one installed, in that order.
 
 The other session settings, all read the same way: ``QT_SCALE`` (a factor

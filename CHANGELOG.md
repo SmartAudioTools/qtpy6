@@ -2,6 +2,10 @@
 
 ## Non publié
 
+- Un réglage de session changé dans QtSelector vaut pour une application lancée du bureau sans relire
+  `QtEnvironment.sh` (SmartTeacher), sans reconnexion : `set_env` écrit avec chaque réglage sa copie
+  `QTPY6_LOGIN_<clé>`, et `get_env` ne préfère l'environnement que s'il diffère de cette copie, donc
+  s'il a été posé après la connexion (`QT_STYLE=Fusion python app.py`). Sous Linux et sous Windows.
 - Réglage de session `QT_STYLE` (`default`, `Fusion`, `Breeze`…), choisi dans QtSelector : le style de
   `QApplication` des applications qtpy6, sans toucher aux autres applications Qt de la session.
 - Dans le navigateur, `QDrag.exec` est une vraie boucle de Qt, suspendue par JSPI, y compris ouverte par une minuterie ou un signal (appui long au doigt) : le glisser-déposer des vues d'éléments (`QListWidget`, `QTreeView`, `QTableView`…) déplace, comme en natif. Le contournement `qtpy6.web.glisser` est retiré (`web.md`, « Pièges »).

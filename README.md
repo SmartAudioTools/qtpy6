@@ -93,7 +93,13 @@ Coût mesuré : `import qtpy6` (QtCore + QtWidgets, ~4 800 alias dans QtWidgets)
 
 Lus par `qtpy6.get_env`, écrits par `qtpy6.set_env` — dans le registre sous
 Windows (`setx`), dans `QtEnvironment.sh` sous KDE Plasma — de sorte qu'un
-changement vaut pour le prochain programme Qt lancé, sans se reconnecter :
+changement vaut pour le prochain programme Qt lancé, sans se reconnecter. Un
+programme lancé du bureau hérite pourtant des valeurs exportées à l'ouverture de
+session : chaque réglage est donc écrit avec sa copie `QTPY6_LOGIN_<clé>`,
+exportée en même temps. Une variable égale à sa copie est héritée de la
+connexion, et le réglage de session l'emporte ; une variable qui en diffère a été
+posée exprès (`QT_STYLE=Fusion python app.py`, un lanceur, du code Python), et
+c'est elle qui l'emporte.
 
 | Réglage | Valeurs | Effet |
 |---|---|---|
@@ -138,7 +144,7 @@ l'application a chargée. Le reste (chargeur de la page, polices, tactile, stock
 | `API`, `API_NAME`, `PYSIDE6`, `PYQT6` | binding choisi : `'pyside6'`/`'pyqt6'`, `'PySide6'`/`'PyQt6'`, deux booléens |
 | `QT_VERSION`, `PYQT_VERSION`, `PYSIDE_VERSION` | versions ; celle de l'autre binding vaut `None` |
 | `QtBindingsNotFoundError` | levée à l'import si aucun binding n'est installé |
-| `get_env(key, default=None)`, `set_env(key, value)` | réglages de session (environnement, puis registre ou `QtEnvironment.sh`) |
+| `get_env(key, default=None)`, `set_env(key, value)` | réglages de session (l'environnement s'il diffère de sa copie de connexion `QTPY6_LOGIN_<clé>`, sinon le registre ou `QtEnvironment.sh`) |
 | `QT_SCALE`, `QT_FONT`, `QT_FONT_SIZE`, `QT_STYLE` | valeurs lues à l'import (`QT_SCALE` : flottant, ou `None` tant que `auto` n'est pas résolu) |
 | `scaled(obj, *more)` | `obj × QT_SCALE`, résout `auto` au premier appel (il faut une `QApplication`) |
 | `qtpy6.QtSelector` | les widgets de réglage et `main()` (point d'entrée `qtselector`) |
