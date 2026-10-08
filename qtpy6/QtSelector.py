@@ -5,7 +5,7 @@ import importlib.util
 import os
 import sys
 
-from . import API_NAMES, QtGui, QtWidgets, get_env, set_env
+from qtpy6 import API_NAMES, QtGui, QtWidgets, get_env, set_env
 
 
 class _SettingComboBox(QtWidgets.QComboBox):
