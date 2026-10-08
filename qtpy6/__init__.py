@@ -15,8 +15,9 @@ first one installed, in that order.
 
 The other session settings, all read the same way: ``QT_SCALE`` (a factor
 for `scaled()`, or ``auto`` for the first screen's DPI / 192), ``QT_FONT``
-(a family, or ``default``) and ``QT_FONT_SIZE`` (in points, ``12 pixels``,
-or ``default``), the last two applied by QApplication.
+(a family, or ``default``), ``QT_FONT_SIZE`` (in points, ``12 pixels``,
+or ``default``) and ``QT_STYLE`` (a QStyleFactory key such as ``Fusion``, or
+``default``), the last three applied by QApplication.
 """
 import importlib
 import importlib.util
@@ -34,6 +35,7 @@ os.environ['QT_ENABLE_HIGHDPI_SCALING'] = '0'
 os.environ['QT_USE_PHYSICAL_DPI'] = '1'
 QT_FONT = get_env('QT_FONT', 'default')
 QT_FONT_SIZE = get_env('QT_FONT_SIZE', 'default').lower()
+QT_STYLE = get_env('QT_STYLE', 'default')
 QT_SCALE = get_env('QT_SCALE', 'auto').lower()
 QT_SCALE = None if QT_SCALE == 'auto' else float(QT_SCALE)
 

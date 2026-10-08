@@ -2,6 +2,8 @@
 
 ## Non publié
 
+- Réglage de session `QT_STYLE` (`default`, `Fusion`, `Breeze`…), choisi dans QtSelector : le style de
+  `QApplication` des applications qtpy6, sans toucher aux autres applications Qt de la session.
 - Dans le navigateur, `QDrag.exec` est une vraie boucle de Qt, suspendue par JSPI, y compris ouverte par une minuterie ou un signal (appui long au doigt) : le glisser-déposer des vues d'éléments (`QListWidget`, `QTreeView`, `QTableView`…) déplace, comme en natif. Le contournement `qtpy6.web.glisser` est retiré (`web.md`, « Pièges »).
 - `qtpy6.erreurs.installer()` : les exceptions non rattrapées s'affichent dans une boîte de dialogue, depuis
   n'importe quel fil (`QThread`, `threading.Thread`), en plus de la trace en console. Repris de SmartFramework

@@ -101,6 +101,7 @@ changement vaut pour le prochain programme Qt lancé, sans se reconnecter :
 | `QT_SCALE` | `auto` (DPI logique du premier écran / 192) ou un facteur | `qtpy6.scaled(x)` : entier, flottant, `QRect`, `QSize`, `QMargins`, tuple, liste ; `scaled(a, b)` rend un tuple. La mise à l'échelle de Qt est désactivée (`QT_ENABLE_HIGHDPI_SCALING=0`, `QT_USE_PHYSICAL_DPI=1`) |
 | `QT_FONT` | `default` ou une famille | police de `QApplication` |
 | `QT_FONT_SIZE` | `default`, des points (`10`, `10.5`) ou `12 pixels` | taille de police de `QApplication` |
+| `QT_STYLE` | `default` ou une clé de `QStyleFactory` (`Fusion`, `Breeze`, `Windows`…) | style de `QApplication` ; seules les applications qtpy6 le suivent, contrairement à `QT_STYLE_OVERRIDE` de Qt |
 
 Sous Windows, l'import rend aussi le processus « DPI aware ».
 
@@ -138,7 +139,7 @@ l'application a chargée. Le reste (chargeur de la page, polices, tactile, stock
 | `QT_VERSION`, `PYQT_VERSION`, `PYSIDE_VERSION` | versions ; celle de l'autre binding vaut `None` |
 | `QtBindingsNotFoundError` | levée à l'import si aucun binding n'est installé |
 | `get_env(key, default=None)`, `set_env(key, value)` | réglages de session (environnement, puis registre ou `QtEnvironment.sh`) |
-| `QT_SCALE`, `QT_FONT`, `QT_FONT_SIZE` | valeurs lues à l'import (`QT_SCALE` : flottant, ou `None` tant que `auto` n'est pas résolu) |
+| `QT_SCALE`, `QT_FONT`, `QT_FONT_SIZE`, `QT_STYLE` | valeurs lues à l'import (`QT_SCALE` : flottant, ou `None` tant que `auto` n'est pas résolu) |
 | `scaled(obj, *more)` | `obj × QT_SCALE`, résout `auto` au premier appel (il faut une `QApplication`) |
 | `qtpy6.QtSelector` | les widgets de réglage et `main()` (point d'entrée `qtselector`) |
 | `qtpy6.QtCore.QPropertyAnimation` | celle de la liaison, même API, mais menée par les images de l'écran (`QWindow.requestUpdate` : rappel du compositeur sur Wayland, `requestAnimationFrame` dans le navigateur) au lieu de la minuterie de 16 ms de Qt, dès que la cible est un widget dont la fenêtre existe ; `par_image = False` (sur la classe ou l'instance) rend celle de Qt telle quelle (`qtpy6.animation`) |

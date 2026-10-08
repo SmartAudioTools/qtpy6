@@ -1,6 +1,6 @@
 """Widgets that choose, for the whole desktop session, the binding, scale, font
-and font size that qtpy6 reads at start-up (QT_API, QT_SCALE, QT_FONT,
-QT_FONT_SIZE). Run ``python -m qtpy6.QtSelector`` or ``qtselector``."""
+and font size and widget style that qtpy6 reads at start-up (QT_API, QT_SCALE,
+QT_FONT, QT_FONT_SIZE, QT_STYLE). Run ``python -m qtpy6.QtSelector`` or ``qtselector``."""
 import importlib.util
 import os
 import sys
@@ -45,6 +45,14 @@ class QtFontSizeSelector(_SettingComboBox):
     choices = ['default'] + [str(points) for points in range(7, 15)] + [f'{pixels} pixels' for pixels in range(81)]
 
 
+class QtStyleSelector(_SettingComboBox):
+    key, default = 'QT_STYLE', 'default'
+
+    @property
+    def choices(self):
+        return ['default'] + QtWidgets.QStyleFactory.keys()
+
+
 class QtFontSelector(QtWidgets.QFontComboBox):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -65,7 +73,8 @@ class QtSelector(QtWidgets.QWidget):
         super().__init__(parent)
         layout = QtWidgets.QGridLayout(self)
         selectors = (('QT_API', QtApiSelector), ('QT_SCALE', QtScaleSelector),
-                     ('QT_FONT', QtFontSelector), ('QT_FONT_SIZE', QtFontSizeSelector))
+                     ('QT_FONT', QtFontSelector), ('QT_FONT_SIZE', QtFontSizeSelector),
+                     ('QT_STYLE', QtStyleSelector))
         for row, (name, selector) in enumerate(selectors):
             layout.add_widget(QtWidgets.QLabel(name), row, 0)
             layout.add_widget(selector(), row, 1)
