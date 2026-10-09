@@ -108,6 +108,79 @@ Ce qu'il a fallu corriger, et qui n'était pas dans Spyder :
 Ce que le jalon ne mesure pas : la mémoire après une heure (le gc est appelé une fois), le défilement à la molette, la
 complétion, un rendu jugé à l'œil par l'utilisateur dans son navigateur.
 
+### Résultat du jalon 3 (09/10/2026, 23 h 15) : le programme de l'élève tourne dans un Worker, la console de Spyder suit
+
+Demande de l'utilisateur (22 h 54) : « lance le jalon 3 ». Mesuré avec `essais/spyder/jalon3.py` (bureau et page,
+`site/index.html?script=jalon3.py`, sonde `--pilote`) : le `CodeEditor` de Spyder au-dessus, et en dessous le widget de
+console de Spyder (`ShellBaseWidget`, celui de sa console interne) relié comme un terminal à un `qtpy6.QtCore.QProcess` —
+dans la page, `ProcessusWeb` : le programme de l'élève est lancé par `start(sys.executable, ["-u", script])` dans un Web
+Worker neuf, avec le Pyodide-Qt du site comme interpréteur (`travailleur.configurer("./pyodide-qt/", filtre=…)`, l'archive
+envoyée au Worker réduite au dossier de l'élève). Trois programmes : (1) à froid, deux `input()` tapés dans la console par
+de vrais clics et de vraies touches, 1 000 lignes, un calcul d'une seconde, une exception ; (2) un Worker préchauffé
+(`prechauffer()`), boucle infinie, `kill()` après une seconde ; (3) le même programme (1) en `exec()` dans l'interpréteur
+de la page, pour comparer. Un `QTimer` de 50 ms mesure le plus long silence de la page pendant que l'élève calcule.
+
+| Mesure (deux lancements de la page qui passent, charge machine 8 ; bureau offscreen, même charge) | Navigateur (Firefox, Worker) | Bureau (QProcess) |
+|---|---|---|
+| console de Spyder créée, premier rendu | 17 ms, 9 ms | 9 ms, 7 ms |
+| programme 1, Worker à froid : premier octet reçu (Pyodide démarré, archive dépliée, script lancé) | **249–531 ms** (4 lancements) | 37 ms |
+| réponse à un `input()` revenue, depuis la demande du geste | 925–968 ms, dont **730–830 ms de clic Selenium** ; ~150–190 ms propres à la page (frappe, Entrée, stdin du Worker, retour) | 2 ms |
+| programme 1 entier (1 000 lignes, 5 000 000 d'itérations, traceback), gestes compris | 3,6 s | 0,4 s |
+| plus long silence de la page pendant le programme 1 | **63 ms** sur 71 tics (la page reste réactive) | 50 ms |
+| programme 2, Worker préchauffé : premier octet | **23 ms** | 22 ms |
+| `finished` après `kill()` | 2 ms | 1 ms |
+| programme 3, `exec()` dans la page : durée | 802 ms, **page figée** (0 tic) | 307 ms, figé |
+| tas WebAssembly de la page, du premier rendu à la fin | **103 Mio, stable** (le Worker a le sien, non mesuré) | — |
+| script entier | 10,7 s | 3,3 s |
+
+Tout passe : « sortie : ok », « traceback : ok » (ZeroDivisionError, bonne ligne), « saisies dans la console : ok »
+(« Ton nom ? Alice », « Un entier ? 16 » lus dans le widget), 1 000 lignes « ligne » dans la console, « boucle : sortie
+reçue : ok » ; captures `capture_jalon3_fin.png` (page) et `capture_jalon3_bureau_fin.png`, relues : identiques.
+
+**Verdict sur ce que le jalon devait trancher (exigence du Superviseur, 23 h 10) : pour EXÉCUTER le fichier de l'élève avec
+sa console (sortie, erreurs, `input()`, arrêt), `ShellBaseWidget` + `ProcessusWeb` suffisent, et qtconsole/jupyter_client
+sur un Worker n'est pas nécessaire.** La mesure qui le dit : le Worker rend tout ce qu'un `QProcess` rend sur le bureau
+(stdout, stderr, stdin bloquant, code de retour, kill en 2 ms), avec la page qui reste réactive (63 ms de silence au pire
+pendant un calcul d'une seconde) là où l'exécution dans la page la fige 800 ms. Le surcoût est le démarrage à froid d'un
+Worker (0,25–0,5 s, 19–23 ms préchauffé : un Worker de réserve suffit à le cacher à l'élève). Ce que ce verdict ne couvre pas,
+et qui est le seul motif de qtconsole : un REPL interactif entre deux exécutions (variables conservées, `%magics`),
+l'explorateur de variables, la complétion dans la console. Pour ces besoins-là la voie la moins chère n'est pas jupyter
+mais ce que `console_enfant.py` du lecteur SmartTeacher fait déjà : un interpréteur persistant (`code.InteractiveConsole`
+sur le stdin du Worker) dans le même `ProcessusWeb` — à mesurer seulement si l'utilisateur le demande.
+
+**Ce que `ShellBaseWidget` tire de Spyder dans la page (le coût caché, exigence du Superviseur)** : 6 modules de plus
+que le `CodeEditor` du jalon 1 (`spyder.plugins.console`, `.utils`, `.utils.ansihandler`, `.widgets`, `.widgets.console`,
+`.widgets.shell`), aucun paquet tiers de plus (relevé par différence de `sys.modules` sur le bureau, même préambule) ;
+`imports` passe de 0,48 s (jalon 2, bureau) à 0,77–2,1 s dans la page selon la charge. Le Worker, lui, n'importe RIEN de
+Spyder : il ne reçoit que `eleve.py` et l'historique (filtre de `configurer`), c'est un Pyodide nu, et c'est ce qui fait
+ses 23 ms préchauffé.
+
+Ce qu'il a fallu corriger, et qui n'était pas dans Spyder (tout dans `jalon3.py`, aucun fichier de qtpy6 touché) :
+  - **la console interne de Spyder ne garde que 300 lignes** (`ConsoleBaseWidget.__init__`, `setMaximumBlockCount(300)`,
+    réglage `max_line_count`) : 290 lignes sur 1 000 au premier essai, « saisies : ÉCART ». Ce n'est pas un défaut mais un
+    réglage, à monter dans le port (`setMaximumBlockCount(5000)` ici) ;
+  - **`SaveHistoryMixin` exige `SEPARATOR`** (None dans `ShellBaseWidget`, `TypeError` au premier Entrée) : posé comme
+    `PythonShellWidget` le fait ;
+  - **un `readyRead` de plus que d'octets** : dans la page, deux écritures rapprochées du programme (« Bonjour ! » puis
+    l'invite) arrivent en deux messages du Worker, donc deux `readyReadStandardOutput`, et le second ne lit plus rien
+    (le premier a tout pris). Le script répondait deux fois à la même invite. QProcess peut faire de même sur le bureau :
+    un morceau vide n'est jamais une invite, c'est au lecteur de l'ignorer (une ligne). Écarté : fusionner les messages
+    dans `travailleur.py` (changerait le comportement de tout `ProcessusWeb` pour un cas que le bureau a aussi) ;
+  - **le protocole de la sonde n'admet qu'un geste à la fois** : la page a demandé « cliquer » (seconde invite) pendant
+    que la sonde finissait encore « taper » ; la sonde a ensuite posé `taper_fait` par-dessus, et chacun attendait
+    l'autre (blocage, délai de 600 s). Corrigé côté page : un geste n'est demandé que lorsque l'état est revenu à
+    « jalon3 », et une attente sur un geste dépassé s'abandonne. Écarté pour l'instant : un `_fait` posé par la sonde
+    seulement si l'état est encore le sien (compare-and-set dans `sonde.py` : plus robuste, mais c'est un fichier du
+    paquet, à proposer au Superviseur avec le hunk si un autre essai tombe dessus) ;
+  - **un chien de garde** dans la page : 20 s sans événement → diagnostic dans le journal (état, programme, réponses
+    restantes, fin de la sortie) et `etat = "erreur"`. Les deux blocages ci-dessus ont coûté un délai de 600 s chacun
+    avant lui, et c'est lui qui a nommé le second en une ligne.
+
+Ce que le jalon ne mesure pas : la mémoire du Worker (son tas est séparé de celui de la page) ; plusieurs exécutions à la
+suite (un seul Worker préchauffé) ; un REPL persistant ; la frappe directe dans la console sans programme en cours ; le
+ressenti à la main. Le démarrage à froid a été mesuré site déjà en cache du navigateur : au premier chargement il
+comprend le téléchargement de Pyodide-Qt.
+
 ## Conclusion en cinq lignes
 
 | | Verdict |
@@ -275,6 +348,11 @@ précédent dont la voie B copierait l'architecture noyau ; Binder : un vrai Spy
   Le correctif de `bloquant.py` : vérifié par les 116 erreurs qui disparaissent et par la suite de tests de qtpy6
   (`tests/`, lancée après le correctif) ; celui de la sonde : par les 3 Entrée retrouvées (Firefox ; la branche Chromium, `key="Enter"` par CDP, est
   écrite sans avoir été lancée, Chromium n'ouvrant pas dans le bac à sable). Aucun des deux n'a de test dédié.
+- Jalon 3 : **mesuré en direct**, quatre lancements de la page (deux bloqués par les défauts corrigés, un en
+  `NameError` d'instrumentation, un qui passe) et cinq du bureau, journaux `essais/spyder/sonde_jalon3.log` et
+  `jalon3_bureau.log`, captures relues (page et bureau identiques). Les durées de la page viennent d'UN lancement qui
+  passe, machine à charge 8 : ordres de grandeur. Les modules tirés par `ShellBaseWidget` : différence de `sys.modules`
+  sur le bureau, non refaite dans la page.
 - Disponibilité des roues Pyodide pour les extensions C : **non vérifiée** (aucune n'a été nécessaire au jalon 1).
 - Les durées sont des ordres de grandeur, pas des estimations fondées sur une mesure.
 
@@ -325,15 +403,18 @@ précédent dont la voie B copierait l'architecture noyau ; Binder : un vrai Spy
   le renommage, l'essai avec alias conservés plante (core dump) ; après, il passe en natif (capture) et dans Firefox
   (site reconstruit, sonde : 2,9 s, tas 86 Mio, capture relue, la page est identique). Le contournement générique
   n'est donc plus en service. Pourquoi PySide6 plante au lieu de lever n'a pas été cherché.
-- Jalons 1 et 2 atteints : les jalons suivants de la voie B, dans l'ordre où chacun peut faire échouer le projet seul :
-  3. l'exécution du code de l'élève (noyau dans un Web Worker par `qtpy6.web.travailleur`, ou dans le même
-     interpréteur) et la console ; 4. la complétion (jedi en direct, sans serveur de langage) ; 5. les fichiers (lire,
-     enregistrer, retrouver — stockage du navigateur ou téléchargement). Chacun : un `essais/spyder/jalonN.py`, mesuré par
-     la sonde, avant de toucher au fork.
+- Jalons 1, 2 et 3 atteints (le 3 : exécution dans un Worker par `ProcessusWeb`, pas dans le même interpréteur, qui fige
+  la page) : les jalons suivants de la voie B, dans l'ordre où chacun peut faire échouer le projet seul :
+  4. la complétion (jedi en direct, sans serveur de langage) ; 5. les fichiers (lire, enregistrer, retrouver — stockage
+  du navigateur ou téléchargement). Chacun : un `essais/spyder/jalonN.py`, mesuré par la sonde, avant de toucher au fork.
+  Dans le port lui-même : monter `max_line_count` de la console (300 lignes), garder un Worker de réserve
+  (`prechauffer()`) entre deux exécutions, et décider si un REPL persistant est voulu (voir le verdict du jalon 3).
+- La sonde (`web/sonde.py`) ne protège pas contre un geste demandé pendant qu'elle finit le précédent (jalon 3) : un
+  `_fait` posé par compare-and-set la rendrait sûre ; hunk à proposer au Superviseur si un autre essai y tombe.
 - La règle « un slot qui reçoit un QEvent s'exécute sur place » (`bloquant.py`) n'a pas de test unitaire dans
   `tests/test_web.py` ; seul l'essai jalon 2 la prouve (réserve du Superviseur, 09/10/2026 : à écrire sur le modèle du
   test des DeferredDelete de 50a2747).
-- Avant le jalon 3, un essai À LA MAIN de `essais/spyder/site/index.html?script=jalon2.py` dans le navigateur de
+- Un essai À LA MAIN de `essais/spyder/site/index.html?script=jalon2.py` (et `jalon3.py`) dans le navigateur de
   l'utilisateur (servi par `http.server`) : le ressenti de la frappe et du défilement n'est pas dans les chiffres.
 - Ce qu'un relecteur devrait regarder en premier : la condition ajoutée dans `qtpy6/web/bloquant.py` (`_relayer`,
   elle change le comportement de tout slot recevant un QEvent, pour toutes les applications), puis `essais/spyder/editeur.py` (les doublures et le bloc qui complète
