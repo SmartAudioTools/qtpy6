@@ -7,7 +7,7 @@ import time
 
 from qtpy6.QtCore import QAbstractAnimation, QEasingCurve, QEvent, QObject, QPropertyAnimation, Qt
 from qtpy6.QtGui import QInputDevice, QMouseEvent
-from qtpy6.QtWidgets import QApplication, QScroller, QWidget
+from qtpy6.QtWidgets import QApplication, QScroller, QScrollerProperties, QWidget
 
 from . import navigateur
 
@@ -106,7 +106,12 @@ class _Inertie(QObject):
     fois sur 12, QScroller seul compris : dans le navigateur, il laisse passer la souris que Qt tire du doigt). Mesuré
     au même profil : après le lâcher, 0 image sans mouvement au lieu de 33 à 48 %, pas d'avant et d'après du même ordre
     (20-30 px) ; écarté, ``QScrollerProperties.FrameRate`` à ``Fps60`` : encore 26 à 42 %, la minuterie restant décalée
-    des images."""
+    des images.
+
+    Pas de dépassement de la borne non plus, au doigt posé comme à la lancée (``OvershootAlwaysOff``) : la page tirée
+    au-delà du bas ou du haut déplace le viewport par-dessus ce qui le borde, et le canevas du navigateur n'y repeint
+    pas : l'en-tête gardait des morceaux de page (sonde Blink tactile, ``doigt`` avec ``avant_fin=150``, 4 fois sur 4,
+    09/10/2026 ; 0 sur 4 sans dépassement). Coût accepté : plus aucun rebond élastique au doigt dans le navigateur."""
 
     FENETRE = 0.1  # s
 
@@ -114,6 +119,11 @@ class _Inertie(QObject):
         super().__init__(zone)
         self.zone, self.courses, self.trace, self.avale = zone, [], [], False
         self.scroller = QScroller.scroller(zone.viewport())
+        proprietes = self.scroller.scrollerProperties()
+        for metrique in (QScrollerProperties.ScrollMetric.HorizontalOvershootPolicy,
+                         QScrollerProperties.ScrollMetric.VerticalOvershootPolicy):
+            proprietes.setScrollMetric(metrique, QScrollerProperties.OvershootPolicy.OvershootAlwaysOff)
+        self.scroller.setScrollerProperties(proprietes)
         self.scroller.stateChanged.connect(self._etat)
         for barre in self._barres():
             barre.valueChanged.connect(self._noter)
