@@ -259,11 +259,13 @@ précédent dont la voie B copierait l'architecture noyau ; Binder : un vrai Spy
   `DirView.clicked` (explorer.py l. 1062) redéfinit `QAbstractItemView.clicked` ; sans plantage, le signal n'y est jamais
   connecté par ce nom. Script : `$TMPDIR/conflits.py` de la session, non conservé (à refaire en une minute si besoin).
   **Fait (l'utilisateur, 21 h 51 : « renomme les trois méthodes dans le fork ») : les trois slots renommés `on_…` dans
-  le fork** (six lignes, aucune autre occurrence dans le dépôt, tests compris), et `editeur.py` ne retire plus les alias
-  par défaut : `retirer_alias_signaux` reste derrière `--retirer-alias`, pour mesurer l'un sans l'autre. Vérifié : avant
+  le fork** (six lignes, aucune autre occurrence dans le dépôt, tests compris), et `retirer_alias_signaux` est sorti de
+  `editeur.py` (l'utilisateur, 22 h 16 : « il y aurait toujours besoin de --retirer-alias ? » — non : aucun scénario réel
+  ne le déclenche plus, le relevé ci-dessus est exhaustif ; un greffon futur qui reprendrait l'habitude se corrige comme
+  ici, le mécanisme reste décrit dans ce point et dans `essais/alias_signal_slot.py`). Vérifié : avant
   le renommage, l'essai avec alias conservés plante (core dump) ; après, il passe en natif (capture) et dans Firefox
   (site reconstruit, sonde : 2,9 s, tas 86 Mio, capture relue, la page est identique). Le contournement générique
-  n'est donc plus en service ; il reste utile pour un autre greffon écrit avec la même habitude. Pourquoi PySide6 plante au lieu de lever n'a pas été cherché.
+  n'est donc plus en service. Pourquoi PySide6 plante au lieu de lever n'a pas été cherché.
 - Jalon 1 atteint : les jalons suivants de la voie B, dans l'ordre où chacun peut faire échouer le projet seul :
   2. la frappe et l'édition réelle dans la page (clavier, sélection, pliage, un fichier de 2 000 lignes) et la mémoire après
      usage ; 3. l'exécution du code de l'élève (noyau dans un Web Worker par `qtpy6.web.travailleur`, ou dans le même

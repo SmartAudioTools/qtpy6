@@ -82,31 +82,6 @@ from spyder.plugins.editor.widgets.codeeditor import CodeEditor  # noqa: E402
 etape("import CodeEditor")
 
 
-def retirer_alias_signaux():
-    """qtpy6 pose sur chaque classe PySide6 un alias snake_case de chaque méthode et signal (_binding._pyside6_class, une
-    fois par classe, mémorisé dans _prepared). Une classe fille qui définit une MÉTHODE du nom d'un alias de SIGNAL et la
-    connecte à ce signal fait planter PySide6 (segfault au premier setPlainText) : Spyder le fait dans
-    plugins/editor/widgets/base.py avec cursor_position_changed (bissection des 98 alias de QPlainTextEdit, repro en dix
-    lignes). Premier contournement (09/10/2026, 20 h) : retirer tous les alias de signaux - reconnaissables au même objet
-    Signal sous deux noms - après les imports de Spyder (toutes ses classes de base existent alors, mode paresseux de la
-    page compris) et avant le premier widget ; les alias de méthodes restent, une redéfinition les masque sans planter.
-    Depuis 22 h le fork est corrigé (trois slots renommés on_…, relevé dans la note) et ce retrait n'est plus appelé que
-    sur --retirer-alias, pour mesurer l'un sans l'autre."""
-    import qtpy6._binding
-    from qtpy.QtCore import Signal
-    retires = 0
-    for cls in list(qtpy6._binding._prepared):
-        membres = vars(cls)
-        camel = {id(v) for n, v in membres.items() if isinstance(v, Signal) and "_" not in n}
-        for n in [n for n, v in membres.items() if isinstance(v, Signal) and "_" in n and id(v) in camel]:
-            delattr(cls, n)
-            retires += 1
-    etape(f"{retires} alias de signaux retirés")
-
-
-if "--retirer-alias" in sys.argv:
-    retirer_alias_signaux()
-
 import qtpy6.web  # noqa: E402
 
 # La QApplication de qtpy6 : dans la page, elle charge les polices de app.zip (Qt n'en a aucune) ; en natif, rien de plus.
