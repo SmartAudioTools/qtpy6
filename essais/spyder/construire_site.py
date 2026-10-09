@@ -1,0 +1,72 @@
+"""Construit ``site/`` (index.html, app.zip, pyodide-qt en lien) pour editeur.py, puis le mesure avec la sonde :
+
+    $P construire_site.py            # construit
+    $P -m qtpy6.web.sonde site/index.html capture_web.png --racine site --delai 600
+
+Même mécanisme que ``python -m qtpy6.web.construire``, avec en plus : le fork Spyder et les roues pures sur sys.path (d'où
+``--paquet spyder`` prend le fork), les paquets purs que l'import de CodeEditor tire (relevé par audit de sys.modules sur le
+bureau), les dossiers de Spyder inutiles ici laissés dehors (MathJax de l'aide : 29 Mo, traductions : 6 Mo, tests : 4 Mo),
+les polices DejaVu, et deux mesures imprimées dans le journal de la page : durée totale et tas WebAssembly."""
+
+import os
+import sys
+from pathlib import Path
+
+sys.path[:0] = ["/DATA/Python/FORKS/SmartPythonEditor", "/DATA/Python/qtpy6/essais/roues/lib"]
+os.environ.setdefault("QT_API", "pyside6")
+os.environ.setdefault("SPYDER_QT_SKIP_VERSION_CHECK", "1")
+
+from qtpy6.web import assembler as _assembler, construire as _construire  # noqa: E402
+
+ICI = Path(__file__).resolve().parent
+SITE = ICI / "site"
+PYODIDE_QT = Path("/DATA/Python/qtpy6/exemple/pyodide-qt")
+PAQUETS = ("spyder qtpy IPython asttokens colorama decorator diff_match_patch executing intervaltree jedi packaging parso "
+           "prompt_toolkit pure_eval pygments qdarkstyle qtawesome qtconsole sortedcontainers spyder_kernels "
+           "stack_data superqt tinycss2 traitlets wcwidth webencodings").split()
+DISTRIBUTIONS = ["qstylizer", "ipython_pygments_lexers", "typing_extensions"]  # modules d'un seul fichier : --paquet prendrait site-packages
+EXCLURE = ["spyder/plugins/help/utils/js/", "spyder/locale/", "qtpy6/web/js/pdfjs/"]
+EXCLURE_TESTS = "/tests/"
+POLICES = [f"/usr/share/fonts/TTF/DejaVu{n}.ttf" for n in ("Sans", "Sans-Bold", "SansMono", "SansMono-Bold")]
+
+MESURE = ('  await rendu();\n'
+          '  print("durée totale : " + (performance.now() / 1000).toFixed(1) + " s ; tas wasm : "'
+          ' + (py._module.HEAPU8.length / 1048576).toFixed(0) + " Mio");\n')
+
+
+def assembler(archive, fichiers=(), **k):
+    """L'assembleur de qtpy6, avec les exclusions d'ici en plus (dont tout dossier tests/)."""
+    k["exclure"] = [*k.get("exclure", ()), *EXCLURE]
+    original = _assembler.zipfile.ZipFile
+
+    class Zip(original):
+        def write(self, chemin, nom=None, *a, **kk):
+            if nom and EXCLURE_TESTS in f"/{nom}":
+                return
+            super().write(chemin, nom, *a, **kk)
+
+    compile_original = _assembler.py_compile.compile
+
+    def compile_(chemin, cfile, dfile, *a, **kk):  # un test écrit en syntaxe fausse exprès ne se compile pas
+        if EXCLURE_TESTS not in f"/{dfile}":
+            compile_original(chemin, cfile, dfile, *a, **kk)
+
+    _assembler.zipfile.ZipFile, _assembler.py_compile.compile = Zip, compile_
+    try:
+        return _assembler.assembler(archive, fichiers, **k)
+    finally:
+        _assembler.zipfile.ZipFile, _assembler.py_compile.compile = original, compile_original
+
+
+_construire.assembler = assembler
+SITE.mkdir(exist_ok=True)
+lien = SITE / "pyodide-qt"
+if not lien.exists():
+    lien.symlink_to(PYODIDE_QT)
+taille = _construire.construire(ICI / "editeur.py", SITE, "./pyodide-qt/", PAQUETS, DISTRIBUTIONS, POLICES, (),
+                                "CodeEditor de Spyder dans qtpy6")
+page = SITE / "index.html"
+texte = page.read_text(encoding="utf-8")
+assert texte.count("  await rendu();\n") == 1
+page.write_text(texte.replace("  await rendu();\n", MESURE), encoding="utf-8")
+print(f"site/app.zip : {taille // 1024} Kio")

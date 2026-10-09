@@ -1,0 +1,276 @@
+# Porter SmartPythonEditor (Spyder 6.1.5) dans le navigateur par `qtpy6.web` : étude de faisabilité
+
+Note du 09/10/2026. C'est une ÉTUDE : rien n'a été écrit, rien n'a été construit, rien n'a tourné dans un navigateur.
+Tout vient de la lecture des deux dépôts ce jour-là (`/DATA/Python/FORKS/SmartPythonEditor`, fork de Spyder 6.1.5 ;
+`/DATA/Python/qtpy6`, `web.md` et `wasm/`) ; le relevé chiffré sur Spyder a été fait par un sous-agent (grep), les
+points qui tranchent ont été relus à la main. Le niveau de preuve est donné section par section.
+
+## La demande, citée
+
+« pourrais-tu evaluer la faisabilité de porter SmartPythonEditor sur qtpy6 avec le backend web ? »
+
+## Décision de l'utilisateur (09/10/2026, 20 h 24)
+
+« je veux un vrai éditeur dans le navigateur, pas juste étendre le lecteur de SmartTeacher » : la voie C est écartée
+par l'utilisateur, la voie B (Spyder allégé, transport réécrit) est la cible. Premier jalon lancé le soir même : le
+`CodeEditor` de Spyder (coloration, pliage, numéros, `lsp_mixin`) dans une page `qtpy6.web`, chargé et mesuré par la
+sonde (`essais/spyder/`, hors dépôt tant que ce n'est pas concluant). Les dépendances pures manquantes de SmartPython
+(qtawesome, qdarkstyle, qstylizer, qtconsole, superqt, pyuca, intervaltree, diff-match-patch, textdistance) sont
+téléchargées par l'utilisateur dans `essais/roues/` : le venv Spyder 3.13.15 est illisible depuis le bac à sable.
+
+### Résultat du jalon 1 (09/10/2026, 20 h 47) : le `CodeEditor` de Spyder tourne dans le navigateur
+
+Mesuré avec `essais/spyder/` (`editeur.py` : le script, le même sur le bureau et dans la page ; `construire_site.py` : le
+site), par la sonde de qtpy6 (Firefox 155 sans interface, page et Pyodide-Qt servis en local, donc **sans le coût du
+réseau** : 25 Mo d'archive plus Pyodide-Qt à télécharger sur un vrai hébergement). Capture vérifiée (`capture_web.png`) :
+thème sombre, numéros de ligne, coloration Python, ligne de marge, surlignage de la ligne courante — le même rendu que sur
+le bureau (`capture_bureau.png`).
+
+| Mesure | Navigateur | Bureau (SmartPython 3.13, offscreen) |
+|---|---|---|
+| Pyodide-Qt chargé | 0,55 s | — |
+| archive dépaquetée, Python lancé | 1,78 s | — |
+| `import CodeEditor` | 0,73 s | 0,54 s |
+| `CodeEditor` créé, fenêtre montrée (depuis le début du script) | 0,84 s | 0,86 s |
+| durée totale, de la page au premier rendu | **2,7 s** | 1,4 s avec la capture |
+| tas WebAssembly après le rendu | **86 Mio** (104 à un essai précédent, même site) | — |
+| archive `app.zip` | 25 Mo compressés, 70 Mo dépaquetés, 9 584 fichiers | — |
+
+Ce que pèse l'archive : Spyder 14 Mo (sans `plugins/help/utils/js/`, MathJax, 28 Mo, ni `locale/`, 6 Mo, ni les
+`tests/`), jedi 14,6 Mo, pygments 8 Mo, qtawesome 6 Mo (polices d'icônes), wcwidth 4 Mo, IPython 4 Mo, prompt_toolkit 3 Mo,
+qtpy6 2,6 Mo, qdarkstyle 2,6 Mo, polices DejaVu 2 Mo. Les `.pyc` sont compilés à l'assemblage (Python 3.13 des deux côtés).
+
+Ce qu'il a fallu pour y arriver, et qui mesure l'écart entre Spyder et le navigateur à ce stade :
+  - **neuf doublures** de modules absents, toutes minimales (`editeur.py`) : psutil, pickleshare, three_merge, jellyfish,
+    bcrypt, keyring et keyring.errors, inflection (celle-ci avec de vrais `underscore`/`camelize`, qstylizer s'en sert) ;
+  - **les classes que Qt-WASM n'a pas, posées sur PySide6** : qtpy (celui de Spyder) lit `QThread`, `QMutex`… dans
+    `PySide6.QtCore` ; qtpy6 les double, mais dans ses propres espaces de noms. Le script recopie sur chaque module PySide6
+    les classes `Q…` de qtpy6 qui y manquent, avant d'importer qtpy (dans la page seulement) ;
+  - `spyder/locale/` créé vide (Spyder ne fait que le lister) ; qstylizer en `--distribution` (il relit sa version par
+    `importlib.metadata`) ; les `tests/` exclus de l'archive (un cas de test contient une `SyntaxError` voulue, qui
+    fait échouer la compilation des `.pyc`) ;
+  - **une incompatibilité réelle entre qtpy6 et Spyder, trouvée sur le bureau** : voir « Points ouverts ».
+
+Ce que le jalon ne mesure pas : la frappe (aucune touche envoyée), la complétion et le LSP (`lsp_mixin` importé, jamais
+connecté), le pliage sur un vrai fichier long, la mémoire après une heure d'édition, le chargement sur un réseau réel.
+
+## Conclusion en cinq lignes
+
+| | Verdict |
+|---|---|
+| Spyder entier dans le navigateur | **pas tel quel, mais rien n'y est indispensable** (objection de l'utilisateur, voir « Ce qui est indispensable » ci-dessous) : ZMQ, les processus, les fils réels, psutil, git, conda sont des MÉCANISMES, chacun remplaçable ou désactivable ; ce qui est indispensable, c'est un noyau qui exécute et le protocole Jupyter que parlent les widgets de console, et ces deux-là passent dans un Worker (précédent JupyterLite). Le vrai inconnu est la mémoire et le chargement de ~220 000 lignes |
+| Un « Spyder allégé » : Spyder avec ses plugins poste désactivés, une console sur Web Worker | **possible mais lourd**, et c'est la voie réelle : plusieurs semaines, qui réécrivent la couche transport (noyau et LSP) sans toucher au protocole, et qui doivent d'abord prouver que la mémoire tient |
+| Ce que vise sans doute la demande, un éditeur Python exécutable dans le navigateur pour les élèves | **déjà là** : `editeur_code.py` + `console_code.py` + `console_enfant.py` du lecteur SmartTeacher (1 770 lignes) tournent dans le navigateur depuis septembre ; les étendre coûte des jours, pas des semaines |
+| Ce qu'un essai devrait mesurer en premier, si la voie « Spyder allégé » est retenue | la mémoire et le temps de chargement d'un `import spyder` nu sous Pyodide-Qt, avant d'écrire une ligne |
+| La question « sur qtpy6 » | n'est pas l'obstacle : Spyder accepte déjà PySide6 et c'est l'API que qtpy6 expose ; une ligne d'alias (`qtpy.QtCore` → `qtpy6.QtCore`) suffirait sur le papier pour que Spyder reçoive les doublures du navigateur |
+
+## Ce qui a été relevé
+
+### Ce que le navigateur offre (qtpy6, `web.md`, vérifié par lecture)
+
+- Pyodide-Qt lie **QtCore, QtGui, QtWidgets, QtSvg, QtSvgWidgets** et rien d'autre (`wasm/construire.sh`, l. 172 et
+  207) : ni QtNetwork, ni QtPrintSupport, ni QtWebEngine, ni QtTest, ni QtQuick. PySide6 6.10.2, Python 3.13, un seul
+  fil, pas de `SharedArrayBuffer`.
+- qtpy6 double, dans le navigateur seulement : `QProcess` (un Web Worker Pyodide, Python seulement), `subprocess.run`,
+  les `exec()` bloquants (dans un slot, jamais dans une méthode virtuelle), `QThread`/verrous/`time.sleep` en fils
+  coopératifs, `QFileDialog` par le navigateur, le stockage (localStorage, IndexedDB). **Pas doublés** :
+  `threading.Thread`, `multiprocessing`, les sockets, tout exécutable qui n'est pas un script Python.
+- Les roues se chargent par URL seulement (lock vide : ni `loadPackage`, ni micropip) ; une extension C doit exister pour
+  l'ABI `cp313-pyemscripten_2025_0_wasm32`.
+- Coût mesuré sur une application de 2 000 lignes : +360 Mio de mémoire, 32 Mio de wasm à télécharger (9,9 en gzip).
+
+### Ce que Spyder est (relevé du 09/10/2026, sous-agent, chiffres exacts)
+
+- 814 fichiers `.py`, ~222 000 lignes sous `spyder/` (plugins 159 000, api 13 400, utils 13 400, widgets 17 700,
+  app 12 200), 35 plugins.
+- Liaisons acceptées (`spyder/requirements.py`) : PyQt5, PySide2, PyQt6 6.9+, **PySide6 6.8 à 6.9** ; le fork SmartOS
+  ajoute `SPYDER_QT_SKIP_VERSION_CHECK=1` qui lève la plage, donc la 6.10.2 de Pyodide-Qt passe. Défaut du fork :
+  `pyside6`.
+- Modules Qt importés (occurrences) : QtCore 300, QtWidgets 262, QtGui 155, **QtWebEngineWidgets 11** (5 fichiers hors
+  tests, tous derrière un drapeau `WEBENGINE` avec repli `QTextBrowser` : aide, aide en ligne, navigateur), **QtPrintSupport
+  3** (`widgets/printer.py`, `editor/widgets/main_widget.py`, `ipythonconsole/widgets/main_widget.py` : imports nus, sans
+  repli — à doubler par un module vide dans qtpy6 ou à patcher), QtSvg 2 (lié), QtTest 1, QtQuick 1 (non lié ; usage non
+  vérifié).
+- Fils : QThread dans 25 fichiers (doublé, coopératif : un `run()` qui ne cède jamais fige la page), `threading.Thread`
+  dans 8 (non doublé : transport LSP, interpréteur de la console interne, `utils/programs.py`, pydoc), asyncio 14,
+  `concurrent.futures` 3, multiprocessing 1.
+- Sous-processus : Python (pylint, pylsp, transport LSP, cookiecutter, relance) — transposables sur le Worker ; **git,
+  hg, xdg-open, conda, pixi** (`utils/vcs.py`, `explorer/widgets/utils.py`, `kernelspec.py`) — impossibles, à désactiver.
+- Réseau : **pyzmq dans 8 fichiers, jupyter_client dans 7, tornado 3, websocket 4, requests 5**. Aucun QTcpSocket.
+- Extensions C déclarées (versions figées du fork) : **pyzmq, psutil (9 fichiers, dont `app/utils.py` au démarrage),
+  watchdog, rtree, jellyfish, bcrypt, aiohttp, yarl**. Transitives : tornado, ujson (python-lsp-jsonrpc). Aucune roue
+  Pyodide n'a été cherchée pour elles ce jour (non vérifié) ; pyzmq et psutil n'ont par nature pas d'équivalent dans un
+  navigateur.
+- Autres entrées système : keyring (8 fichiers), presse-papiers (17), `QDesktopServices.openUrl` (4), watchdog
+  (projets).
+
+### Ce qui est indispensable, et ce qui ne l'est pas (objection de l'utilisateur, 09/10/2026)
+
+« tout cela est indispensable à SmartPythonEditor ? » — non, et le premier jet de cette note le laissait croire en
+listant des mécanismes comme s'ils étaient le besoin. Repris point par point, vérifié dans les sources du fork :
+
+| Mécanisme cité | Indispensable ? | Ce qui l'est, et ce qui le remplace |
+|---|---|---|
+| ZMQ + processus noyau (`jupyter_client`, `SpyderKernelManager`) | non | un **noyau qui exécute** et le **protocole Jupyter** (messages `execute_request`, `comm_msg`… en dicts Python, `jupyter_client.session`, pur Python) sont indispensables : c'est ce que parlent `qtconsole` et `KernelComm`. Seuls les sockets ZMQ sont à remplacer par un pont vers `ProcessusWeb`. Précédent : JupyterLite ne fait pas tourner ipykernel, il en garde une maquette (« an ipykernel mock that provides utility classes (like Comms) ») et un petit noyau (`run`, `complete`, `inspect`, `is_complete`) dans le Worker, le protocole étant joué côté client |
+| pylsp en TCP relayé par ZMQ (`transport/main.py`) | non | la complétion est indispensable, pas son transport : Spyder a un mode stdio (`advanced/stdio`), qui colle au stdin/stdout de `ProcessusWeb`, et un fournisseur de repli dans le processus (`completion/providers/fallback`) qui marche sans serveur |
+| psutil | non | 3 usages : `cpu_percent` de la barre d'état, `pid_exists` au démarrage (`app/utils.py`), `virtual_memory` ; un module de doublure de dix lignes suffit |
+| watchdog, keyring, pyzmq | non | watchdog : surveillance des projets, à désactiver ; keyring : jetons distants, à désactiver ; pyzmq : voir ligne 1 |
+| `threading.Thread` (8 fichiers) | non | transport LSP (remplacé), interpréteur de la console interne (plugin désactivable), `utils/programs.py` (lancement de programmes externes, sans objet), pydoc (aide en ligne, désactivable) |
+| git, hg, conda, pixi en sous-processus | non | `vcs`, `explorer`, `kernelspec` : optionnels, détectés à l'exécution ; chaque plugin a sa clé `enable` (`config/main.py`), et `--safe-mode` / `--no-web-widgets` existent (`app/cli_options.py`) |
+
+Reste indispensable, donc : le noyau et le protocole Jupyter (dans le Worker), la complétion (stdio ou repli), et la
+mémoire pour charger le tout. Le verdict « non » du premier jet est corrigé en « pas tel quel » dans la conclusion.
+
+### Les trois chantiers qui ne sont pas Qt (vérifié par lecture des fichiers nommés)
+
+1. **La console IPython.** `SpyderKernelManager(QtKernelManager)` lance un processus noyau (`spyder_kernels` sur
+   `ipykernel`) et lui parle par sockets ZMQ via `jupyter_client` et un fichier de connexion ; `KernelHandler` tient
+   des threads sur les pipes du noyau ; `KernelComm` double le canal Jupyter. Rien de cela n'existe dans un navigateur.
+   Le modèle qui marche ailleurs est celui de JupyterLite : un noyau Pyodide dans un Web Worker, un `ipykernel` de
+   substitution sans ZMQ, un client qui parle au Worker par messages. Pour Spyder il faudrait écrire un `KernelClient`
+   et un `KernelManager` sur `ProcessusWeb`, et porter `spyder_kernels` sur ce substitut. C'est le gros du travail.
+2. **Le serveur de langage.** `pylsp` est lancé en TCP (`--host --port --tcp`) et relié par un second processus
+   (`transport/main.py`) qui relaie entre ZMQ PAIR et TCP. Un mode stdio existe (`advanced/stdio`, `pexpect`), qui
+   collerait au stdin/stdout de `ProcessusWeb`, mais le relais ZMQ reste entre les deux : à réécrire. Bonne nouvelle :
+   pylsp et ses extras sont du Python pur, hormis `ujson` (à vérifier sur Pyodide).
+3. **Ce qui est fait pour un poste** : psutil au démarrage, keyring, watchdog, git/hg, conda, les mises à jour, les
+   projets distants (`remoteclient`, asyncssh, aiohttp). À retirer ou à mettre derrière `qtpy6.web.navigateur()`.
+
+### Les treize greffons de SmartPythonEditor (`/DATA/Python/FORKS/SmartPythonEditorPlugins/`, relevé du 09/10/2026)
+
+Oubliés du premier jet (question de l'utilisateur : « et tous mes plugins ajoutés à Spyder pour faire SmartPythonEditor ? »).
+Relevé par grep des imports et des lancements de processus, hors tests ; le rôle vient de la `description` de chaque
+`pyproject.toml`. Lignes de code entre parenthèses.
+
+| Greffon | Verdict navigateur | Pourquoi |
+|---|---|---|
+| spyder_claude (6 900) | sans objet | docks des instances Claude Code du poste (`claude-window.sh`, panneaux Konsole) |
+| spyder_konsole (2 440) | impossible | QTermWidget, un terminal : pas de pty dans un navigateur |
+| spyder_tortoisehg (126 000, TortoiseHg embarqué) | impossible | `mercurial` (extensions C), QtNetwork, `subprocess`, `threading`, `socket` |
+| spyder_window_controls (1 700) | sans objet | boutons de la fenêtre sans barre de titre, `subprocess` |
+| spyder_interpreter_toolbar (640) | sans objet | choix de l'interpréteur : il n'y en a qu'un, Pyodide |
+| spyder_viztracer (2 500) | improbable | `viztracer` (extension C, pas de roue Pyodide connue), `socket`, QtWebEngine pour Perfetto |
+| spyder_line_profiler (12 900) | lourd | `line_profiler` (Cython) à construire pour l'ABI wasm, 5 fichiers de sous-processus → Worker |
+| spyder_python_tutor (6 400) | à réécrire | QtWebEngineWidgets/Core (non liés) : le tracé est Python, l'affichage devrait passer par un onglet du navigateur ou un widget Qt |
+| spyder_collab (5 200) | transport à réécrire | CRDT pur Python a priori, mais `network.py` sur QtNetwork (non lié) : WebSocket/WebRTC par JS |
+| spyder_code_analysis (910) | possible | pylint/astroid purs, lancés en sous-processus → `ProcessusWeb` |
+| spyder_pyxel (7 300) | remplacé | `pyxel` natif (SDL) ; le lecteur SmartTeacher a déjà `pyxel_studio.py` dans le navigateur |
+| spyder_smartteacher (840) | possible, et déjà fait ailleurs | sujet de TP, aide, indices, soumission, note : c'est ce que le lecteur SmartTeacher fait nativement ; 1 `subprocess` |
+| spyder_stop_toolbar (550) | possible | un bouton, aucune dépendance |
+
+Lecture : cinq greffons sur treize sont des greffons de POSTE (Claude, terminal, Mercurial, fenêtre, interpréteur) et
+n'ont pas de sens dans un navigateur ; trois tiennent à une extension C ou à QtWebEngine (viztracer, line_profiler,
+python_tutor) ; les cinq qui concernent l'élève (analyse, pyxel, smartteacher, stop, collab hors transport) sont
+portables, et deux ont déjà leur équivalent dans le lecteur web. Un SmartPythonEditor dans le navigateur ne serait donc
+pas SmartPythonEditor : ce serait Spyder allégé + ces cinq-là. Cela renforce la voie C (étendre le lecteur) pour
+l'usage élève, et confine la voie B au cas où c'est l'éditeur de Spyder lui-même (coloration, complétion LSP,
+explorateur de variables) qu'on veut dans la page.
+
+### Le reste, sans doute surmontable mais à auditer
+
+- `exec()` dans une méthode virtuelle (`contextMenuEvent` → `menu.exec()`) ne bloque pas dans le navigateur : Spyder en a
+  beaucoup, chacun à passer en `popup` ou en `QTimer.singleShot(0, …)`. Non compté.
+- Qt-WASM n'expose pas de lecteur d'écran, ni la sélection/recherche du navigateur dans la fenêtre Qt.
+- Polices : Spyder embarque les siennes (qtawesome, fonts/), à déclarer à `application(polices=…)`.
+- Les 89 fichiers `.py` modifiés par le fork (+5 268 / −275 : scénarios `--actions`, trace de démarrage, support de
+  distribution) sont orthogonaux au portage ; ils ne l'aident ni ne le gênent.
+
+## Les voies, et ce qu'elles coûtent (estimations, rien n'est mesuré)
+
+**A. Spyder entier, tel quel.** Écartée comme TEL QUEL seulement (la couche transport doit être réécrite, voie B) ; ce qui reste contre elle est la taille
+(222 000 lignes + IPython, jedi, parso, pygments, sphinx, pylint, nbconvert…) fait craindre bien plus que les 360 Mio
+mesurés pour 2 000 lignes ; un poste d'élève ou une classe de 30 à froid n'y résistent probablement pas. Spyder lui-même
+n'a pas de port WebAssembly : son « Try Spyder online » est un bureau distant (Binder, noVNC), pas une page.
+
+**B. Un Spyder allégé — la voie réelle.** Garder `app`, `api`, `plugins/editor` (avec `lsp_mixin`), `outlineexplorer`, `plots`,
+`variableexplorer`, désactiver par `enable` les plugins poste (vcs, explorer distant, mises à jour, remoteclient, console
+interne), et réécrire : un client noyau sur `ProcessusWeb` + un `spyder_kernels` sans ZMQ (obstacle 1), le
+transport LSP en stdio sans relais (obstacle 2), des doublures vides pour QtPrintSupport, keyring, psutil, watchdog
+(obstacle 3), puis l'audit des `exec()` et des `threading.Thread`. Ordre de grandeur : plusieurs semaines, et le premier
+jalon n'est pas une fenêtre, c'est la mesure d'un `import spyder.app.mainwindow` nu sous Pyodide-Qt (mémoire, durée) —
+si elle dépasse ce qu'un poste d'élève tolère, le reste est sans objet. À lancer sur `exemple/` de qtpy6, avec les roues
+pures de Spyder dans l'archive.
+
+**C. Étendre l'éditeur du lecteur SmartTeacher.** `editeur_code.py` (QPlainTextEdit, indentation, couleurs
+donné/élève, numéros de ligne), `console_code.py` et `console_enfant.py` (un interpréteur dans un `QProcess` → Web Worker,
+variables conservées entre deux commandes, reprise d'état) tournent déjà dans le navigateur, et sont écrits en qtpy6. Ce
+qui manque par rapport à un éditeur : plusieurs fichiers, coloration syntaxique complète (pygments est en Python pur),
+complétion (jedi, pur, dans le Worker), un débogueur (pdb dans le Worker, par stdin). Chaque brique est un item de
+quelques jours ; aucune ne dépend de ZMQ ni d'un processus.
+
+**D. Hors qtpy6, pour mémoire.** JupyterLite (notebook Pyodide dans le navigateur, noyau en Worker) : c'est le
+précédent dont la voie B copierait l'architecture noyau ; Binder : un vrai Spyder, mais sur un serveur distant.
+
+## Niveau de preuve
+
+- Modules liés dans Pyodide-Qt, doublures de qtpy6, coûts mesurés : lus dans `wasm/construire.sh` et `web.md`.
+- Précédent JupyterLite : lu en ligne le 09/10/2026 (`pyodide-kernel`, README du paquet `ipykernel` maquette et `kernel.py` :
+  `PyodideKernel` hérite de `LoggingConfigurable`, pas d'ipykernel ; aucun ZMQ, le transport est côté JS).
+- Mode stdio du LSP, fournisseur de repli, usages de psutil, clés `enable`, `--safe-mode` : relus dans les sources du fork.
+- Greffons : imports et sous-processus relevés par grep, rôles lus dans les `pyproject.toml` ; aucun n'a été lancé ni lu en
+  entier (l'existence d'une roue Pyodide pour viztracer et line_profiler n'a pas été cherchée).
+- Chiffres sur Spyder : grep d'un sous-agent, non recomptés sauf QtWebEngine (drapeau `WEBENGINE` et repli relus dans
+  `widgets/browser.py`, `plugins/help/widgets.py`) et QtPrintSupport (les trois imports relus).
+- Jalon 1 : **mesuré en direct** (sonde, journal `essais/spyder/sonde.log`, captures relues), deux fois sur le même site
+  (86 et 104 Mio de tas : la mesure varie d'un lancement à l'autre, à ne pas lire au Mio près). Le bureau : mesuré en
+  offscreen, capture relue. L'incompatibilité d'alias : bissection automatique des 98 alias de `QPlainTextEdit`, puis
+  reproduction en dix lignes sans Spyder (plante avec `import qtpy6`, passe sans), puis l'essai complet qui passe une
+  fois l'alias retiré.
+- Disponibilité des roues Pyodide pour les extensions C : **non vérifiée** (aucune n'a été nécessaire au jalon 1).
+- Les durées sont des ordres de grandeur, pas des estimations fondées sur une mesure.
+
+## Points ouverts
+
+- **Un défaut de qtpy6, pas une particularité de Spyder** (question de l'utilisateur, 21 h 16 : « pour un vrai programme en
+  qtpy6 qui veut respecter PEP 8 on aurait des conflits de nom entre des signaux et des slots ? » — oui, reproduit :
+  `essais/alias_signal_slot.py`, un QLineEdit ordinaire dont le slot s'appelle `text_changed`, plante avec `import qtpy6`,
+  passe sans ; c'est le test qui échoue tant que qtpy6 n'est pas corrigé). Mesuré le même soir : aucun code de
+  SmartTeacher ni de qtpy6 n'appelle un alias de signal, ni d'ailleurs un alias de méthode (grep des 237 noms posés) ;
+  cesser d'aliasser les signaux ne casserait donc rien d'existant. Le mécanisme : qtpy6 pose sur chaque classe PySide6 un
+  alias snake_case de chaque méthode et signal (`_binding._pyside6_class`), dont `cursor_position_changed` pour le signal
+  `cursorPositionChanged` de `QPlainTextEdit`. Spyder (`plugins/editor/widgets/base.py`, l. 76 et 425) définit une
+  MÉTHODE de ce nom et la connecte à ce signal : PySide6 plante alors au premier `setPlainText` (segfault, pas
+  d'exception). **Retenu à 20 h (l'utilisateur, « le plus propre sans toucher à qtpy6 »), puis remplacé à 22 h par le renommage
+  dans le fork (voir plus bas) : l'essai retirait, après les imports de Spyder et avant le premier widget, TOUS les alias
+  de signaux** (`retirer_alias_signaux` dans `editeur.py` :
+  même objet `Signal` sous deux noms dans `vars(cls)`, sur les classes que qtpy6 a préparées, `_binding._prepared`) —
+  309 sur le bureau, 423 dans la page ; les alias de méthodes restent, une redéfinition les masque sans planter. Écartés :
+  retirer le seul `cursor_position_changed` (premier jet : juste, mais à refaire à chaque greffon dont une méthode porte
+  le nom d'un signal) ; renommer la méthode du fork (deux lignes, même défaut) ; que qtpy6 cesse d'aliasser les signaux
+  (le plus propre, mais touche qtpy6 en service : à décider à part). **PySide6 a-t-il le même problème ? (question de
+  l'utilisateur, 09/10/2026)** Le mécanisme, oui : `essais/alias_signal_pyside6.py`, PySide6 seul, un `Signal` sous un second
+  nom de classe (`alias = changed`), masqué par une méthode `alias` du sous-type, connecté → core dump (mesuré). En
+  pratique, non : son `from __feature__ import snake_case` renomme les méthodes à l'accès (`set_text` marche, `setText`
+  disparaît) mais ne pose aucun nom pour les signaux (ils restent en camelCase : pas PEP 8 pour eux, mesuré) (`text_changed` n'existe ni sur la classe ni sur l'instance, `textChanged` reste) ;
+  un slot `text_changed` connecté à `textChanged` passe (mesuré). Un slot nommé EXACTEMENT comme le signal plante aussi en 100 % camelCase (`def textChanged` dans un
+  sous-type de QLineEdit, connecté : core dump, mesuré) — mais la collision saute alors aux yeux de l'auteur, et deux
+  conventions distinctes (signaux camelCase, slots PEP 8) la rendent impossible. Le défaut est donc propre à qtpy6 :
+  en posant un nom snake_case sur chaque signal, il réunit les deux espaces de noms, et un slot PEP 8 écrit sans
+  jamais voir de signal de ce nom le masque à l'insu de l'auteur. Un programme écrit POUR qtpy6, 100 % snake_case,
+  n'est pas plus exposé qu'en camelCase (l'utilisateur, 09/10/2026) : son auteur voit `cursor_position_changed` comme
+  un signal et ne nomme pas son slot ainsi — à ceci près que ce nom n'est dans aucune doc Qt. Seul le code écrit pour
+  Qt camelCase avec des slots PEP 8 (Spyder) tombe dedans. **Combien de méthodes de Spyder à renommer pour suivre la
+  convention `on_…` / verbe (question de l'utilisateur, 09/10/2026) : trois**, relevé par AST sur tout le fork (hors
+  tests) croisé avec les signaux de QtCore/QtGui/QtWidgets de PySide6, puis filtré à la main par héritage et connexion :
+  `TextEditBaseWidget.cursor_position_changed` (base.py), `ArrayTable.cell_changed` (widgets/arraybuilder.py l. 143/156),
+  `ProfilerDataTree.item_expanded` (plugins/profiler/widgets/profiler_data_tree.py l. 551/868) — chacune connectée au
+  signal homonyme du widget dont elle hérite. 32 méthodes portent le nom snake_case d'un signal Qt, mais 29 sont dans des
+  classes qui n'héritent pas de ce signal (sans effet). Et Spyder masque déjà un signal en camelCase pur :
+  `DirView.clicked` (explorer.py l. 1062) redéfinit `QAbstractItemView.clicked` ; sans plantage, le signal n'y est jamais
+  connecté par ce nom. Script : `$TMPDIR/conflits.py` de la session, non conservé (à refaire en une minute si besoin).
+  **Fait (l'utilisateur, 21 h 51 : « renomme les trois méthodes dans le fork ») : les trois slots renommés `on_…` dans
+  le fork** (six lignes, aucune autre occurrence dans le dépôt, tests compris), et `editeur.py` ne retire plus les alias
+  par défaut : `retirer_alias_signaux` reste derrière `--retirer-alias`, pour mesurer l'un sans l'autre. Vérifié : avant
+  le renommage, l'essai avec alias conservés plante (core dump) ; après, il passe en natif (capture) et dans Firefox
+  (site reconstruit, sonde : 2,9 s, tas 86 Mio, capture relue, la page est identique). Le contournement générique
+  n'est donc plus en service ; il reste utile pour un autre greffon écrit avec la même habitude. Pourquoi PySide6 plante au lieu de lever n'a pas été cherché.
+- Jalon 1 atteint : les jalons suivants de la voie B, dans l'ordre où chacun peut faire échouer le projet seul :
+  2. la frappe et l'édition réelle dans la page (clavier, sélection, pliage, un fichier de 2 000 lignes) et la mémoire après
+     usage ; 3. l'exécution du code de l'élève (noyau dans un Web Worker par `qtpy6.web.travailleur`, ou dans le même
+     interpréteur) et la console ; 4. la complétion (jedi en direct, sans serveur de langage) ; 5. les fichiers (lire,
+     enregistrer, retrouver — stockage du navigateur ou téléchargement). Chacun : un `essais/spyder/jalonN.py`, mesuré par
+     la sonde, avant de toucher au fork.
+- Ce qu'un relecteur devrait regarder en premier : `essais/spyder/editeur.py` (les doublures et le bloc qui complète
+  PySide6 — ce sont les deux listes qui diront ce que la voie B coûte vraiment), puis la capture web.
+- Si c'est la voie C : lister ce que l'utilisateur attend d'un « éditeur » pour les élèves (fichiers multiples ?
+  débogueur ? complétion ?) ; chaque brique est un item de TODO du lecteur web.
