@@ -135,16 +135,23 @@ def cliquer(navigateur):
 
 
 def taper(navigateur):
-    """``window.texte`` tapé au vrai clavier, touche par touche, là où le navigateur a le focus."""
+    """``window.texte`` tapé au vrai clavier, touche par touche, là où le navigateur a le focus ; ``"\\n"`` est la touche
+    Entrée (envoyé tel quel, le navigateur ferait un KeyboardEvent de touche ``"\\n"``, que Qt rend en Key 0xa au lieu de
+    Key_Return : Spyder n'y voit pas une Entrée, et QPlainTextEdit n'insère pas ce caractère non imprimable)."""
     texte = navigateur.execute_script("return window.texte")
     if isinstance(navigateur, Blink):
         for c in texte:
-            navigateur.cdp("Input.dispatchKeyEvent", type="keyDown", key=c, text=c)
-            navigateur.cdp("Input.dispatchKeyEvent", type="keyUp", key=c)
+            if c == "\n":
+                navigateur.cdp("Input.dispatchKeyEvent", type="keyDown", key="Enter", code="Enter", windowsVirtualKeyCode=13, text="\r")
+                navigateur.cdp("Input.dispatchKeyEvent", type="keyUp", key="Enter", code="Enter", windowsVirtualKeyCode=13)
+            else:
+                navigateur.cdp("Input.dispatchKeyEvent", type="keyDown", key=c, text=c)
+                navigateur.cdp("Input.dispatchKeyEvent", type="keyUp", key=c)
     else:
         from selenium.webdriver.common.action_chains import ActionChains  # noqa: PLC0415
+        from selenium.webdriver.common.keys import Keys  # noqa: PLC0415
 
-        ActionChains(navigateur).send_keys(texte).perform()
+        ActionChains(navigateur).send_keys(texte.replace("\n", Keys.ENTER)).perform()
     repeint(navigateur)
 
 

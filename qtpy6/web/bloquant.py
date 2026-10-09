@@ -245,7 +245,7 @@ def doubler_qtcore(ns):
     """Pose les doublures dans l'espace de noms de ``qtpy6.QtCore`` (la liaison ; ses noms PySide6 y sont déjà)."""
     import weakref  # noqa: PLC0415
 
-    QObject, QCoreApplication, QEventLoop = ns["QObject"], ns["QCoreApplication"], ns["QEventLoop"]
+    QObject, QCoreApplication, QEventLoop, QEvent = ns["QObject"], ns["QCoreApplication"], ns["QEventLoop"], ns["QEvent"]
     signal_lie = ns["SignalInstance"]
     connect, disconnect, sender = signal_lie.connect, signal_lie.disconnect, QObject.sender
     mort = _mort()
@@ -321,7 +321,10 @@ def doubler_qtcore(ns):
         return RelaisFonction(slot, direct)
 
     def _relayer(r, args, exp):
-        if r.direct or _peut_suspendre():
+        # Un QEvent passé en argument (Spyder : sig_key_pressed.emit(event) dans keyPressEvent) ne vit que le temps du
+        # dispatch, et l'émetteur lit son accept() juste après l'emit : reporté, le slot lirait un objet C++ détruit et
+        # son accept() viendrait trop tard (une touche insérée deux fois, Entrée perdue). Il s'exécute donc sur place.
+        if r.direct or _peut_suspendre() or any(isinstance(a, QEvent) for a in args):
             return executer(r, exp, args)  # appelé tout de suite, mais par le relais : sender() n'y vaut que par _expediteur
         _plus_tard(executer, r, exp, args)
         return None
@@ -355,7 +358,6 @@ def doubler_qtcore(ns):
     # l'application retient donc les DeferredDelete, et le dernier slot fini détruit ce qu'il a retenu. Posé seulement
     # pendant cette attente : un filtre Python permanent verrait passer chaque événement de Qt. Détruit directement, pas
     # par un nouveau deleteLater : Qt n'en poste qu'un par objet (``deleteLaterCalled``), le second serait sans effet.
-    QEvent = ns["QEvent"]
     detruire = _detruire()
     retenus = []
 

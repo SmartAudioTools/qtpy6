@@ -54,6 +54,60 @@ Ce qu'il a fallu pour y arriver, et qui mesure l'écart entre Spyder et le navig
 Ce que le jalon ne mesure pas : la frappe (aucune touche envoyée), la complétion et le LSP (`lsp_mixin` importé, jamais
 connecté), le pliage sur un vrai fichier long, la mémoire après une heure d'édition, le chargement sur un réseau réel.
 
+### Résultat du jalon 2 (09/10/2026, 22 h 50) : on édite pour de vrai dans la page, et la mémoire ne bouge pas
+
+Demande de l'utilisateur (22 h 20) : « lance le jalon 2, en essayant d'économiser au maximum les tokens, pour ça délègue au
+maximum à des modèles moins gourmands ». Mesuré avec `essais/spyder/jalon2.py` (le même script sur le bureau et dans la
+page, lancé par `site/index.html?script=jalon2.py`), sur `editeur.py` recopié jusqu'à 2 000 lignes. Les gestes qui comptent
+sont RÉELS : un clic de souris et 29 touches envoyés par le navigateur (sonde `--pilote`), pas des événements Qt
+synthétiques — ce sont eux qui traversent Qt-WASM, le relais de `bloquant` et le `keyPressEvent` de Spyder. Le reste
+(sélection par Maj+Bas, pliage, annulation) est fait par l'API de l'éditeur, identique des deux côtés.
+
+| Mesure (deux lancements de la page, machine chargée) | Navigateur | Bureau (offscreen) |
+|---|---|---|
+| texte de 2 000 lignes posé (coloration, numéros) | 230–460 ms | 126 ms |
+| clic réel dans l'éditeur, jusqu'au rendu (aller-retour sonde compris, ~0,5 s) | 0,9–1,0 s | — |
+| frappe de 29 touches réelles, dont 3 Entrée avec indentation automatique | 1,2–1,4 s (trajet Selenium touche par touche compris) | 19 ms (QKeyEvent) |
+| annulation des 6 pas, texte d'origine retrouvé | 36 ms | 6 ms |
+| tout sélectionner, rendu | 7–22 ms | 6 ms |
+| Maj+Bas × 50, rendu | 93–254 ms | 29 ms |
+| 247 plis calculés (ast) et posés | 51–113 ms | 116 ms |
+| classe de la ligne 95 repliée, rendu | 22–51 ms | 12 ms |
+| tas WebAssembly, du premier rendu à la fin (après gc) | **103 Mio, stable** | — |
+| script entier | 3,8–5,2 s | 1,4 s |
+
+Tout passe (« frappe : ok », « annulation : ok », « pli : ok » dans `sonde_jalon2.log` et `jalon2_bureau.log` ; captures
+`capture_jalon2_plie.png` / `_fin.png` dans la page, `capture_jalon2_bureau_plie.png` / `_fin.png` sur le bureau). Le tas
+ne grossit pas d'un Mio entre le premier rendu et la fin : rien ne fuit sur ces gestes-là. Les durées de la page sont 2 à
+8 fois celles du bureau sur ce qui rend (sélection, repli), mais toutes sous 100 ms hors frappe pilotée ; le ressenti
+d'un vrai utilisateur reste à voir à la main (point ouvert).
+
+Ce qu'il a fallu corriger, et qui n'était pas dans Spyder :
+  - **un défaut de qtpy6 (`web/bloquant.py`), corrigé** : tout slot Python connecté à un signal est reporté dans une tâche
+    (pour qu'un `exec()` puisse y suspendre). Spyder émet `sig_key_pressed.emit(event)` DANS `keyPressEvent` et lit
+    `event.isAccepted()` juste après : reporté, le slot (`ScrollFlagArea.keyPressEvent`, closebrackets, snippets,
+    codefolding) lisait un QKeyEvent déjà détruit par Qt (`RuntimeError … already deleted`, 116 fois pour 29 touches) et
+    son `accept()` venait trop tard. Correctif, une condition : un slot dont un argument est un `QEvent` s'exécute sur
+    place. Écartés : cloner l'événement avant le report (ne règle que la destruction, pas l'`accept()` tardif : un
+    crochet inséré deux fois) ; ne pas reporter les seuls QKeyEvent (même piège pour les autres événements). Ce que ça
+    coûte : un tel slot ne peut plus suspendre (un `exec()` y rend un abandon et avertit) — aucun cas connu ;
+  - **un défaut de la sonde (`web/sonde.py`), corrigé** : `"\n"` envoyé tel quel au navigateur donne un KeyboardEvent de
+    touche `"\n"`, que Qt-WASM rend en Key 0xa, pas `Key_Return` : Spyder n'y voyait pas une Entrée, et QPlainTextEdit
+    n'insère pas un caractère non imprimable (3 touches perdues sur 29, trouvé par un filtre d'événements dans la page).
+    `"\n"` est maintenant la touche Entrée (Firefox : `Keys.ENTER` ; Chromium : `key="Enter"`). Un vrai utilisateur
+    n'était pas touché : son clavier envoie `"Enter"` ;
+  - **le pliage sans LSP** : Spyder reçoit ses plis d'un serveur de langage ; ici ils sont calculés par `ast` (classes,
+    fonctions, `if`/`for`/`with`… de plus d'une ligne) et posés par `_update_folding_info` + `_finish_update_folding`,
+    ce qui exerce le même chemin que le LSP (`merge_folding`, qui a demandé `textdistance` dans l'archive). Piège trouvé
+    sur le bureau : les clés de pli sont 1-based, `toggle_fold_trigger` veut le PREMIER bloc à cacher ;
+  - `preparer.py` : le préambule commun des essais (doublures, chemins, `etape`), sorti de `editeur.py` plutôt que recopié ;
+    `construire_site.py` : un seul site, `?script=` choisit l'essai (sinon deux archives de 25 Mo pour un script de 250
+    lignes) ; chaque étape chaînée par QTimer est gardée : une exception pose `window.etat = "erreur"` au lieu de laisser
+    la sonde attendre jusqu'au délai (premier lancement perdu à ça).
+
+Ce que le jalon ne mesure pas : la mémoire après une heure (le gc est appelé une fois), le défilement à la molette, la
+complétion, un rendu jugé à l'œil par l'utilisateur dans son navigateur.
+
 ## Conclusion en cinq lignes
 
 | | Verdict |
@@ -216,6 +270,11 @@ précédent dont la voie B copierait l'architecture noyau ; Binder : un vrai Spy
   offscreen, capture relue. L'incompatibilité d'alias : bissection automatique des 98 alias de `QPlainTextEdit`, puis
   reproduction en dix lignes sans Spyder (plante avec `import qtpy6`, passe sans), puis l'essai complet qui passe une
   fois l'alias retiré.
+- Jalon 2 : **mesuré en direct**, deux lancements de la page (Firefox, sonde pilotée) et un du bureau, journaux
+  `essais/spyder/sonde_jalon2.log` et `jalon2_bureau.log`, captures comparées par un sous-agent (voir la section).
+  Le correctif de `bloquant.py` : vérifié par les 116 erreurs qui disparaissent et par la suite de tests de qtpy6
+  (`tests/`, lancée après le correctif) ; celui de la sonde : par les 3 Entrée retrouvées (Firefox ; la branche Chromium, `key="Enter"` par CDP, est
+  écrite sans avoir été lancée, Chromium n'ouvrant pas dans le bac à sable). Aucun des deux n'a de test dédié.
 - Disponibilité des roues Pyodide pour les extensions C : **non vérifiée** (aucune n'a été nécessaire au jalon 1).
 - Les durées sont des ordres de grandeur, pas des estimations fondées sur une mesure.
 
@@ -266,13 +325,18 @@ précédent dont la voie B copierait l'architecture noyau ; Binder : un vrai Spy
   le renommage, l'essai avec alias conservés plante (core dump) ; après, il passe en natif (capture) et dans Firefox
   (site reconstruit, sonde : 2,9 s, tas 86 Mio, capture relue, la page est identique). Le contournement générique
   n'est donc plus en service. Pourquoi PySide6 plante au lieu de lever n'a pas été cherché.
-- Jalon 1 atteint : les jalons suivants de la voie B, dans l'ordre où chacun peut faire échouer le projet seul :
-  2. la frappe et l'édition réelle dans la page (clavier, sélection, pliage, un fichier de 2 000 lignes) et la mémoire après
-     usage ; 3. l'exécution du code de l'élève (noyau dans un Web Worker par `qtpy6.web.travailleur`, ou dans le même
+- Jalons 1 et 2 atteints : les jalons suivants de la voie B, dans l'ordre où chacun peut faire échouer le projet seul :
+  3. l'exécution du code de l'élève (noyau dans un Web Worker par `qtpy6.web.travailleur`, ou dans le même
      interpréteur) et la console ; 4. la complétion (jedi en direct, sans serveur de langage) ; 5. les fichiers (lire,
      enregistrer, retrouver — stockage du navigateur ou téléchargement). Chacun : un `essais/spyder/jalonN.py`, mesuré par
      la sonde, avant de toucher au fork.
-- Ce qu'un relecteur devrait regarder en premier : `essais/spyder/editeur.py` (les doublures et le bloc qui complète
+- La règle « un slot qui reçoit un QEvent s'exécute sur place » (`bloquant.py`) n'a pas de test unitaire dans
+  `tests/test_web.py` ; seul l'essai jalon 2 la prouve (réserve du Superviseur, 09/10/2026 : à écrire sur le modèle du
+  test des DeferredDelete de 50a2747).
+- Avant le jalon 3, un essai À LA MAIN de `essais/spyder/site/index.html?script=jalon2.py` dans le navigateur de
+  l'utilisateur (servi par `http.server`) : le ressenti de la frappe et du défilement n'est pas dans les chiffres.
+- Ce qu'un relecteur devrait regarder en premier : la condition ajoutée dans `qtpy6/web/bloquant.py` (`_relayer`,
+  elle change le comportement de tout slot recevant un QEvent, pour toutes les applications), puis `essais/spyder/editeur.py` (les doublures et le bloc qui complète
   PySide6 — ce sont les deux listes qui diront ce que la voie B coûte vraiment), puis la capture web.
 - Si c'est la voie C : lister ce que l'utilisateur attend d'un « éditeur » pour les élèves (fichiers multiples ?
   débogueur ? complétion ?) ; chaque brique est un item de TODO du lecteur web.

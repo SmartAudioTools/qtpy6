@@ -1,7 +1,9 @@
-"""Construit ``site/`` (index.html, app.zip, pyodide-qt en lien) pour editeur.py, puis le mesure avec la sonde :
+"""Construit ``site/`` (index.html, app.zip, pyodide-qt en lien) pour les essais du dossier (``?script=`` choisit lequel,
+editeur.py sans), puis le mesure avec la sonde :
 
     $P construire_site.py            # construit
     $P -m qtpy6.web.sonde site/index.html capture_web.png --racine site --delai 600
+    $P -m qtpy6.web.sonde 'site/index.html?script=jalon2.py' capture_jalon2.png --racine site --delai 600 --pilote
 
 Même mécanisme que ``python -m qtpy6.web.construire``, avec en plus : le fork Spyder et les roues pures sur sys.path (d'où
 ``--paquet spyder`` prend le fork), les paquets purs que l'import de CodeEditor tire (relevé par audit de sys.modules sur le
@@ -22,7 +24,7 @@ ICI = Path(__file__).resolve().parent
 SITE = ICI / "site"
 PYODIDE_QT = Path("/DATA/Python/qtpy6/exemple/pyodide-qt")
 PAQUETS = ("spyder qtpy IPython asttokens colorama decorator diff_match_patch executing intervaltree jedi packaging parso "
-           "prompt_toolkit pure_eval pygments qdarkstyle qtawesome qtconsole sortedcontainers spyder_kernels "
+           "prompt_toolkit pure_eval pygments qdarkstyle qtawesome qtconsole sortedcontainers spyder_kernels textdistance "
            "stack_data superqt tinycss2 traitlets wcwidth webencodings").split()
 DISTRIBUTIONS = ["qstylizer", "ipython_pygments_lexers", "typing_extensions"]  # modules d'un seul fichier : --paquet prendrait site-packages
 EXCLURE = ["spyder/plugins/help/utils/js/", "spyder/locale/", "qtpy6/web/js/pdfjs/"]
@@ -68,5 +70,9 @@ taille = _construire.construire(ICI / "editeur.py", SITE, "./pyodide-qt/", PAQUE
 page = SITE / "index.html"
 texte = page.read_text(encoding="utf-8")
 assert texte.count("  await rendu();\n") == 1
-page.write_text(texte.replace("  await rendu();\n", MESURE), encoding="utf-8")
+texte = texte.replace("  await rendu();\n", MESURE)
+assert texte.count('"/home/pyodide/app/editeur.py"') == 1
+texte = texte.replace('"/home/pyodide/app/editeur.py"',  # un seul site pour tous les essais : index.html?script=jalon2.py
+                      '"/home/pyodide/app/" + (new URLSearchParams(location.search).get("script") || "editeur.py")')
+page.write_text(texte, encoding="utf-8")
 print(f"site/app.zip : {taille // 1024} Kio")
