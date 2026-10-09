@@ -31,21 +31,36 @@ def detecte():
 def activer_au_doigt(app=None):
     """``activer`` tout de suite si l'écran se dit tactile (``detecte``) ; sinon, dans le navigateur, au premier doigt posé
     sur la page (``pointerdown`` de type ``touch``, écouté avant Qt) : le seul signe sûr quand le navigateur ne dit rien
-    de son écran. Les widgets construits APRÈS ce doigt sont faits pour lui (sur un écran d'accueil, c'est l'application
-    qui suit), ceux d'avant reçoivent la feuille de style sans toutes leurs hauteurs refaites (``activer``)."""
+    de son écran. ``activer`` attend que ce doigt se lève (``pointerup`` ou ``pointercancel``), puis que Qt ait traité ce
+    lever : sa feuille remet la page en page, et appliquée sous le doigt posé elle déplaçait ce qu'il visait (un éditeur
+    Parsons descendu de 170 px, l'appui reçu par l'énoncé au-dessus : le premier appui long ne prenait rien, R2 de la
+    sonde ``redimensionner``, 09/10/2026). Ce premier geste se fait donc à la souris que Qt tire du doigt. Les widgets
+    construits APRÈS ce doigt sont faits pour lui (sur un écran d'accueil, c'est l'application qui suit), ceux d'avant
+    reçoivent la feuille de style sans toutes leurs hauteurs refaites (``activer``)."""
     if detecte():
         activer(app)
     elif navigateur():
         import js  # noqa: PLC0415
         from pyodide.ffi import create_proxy  # noqa: PLC0415
+        from qtpy6.QtCore import QTimer  # noqa: PLC0415
+
+        premier = []  # le pointerId de ce doigt : le lever d'un second doigt, posé pendant lui, n'active rien
 
         def doigt(evenement):
-            if evenement.pointerType == "touch" and not ACTIF:
-                activer(app)
-                js.window.removeEventListener("pointerdown", ecouteur, True)
+            if evenement.pointerType == "touch":
+                premier.append(evenement.pointerId)
+                js.window.removeEventListener("pointerdown", pose, True)
+                for nom in ("pointerup", "pointercancel"):
+                    js.window.addEventListener(nom, leve, True)
 
-        ecouteur = create_proxy(doigt)
-        js.window.addEventListener("pointerdown", ecouteur, True)  # en capture : avant le canevas de Qt
+        def lever(evenement):
+            if evenement.pointerId == premier[0]:
+                for nom in ("pointerup", "pointercancel"):
+                    js.window.removeEventListener(nom, leve, True)
+                QTimer.singleShot(0, lambda: ACTIF or activer(app))  # après le lever que Qt reçoit de ce même événement
+
+        pose, leve = create_proxy(doigt), create_proxy(lever)
+        js.window.addEventListener("pointerdown", pose, True)  # en capture : avant le canevas de Qt
 
 
 def activer(app=None, cible=CIBLE, case=None):
