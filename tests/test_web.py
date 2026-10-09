@@ -891,6 +891,40 @@ def test_animation_par_image_survit_au_slot_reporte():
 
 
 @greenlet_seul
+def test_slot_reporte_avant_la_destruction():
+    # Un vrai clic sur « Envoyer » d'une fenêtre WA_DeleteOnClose : accepted part hors entrée promettante, son slot est
+    # reporté, et la fermeture a déjà demandé la destruction. Comme en natif, le slot passe avant elle et lit encore le
+    # texte (les signalements de SmartTeacher, perdus sur RuntimeError, 09/10/2026).
+    sortie = simule("""
+        from qtpy6.QtCore import Qt
+        from qtpy6.QtWidgets import QDialog, QLineEdit
+        d = QDialog()
+        d.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        texte = QLineEdit(d)
+        texte.setText("panne")
+        d.accepted.connect(lambda: print("lu", texte.text()))
+        d.destroyed.connect(lambda: print("détruite"))
+        d.show()
+        d.accept()
+        print("après accept")
+        tourner()
+        # le menu d'étiquettes des graphes de SmartTeacher : popup, WA_DeleteOnClose, triggered lit action.data()
+        from qtpy6.QtCore import QPoint
+        from qtpy6.QtWidgets import QMenu
+        menu = QMenu()
+        menu.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        menu.addAction("x").setData("donnée")
+        menu.triggered.connect(lambda action: print("choisi", action.data()))
+        menu.destroyed.connect(lambda: print("menu détruit"))
+        menu.popup(QPoint(0, 0))
+        menu.actions()[0].trigger()
+        menu.close()
+        tourner()
+    """)
+    assert sortie.splitlines() == ["après accept", "lu panne", "détruite", "choisi donnée", "menu détruit"]
+
+
+@greenlet_seul
 def test_un_coup_de_minuterie_est_un_slot():
     sortie = simule("""
         from qtpy6.QtCore import QTimer

@@ -5,7 +5,7 @@ Qt, par exemple) en ``<capture>_<suffixe>.png``. Le code de retour dit si l'éta
 
     python -m qtpy6.web.sonde page.html?param=x capture.png [--racine DIR] [--delai 120] [--etat fini]
                              [--taille 1000x900] [--zoom 2] [--tactile] [--visible] [--chromium]
-                             [--glisser X1,Y1,X2,Y2 | --glisser page]
+                             [--glisser X1,Y1,X2,Y2 | --glisser page] [--pilote]
 
 ``page`` est relative à ``--racine`` (le dossier de la page par défaut), servie par http.server : une page ouverte en
 file:// n'a ni modules ni fetch. ``--taille`` : la fenêtre en pixels CSS (Firefox ne descend pas sous 500 de large : une
@@ -17,7 +17,11 @@ ses images seul). ``--glisser`` : une fois l'état atteint, un glissé souris r�
 relâché en X2,Y2, en pixels CSS de la fenêtre), puis la capture : un défaut de glisser-déposer propre à un navigateur.
 ``--glisser page`` : les points viennent de la page (``window.glisser = [x1, y1, x2, y2]``, posé avec l'état attendu), la
 sonde pose ``window.etat = "glissé"`` une fois le glissé fait, et attend que la page finisse (``"fini"``) : c'est la page
-qui vérifie le résultat du glissé, et un test automatique qui en dépend.
+qui vérifie le résultat du glissé, et un test automatique qui en dépend. ``--pilote`` : pendant que la page tourne, ses
+demandes de gestes réels, qu'un événement synthétique de Qt ne remplace pas (un slot qu'un vrai clic déclenche est reporté
+par ``bloquant``, pas celui de ``click()``) : ``window.etat = "cliquer"`` (en ``window.clic = [x, y]``, pixels CSS) ou
+``"taper"`` (``window.texte``, au clavier, là où est le focus) ; la sonde fait le geste et répond ``window.etat`` suivi
+de ``"_fait"``, puis la page poursuit.
 
 Firefox par défaut, parce que Chromium n'ouvre pas sans socket Unix (son verrou d'instance unique,
 ``process_singleton_posix``), ce qu'un bac à sable peut interdire. ``--chromium`` passe par QtWebEngine, le même moteur
@@ -53,6 +57,7 @@ def main(argv=None):
     a.add_argument("--visible", action="store_true", help="une vraie fenêtre sur l'écran, pas hors écran")
     a.add_argument("--chromium", action="store_true", help="le moteur Blink de QtWebEngine au lieu de Firefox")
     a.add_argument("--glisser", help="X1,Y1,X2,Y2, ou page (window.glisser) : un glissé souris une fois l'état atteint")
+    a.add_argument("--pilote", action="store_true", help="les clics et frappes réels que la page demande (window.etat)")
     o = a.parse_args(argv)
     if o.chromium and (o.zoom or o.tactile or o.visible):
         a.error("--chromium : ni --zoom, ni --tactile, ni --visible")
@@ -78,7 +83,7 @@ def main(argv=None):
     attendu = o.etat
     try:
         debut = time.time()
-        etat = attendre(navigateur, o.etat, debut + o.delai)
+        etat = attendre(navigateur, o.etat, debut + o.delai, o.pilote)
         if o.glisser and etat == o.etat:
             points = navigateur.execute_script("return window.glisser") if o.glisser == "page" else o.glisser.split(",")
             glisser(navigateur, *map(float, points))
@@ -99,14 +104,56 @@ def main(argv=None):
     return etat == attendu
 
 
-def attendre(navigateur, etat, fin):
-    """`window.etat` relu jusqu'à `etat` ou "erreur", ou "délai dépassé" à l'heure `fin`."""
+def attendre(navigateur, etat, fin, pilote=False):
+    """`window.etat` relu jusqu'à `etat` ou "erreur", ou "délai dépassé" à l'heure `fin` ; avec `pilote`, les gestes que
+    la page demande en chemin (``GESTES``) faits au passage."""
     while time.time() < fin:
         lu = navigateur.execute_script("return window.etat")
         if lu in (etat, "erreur"):
             return lu
-        time.sleep(0.5)
+        if pilote and lu in GESTES:
+            GESTES[lu](navigateur)
+            navigateur.execute_script(f"window.etat = '{lu}_fait'")
+            continue
+        time.sleep(0.2 if pilote else 0.5)
     return "délai dépassé"
+
+
+def cliquer(navigateur):
+    """Un vrai clic gauche en ``window.clic`` (pixels CSS de la fenêtre)."""
+    x, y = navigateur.execute_script("return window.clic")
+    if isinstance(navigateur, Blink):
+        for genre, boutons in (("mouseMoved", 0), ("mousePressed", 1), ("mouseReleased", 0)):
+            navigateur.cdp("Input.dispatchMouseEvent", type=genre, x=x, y=y, button="left", buttons=boutons, clickCount=1)
+    else:
+        from selenium.webdriver.common.action_chains import ActionBuilder  # noqa: PLC0415
+
+        actions = ActionBuilder(navigateur)
+        actions.pointer_action.move_to_location(round(x), round(y)).click()
+        actions.perform()
+    repeint(navigateur)
+
+
+def taper(navigateur):
+    """``window.texte`` tapé au vrai clavier, touche par touche, là où le navigateur a le focus."""
+    texte = navigateur.execute_script("return window.texte")
+    if isinstance(navigateur, Blink):
+        for c in texte:
+            navigateur.cdp("Input.dispatchKeyEvent", type="keyDown", key=c, text=c)
+            navigateur.cdp("Input.dispatchKeyEvent", type="keyUp", key=c)
+    else:
+        from selenium.webdriver.common.action_chains import ActionChains  # noqa: PLC0415
+
+        ActionChains(navigateur).send_keys(texte).perform()
+    repeint(navigateur)
+
+
+GESTES = {"cliquer": cliquer, "taper": taper}
+
+
+def repeint(navigateur):
+    navigateur.execute_script("return new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))")
+    time.sleep(0.3)  # Qt-WASM traite l'événement dans sa boucle, puis repeint : deux images et un peu plus
 
 
 def firefox(o, largeur, hauteur, url):
@@ -148,8 +195,7 @@ def glisser(navigateur, x1, y1, x2, y2, pas=10):
             actions.pointer_action.move_to_location(round(x), round(y))
         actions.pointer_action.pointer_up()
         actions.perform()
-    navigateur.execute_script("return new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))")
-    time.sleep(0.3)  # Qt-WASM traite l'événement dans sa boucle, puis repeint : deux images et un peu plus
+    repeint(navigateur)
 
 
 HOTE = """

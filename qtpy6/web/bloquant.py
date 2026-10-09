@@ -115,6 +115,8 @@ def _pyodide_pomper(ns, periode=10):
 # combien de piles attendent. Sans pile suspendue, ``can_run_sync()`` dit vrai (le script principal de runPythonAsync).
 _actif = False
 _suspendus = 0
+_reportes = 0  # tâches de ``_plus_tard`` pas encore finies
+_garde = None  # pose (True) ou retire (False) la garde des destructions différées : ``doubler_qtcore``
 _pompe_tourne = False  # la pompe est dans processEvents (et Qt y a peut-être suspendu un QDrag.exec)
 
 
@@ -138,8 +140,10 @@ def _suspendre(brancher):
 def _plus_tard(f, *args):
     """``f(*args)`` à la tâche suivante de la boucle asyncio, une entrée où il peut suspendre. Une exception va à
     ``sys.excepthook``, comme celle d'un slot en natif (asyncio, lui, se contenterait de la journaliser)."""
+    global _reportes
+
     def tache():
-        global _actif
+        global _actif, _reportes
         avant, _actif = _actif, True
         _pyodide_signaler(True)
         try:
@@ -149,8 +153,15 @@ def _plus_tard(f, *args):
         finally:
             _actif = avant
             _pyodide_signaler(avant)
+            _reportes -= 1
+            if not _reportes and _garde:
+                _garde(False)
 
+    if not _reportes and _garde:
+        _garde(True)
+    _reportes += 1
     _pyodide_plus_tard(tache)
+
 
 
 _averti = set()
@@ -195,6 +206,17 @@ def _mort():
         return lambda objet: isinstance(objet, sip.simplewrapper) and sip.isdeleted(objet)
     import shiboken6  # noqa: PLC0415
     return lambda objet: not shiboken6.isValid(objet)  # True pour un objet Python ordinaire
+
+
+def _detruire():
+    """Rend la fonction qui détruit l'objet C++ d'un QObject, comme le ferait son DeferredDelete."""
+    from .. import PYQT6  # noqa: PLC0415
+
+    if PYQT6:
+        from PyQt6 import sip  # noqa: PLC0415
+        return sip.delete
+    import shiboken6  # noqa: PLC0415
+    return shiboken6.delete
 
 
 def _nb_arguments(slot):
@@ -325,6 +347,45 @@ def doubler_qtcore(ns):
             if r is not None:  # sinon, connecté sans relais (le connect de la liaison, ``_connect_qt``), ou pas du tout
                 return disconnect(self, r.appel)
         return disconnect(self, *args)
+
+    # La garde des destructions différées. En natif, un slot passe avant le retour à la boucle, donc avant toute
+    # destruction différée, et le code le suppose : le slot de ``accepted`` d'une fenêtre ``WA_DeleteOnClose`` y lit encore
+    # ses widgets. Reporté, il passe après le tour de Qt qui a détruit la fenêtre, et levait RuntimeError (les
+    # signalements de SmartTeacher perdus au vrai clic, 09/10/2026). Tant qu'un slot reporté attend, un filtre de
+    # l'application retient donc les DeferredDelete, et le dernier slot fini détruit ce qu'il a retenu. Posé seulement
+    # pendant cette attente : un filtre Python permanent verrait passer chaque événement de Qt. Détruit directement, pas
+    # par un nouveau deleteLater : Qt n'en poste qu'un par objet (``deleteLaterCalled``), le second serait sans effet.
+    QEvent = ns["QEvent"]
+    detruire = _detruire()
+    retenus = []
+
+    class Garde(QObject):
+        def eventFilter(self, objet, evenement):
+            if evenement.type() == QEvent.Type.DeferredDelete:
+                retenus.append(objet)
+                return True
+            return False
+
+    garde = []
+
+    def garder(actif):
+        app = QCoreApplication.instance()
+        if actif:
+            if app is not None and not garde:
+                garde.append(Garde())
+                app.installEventFilter(garde[0])
+            return
+        if garde:
+            if app is not None:
+                app.removeEventFilter(garde[0])
+            garde.pop().deleteLater()  # pas dans un filtre en cours d'appel : à la boucle suivante
+        while retenus:
+            objet = retenus.pop(0)
+            if not mort(objet):
+                detruire(objet)
+
+    global _garde
+    _garde = garder
 
     def sender_(self):
         s = sender(self)
