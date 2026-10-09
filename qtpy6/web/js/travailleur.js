@@ -4,13 +4,15 @@
 //   reçus : {init: {indexURL, archives: [{url, dossier}], module, cwd}}, {appel: {id, fonction, args}}
 //   émis :  {pret}, {id, sortie} (ce que l'appel imprime, au fil de l'eau), {id, retour}, {id, erreur}, {erreur} (init)
 // Ou bien un processus (ProcessusWeb) : un script lancé en __main__, qui lit son stdin comme sur le bureau.
-//   reçus : {prechauffer: {indexURL}} (charger Pyodide dès maintenant, sans script : le {lancer} qui suivra l'épargne),
+//   reçus : {prechauffer: {indexURL, roues}} (charger Pyodide dès maintenant, sans script : le {lancer} qui suivra
+//           l'épargne ; roues : [url de .whl] installées ensuite, que le {lancer} ne chargera plus ; répétable),
 //           {lancer: {indexURL, zip, dossier, argv, cwd, roues}}, {entree: texte} (stdin), {entree: null} (fin de fichier) ;
 //           le zip porte ses chemins depuis la racine du système de fichiers, où il est dépaqueté ; roues :
 //           {module: url de .whl}, chacune chargée au premier import de son module (rien sinon : ni octets ni délai)
 //   émis :  {sortie} (stdout), {sortie_erreur} (stderr), {fin: code}, {erreur} (Pyodide injoignable, JSPI absent)
 let py, module, appeler, courant = 0, file = Promise.resolve();  // courant : le numéro de l'appel en cours, 0 hors de tout appel (l'import du module)
-let prechauffe = null;  // {indexURL, py: Promise} : le Pyodide lancé par {prechauffer}, qu'un {lancer} du même indexURL reprend
+let prechauffe = null;  // {indexURL, py: Promise, roues: Set} : le Pyodide lancé par {prechauffer}, qu'un {lancer} du même
+                        // indexURL reprend, et les URL des roues qui y sont installées
 const decodeur = new TextDecoder();
 
 function telecharger(url) {
@@ -56,8 +58,10 @@ function charger(indexURL) {
 }
 
 async function lancer({ indexURL, zip, dossier, argv, cwd, roues }) {
-  py = await (prechauffe?.indexURL === indexURL ? prechauffe.py : charger(indexURL));  // un échec du préchauffage ressort ici, en {erreur}
+  const reserve = prechauffe?.indexURL === indexURL ? prechauffe : null;
+  py = await (reserve ? reserve.py : charger(indexURL));  // un échec du préchauffage ressort ici, en {erreur}
   prechauffe = null;
+  if (reserve) roues = Object.fromEntries(Object.entries(roues || {}).filter(([, url]) => !reserve.roues.has(url)));
   const canal = cle => { const d = new TextDecoder(); return { write: o => { postMessage({ [cle]: d.decode(o, { stream: true }) }); return o.length; } }; };
   py.setStdout(canal("sortie")); py.setStderr(canal("sortie_erreur"));
   py.unpackArchive(zip, "zip", { extractDir: "/" });
@@ -128,8 +132,13 @@ _executer(**_lancement)
 onmessage = e => {
   const m = e.data;
   if (m.prechauffer) {  // le rejet est gardé pour le {lancer} qui consommera (le catch vide évite l'« unhandled rejection »)
-    prechauffe = { indexURL: m.prechauffer.indexURL, py: charger(m.prechauffer.indexURL) };
-    prechauffe.py.catch(() => {});
+    const { indexURL, roues = [] } = m.prechauffer;
+    if (!prechauffe) prechauffe = { indexURL, py: charger(indexURL), roues: new Set() };
+    const reserve = prechauffe, neuves = roues.filter(url => !reserve.roues.has(url));
+    if (neuves.length)  // une roue qui échoue ici sera chargée au premier import, comme sans réserve
+      reserve.py = reserve.py.then(py => py.loadPackage(neuves, { messageCallback: () => {} })
+        .then(() => neuves.forEach(url => reserve.roues.add(url)), () => {}).then(() => py));
+    reserve.py.catch(() => {});
     return;
   }
   if (m.lancer) { lancer(m.lancer).catch(e => postMessage({ erreur: String(e) })); return; }

@@ -20,9 +20,10 @@ compris (quelques secondes).
                                               distribution (le sqlite3 de Pyodide-Qt) ; un programme qui ne l'importe
                                               pas ne paie rien, ni octets ni délai ; ``filtre`` : quels fichiers copier
                                               dans le worker (voir ``configurer``)
-    prechauffer()                             monte en réserve UN worker dont le Pyodide charge dès maintenant : le
+    prechauffer(modules)                      monte en réserve UN worker dont le Pyodide charge dès maintenant : le
                                               prochain ``ProcessusWeb.start()`` le consomme et épargne ``loadPyodide``
-                                              (plusieurs secondes, l'essentiel du premier lancement)
+                                              (plusieurs secondes, l'essentiel du premier lancement) ; ``modules`` : ceux
+                                              des ``roues`` que le programme importera sûrement, chargés eux aussi
 
 Les arguments et les retours sont convertis entre Python et JavaScript (dict, list, str, nombres, None) : une fonction
 du worker reçoit des listes et des dicts ordinaires et rend de même. Elle peut être ``async``.
@@ -49,31 +50,38 @@ def configurer(indexURL, roues=(), filtre=None):
     """Ce que ``ProcessusWeb()`` utilise : le Pyodide du worker (``indexURL`` ; sans appel, celui de ``versions.json``),
     des URL de roues (.whl) que le worker charge au premier ``import`` de leur module — le nom de distribution du
     fichier (``sqlite3-1.0.0-….whl`` → ``sqlite3``) ; paresseux : un script qui n'importe pas le module ne télécharge
-    rien, le préchauffage n'en charge aucune. ``filtre`` : quels FICHIERS copier dans le worker —
-    ``filtre(chemin absolu) -> bool``, appelé pour chaque fichier des dossiers embarqués (script, cwd, temporaire) ;
-    ``None`` les copie tous. Les dossiers eux-mêmes sont toujours créés : l'application écarte ainsi ce que l'enfant
+    rien, le préchauffage seulement celles qu'on lui nomme (``prechauffer(modules)``). ``filtre`` : quels FICHIERS
+    copier dans le worker — ``filtre(chemin absolu) -> bool``, appelé pour chaque fichier des dossiers embarqués
+    (script, cwd, temporaire) ; ``None`` les copie tous. Les dossiers eux-mêmes sont toujours créés : l'application écarte ainsi ce que l'enfant
     n'importe jamais (polices, données du parent) au lieu de le zipper à chaque ``start``."""
     REGLAGES.update(indexURL=indexURL, roues=tuple(roues), filtre=filtre)
 
 
-def prechauffer():
+def prechauffer(modules=()):
     """Monte en réserve UN worker neuf dont le Pyodide (``configurer``, sinon ``versions.json``) charge dès maintenant :
     le prochain ``ProcessusWeb.start()`` du même Pyodide le consomme au lieu de tout payer (``loadPyodide``, plusieurs
     secondes). À appeler aux moments calmes — le programme affiché, le précédent arrêté. Idempotent tant que la réserve
     n'est pas consommée ; un worker de réserve n'a JAMAIS exécuté de code, et un worker consommé n'y revient jamais.
     Si son chargement a échoué (Pyodide injoignable), l'échec ressort en erreur du ``start`` qui le consomme, et le
-    ``start`` suivant repart à froid, comme sans réserve."""
+    ``start`` suivant repart à froid, comme sans réserve.
+
+    ``modules`` : ceux des ``roues`` de ``configurer`` que le programme importera à coup sûr. Leur roue est installée dans
+    la réserve après Pyodide, hors du chemin du ``start`` ; une roue qui n'a pas pu l'être reste chargée au premier
+    import, comme sans réserve. Rappeler avec d'autres modules les ajoute à la réserve existante."""
     global _RESERVE
     import js  # noqa: PLC0415
 
     indexURL = _index_url()
-    if _RESERVE is not None and _RESERVE[1] == indexURL:
-        return
-    if _RESERVE is not None:  # l'indexURL a changé (configurer) : ce worker ne servira plus
+    roues = _roues()
+    urls = [roues[m] for m in modules if m in roues]
+    if _RESERVE is not None and _RESERVE[1] != indexURL:  # l'indexURL a changé (configurer) : ce worker ne servira plus
         _RESERVE[0].terminate()
-    worker = js.Worker.new(_url_worker(), type="module")
-    worker.postMessage(_objet({"prechauffer": {"indexURL": indexURL}}))
-    _RESERVE = (worker, indexURL)
+        _RESERVE = None
+    if _RESERVE is None:
+        _RESERVE = (js.Worker.new(_url_worker(), type="module"), indexURL)
+    elif not urls:
+        return
+    _RESERVE[0].postMessage(_objet({"prechauffer": {"indexURL": indexURL, "roues": urls}}))
 
 
 def _index_url():
