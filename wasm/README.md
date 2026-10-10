@@ -58,7 +58,9 @@ Le récit, les choix argumentés et les niveaux de preuve sont dans
 
 - Les modules à la demande : `QNetworkAccessManager` passe par `fetch` (même origine ou CORS, pas de sockets), pas de
   TLS natif (greffon `certonly`), QtConcurrent sans fils (ni `QThreadPool`), `QPrinterInfo` sans imprimante (`QPrinter`
-  écrit un PDF dans le système de fichiers de la page). Un import depuis un contexte non suspendable lève `ImportError`.
+  écrit un PDF dans le système de fichiers de la page). `QOpenGLWidget` : le module se charge, mais Qt ne le supporte pas sous WebAssembly (un contexte
+  WebGL par surface, pas de partage : « Context is lost » à chaque image, puis plantage ; `notes/2026-10-10 - Modules Qt à
+  la demande.md`). Un import depuis un contexte non suspendable lève `ImportError`.
 
 - Pas de QtPdf : pdfium n'a pas de cible WebAssembly. La doublure pdf.js de `qtpy6.web.pdf` reste en place.
 - Le lien est statique. Sous LGPL v3, il faut donc fournir de quoi re-lier, et cette recette en fait partie (étape 7

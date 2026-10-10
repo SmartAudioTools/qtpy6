@@ -106,7 +106,34 @@ fichiers de la page.
   60 Mio. Les quatre plugins qui tombaient sans la doublure (`editor`, `ipythonconsole`, `debugger`, `profiler`) passent :
   c'est la preuve que `pyside_QtPrintSupport.so` a été chargé par le finder depuis l'import d'un plugin. Pas de relevé des
   requêtes (la sonde ne les journalise pas) : « aucun `.so` téléchargé avant le premier import » est vérifié par lecture
-  de `pyodide-qt.mjs` seulement. `QOpenGLWidget` affiché et GET `QNetworkAccessManager` dans une page : NON testés.
+  de `pyodide-qt.mjs` seulement — relevé ensuite par l'essai ci-dessous.
+- **Essai dans une page, `essais/modules_demande/page.py`** (demande de l'utilisateur, 11 h 33 : « teste QOpenGLWidget et
+  le GET réseau dans une page ») ; état « essai_fini » (pas « fini », que le gabarit pose lui-même dès que le script est
+  lancé, avant tout rendu) ; mesuré sous Firefox 155 par la sonde, journal `sonde_gl.log` (git-ignoré) :
+  - **GET `QNetworkAccessManager` : OK.** La page elle-même, HTTP 200, 2 175 octets, `NoError`, 0,07 s dans le bac à
+    sable (2,0 s hors bac, où la machine servait aussi WebGL). `import QtNetwork, QtOpenGLWidgets` : 0,04 s, et
+    `performance.getEntriesByType("resource")` montre `pyside_QtNetwork.so.br` et `pyside_QtOpenGLWidgets.so.br` chargés
+    à ce moment-là, pas au démarrage : c'est le relevé des requêtes qui manquait au jalon 6.
+  - **`QOpenGLWidget` : le module se charge et le widget s'exécute, mais ne s'affiche pas — et ce n'est pas réparable
+    ici.** Hors bac à sable (la sonde lancée par l'utilisateur depuis son compte, seul endroit avec WebGL : le Firefox
+    headless du bac n'ouvre aucun contexte WebGL, même sur un canvas nu, `/dev/dri` absent, préférences de rendu logiciel
+    sans effet), le contexte est créé (OpenGL ES 3.0 via WebGL 2, `isValid()` vrai) et `paintGL` est appelé, mais chaque
+    image donne « QRhiGles2: Context is lost » puis « QOpenGLWidget: Failed to create wrapper texture », `initializeGL`
+    est rappelé 14 fois, et au bout de 0,6 s le wasm plante (« index out of bounds » dans Qt, page noire). Cause, lue dans
+    `qwasmopenglcontext.cpp` : `makeCurrent` refuse toute surface autre que la première (`m_contextOwningSurface !=
+    surface → false`), or le RHI de Qt rend son contexte courant sur une `QOffscreenSurface` de repli pour créer ses
+    textures. C'est documenté par Qt (doc.qt.io/qt-6/wasm.html, lu le 10/10/2026) : « OpenGL context sharing is not
+    supported. QOpenGLWidget and other classes which uses context sharing internally are not supported. » Le module
+    `QtOpenGLWidgets` n'apporte donc rien d'utilisable dans une page ; il reste dans le paquet (101 Kio, chargé seulement
+    si on l'importe) pour qu'un code de bureau qui l'importe sans l'afficher ne tombe pas sur un `ImportError`.
+  - Trouvé en passant : la liaison WASM de `QtGui.QOpenGLFunctions` n'a **aucune méthode `gl*`** (`AttributeError:
+    'QOpenGLFunctions' object has no attribute 'glClearColor'`), le bureau en a des dizaines. Shiboken les a écartées à
+    la génération (ES 2 : des inlines dans l'en-tête Qt ?). Non creusé, sans objet tant que le widget est inutilisable ;
+    l'essai peint par `QPainter`, qui marche des deux côtés.
+  - Outil laissé dans le dossier : `sonde_console.py`, la sonde de qtpy6 plus la console du navigateur recopiée dans le
+    journal (`console.warn`/`error`, erreurs JS, rejets). Sans elle, les qWarning de Qt-WASM (« WebGL context creation
+    failed », « Context is lost ») sont invisibles : ils vont à `console.warn`, pas à stderr. **Idée, pas codée** : en
+    faire une option `--console` de `qtpy6.web.sonde`.
 - Chrome (postes du lycée) : non testé ; le relais Chromium de l'utilisateur reste à faire si une page l'exige.
 - `hebergement/telecharger.sh` lancé depuis le bac à sable (sans réseau) : le zip dépaqueté dans `exemple/pyodide-qt`,
   la roue sqlite3 recopiée depuis `SmartTeacher/QCM/web/pyqt6/pyodide-qt` (même empreinte) et les jumeaux br/gz produits à
