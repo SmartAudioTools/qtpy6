@@ -201,6 +201,19 @@ function sans_menu(conteneur) {
   Object.assign(conteneur.style, { webkitTouchCallout: "none", webkitUserSelect: "none", userSelect: "none", touchAction: "none" });
 }
 
+// Le greffon wasm de QtMultimedia (qwasmaudiooutput.cpp, setSource d'un fichier local) pose sur le <source> le type tiré du
+// NOM de fichier : « audio/vorbis » pour un .ogg en wasm, que ni Firefox ni Chrome ne connaissent (canPlayType "" ; ils
+// veulent audio/ogg). Le <source> est alors écarté, son « error » part sur lui et Qt, qui n'écoute que l'<audio>, ne
+// l'apprend jamais : ni son, ni errorOccurred, ni EndOfMedia (le ▶ du lecteur SmartTeacher restait grisé, 10/10/2026).
+// Un type que le navigateur déclare ne pas savoir lire n'est donc pas posé : il reconnaît le fichier par son contenu.
+function types_media() {
+  const type = Object.getOwnPropertyDescriptor(HTMLSourceElement.prototype, "type");
+  const essai = document.createElement("audio");
+  Object.defineProperty(HTMLSourceElement.prototype, "type", { ...type, set(v) {
+    if (v && !essai.canPlayType(v)) this.removeAttribute("type"); else type.set.call(this, v);
+  } });
+}
+
 // Les boucles imbriquées de Qt, QDrag.exec en tête, comme sur le bureau. Qt-WASM sait les mener en suspendant sa pile
 // (QEventLoop::exec → qtSuspendJs) quand il se croit compilé avec Asyncify ; Pyodide-Qt ne l'est pas, mais la JSPI de
 // Pyodide fait la même chose : la cale `Asyncify` lui fait croire (jsHaveJspi() lit globalThis.Asyncify, haveJspi() met
@@ -433,6 +446,7 @@ export async function preparer(conteneur, { indexURL, archives = [], roues = [],
   py._module.qtContainerElements = [conteneur];  // l'API privée de Qt-WASM, isolée ici : l'élément qui sert d'écran à Qt
   molette(conteneur);
   sans_menu(conteneur);
+  types_media();
   if (boucles) glisser_rejoue(conteneur);
   window.qtpy6Conteneur = conteneur;  // ce que qtpy6.web.pdf lit pour caler ses <div> sur les widgets
   window.qtpy6Js = import.meta.url;  // d'où qtpy6.web.pdf charge pdf.js quand l'archive ne l'a pas (assembler, exclure)
