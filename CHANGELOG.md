@@ -2,6 +2,10 @@
 
 ## Non publié
 
+- Dans le navigateur, `concurrent.futures.ThreadPoolExecutor` est doublé sur les fils coopératifs : N `subprocess.run`
+  soumis au pool font tourner N Web Workers en même temps, au lieu de lever `RuntimeError` (pas de fils dans Pyodide).
+  `os.cpu_count()` y rend le nombre de cœurs du navigateur. Une application garde son pool natif tel quel : SmartTeacher
+  corrige 3 codes en fin d'épreuve en 29 s au lieu de 54 s l'un après l'autre (`web.md`).
 - Un réglage de session changé dans QtSelector vaut pour une application lancée du bureau sans relire
   `QtEnvironment.sh` (SmartTeacher), sans reconnexion : `set_env` écrit avec chaque réglage sa copie
   `QTPY6_LOGIN_<clé>`, et `get_env` ne préfère l'environnement que s'il diffère de cette copie, donc

@@ -47,6 +47,7 @@ if sys.platform == 'emscripten':
     fils.doubler(globals())
     bloquant.doubler_qtcore(globals())
     fils.doubler_sleep()
+    fils.doubler_futures()  # ThreadPoolExecutor : des tâches coopératives, leurs sous-processus en parallèle
 
 __version__ = _QT_VERSION
 __version_info__ = tuple(int(part) for part in _QT_VERSION.split('.'))

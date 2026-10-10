@@ -493,3 +493,94 @@ def doubler_sleep():
             sleep(secs)
 
     time.sleep = sleep_
+
+
+def doubler_futures():
+    """``concurrent.futures.ThreadPoolExecutor`` sur les « fils » coopératifs : chaque tâche démarre à la tâche asyncio
+    suivante (``_plus_tard``) et les tâches se relaient à chacune de leurs attentes — un ``subprocess.run`` y attend son
+    worker pendant que les autres lancent les leurs : N programmes tournent en même temps dans N Web Workers, comme N
+    processus sur N cœurs. ``result()``, ``wait``, ``as_completed`` et la sortie du ``with`` suspendent l'appelant au lieu
+    de bloquer la page (hors entrée suspendable, une tâche pas finie y lève ``RuntimeError``). ``os.cpu_count()`` rend le
+    nombre de cœurs du navigateur (``navigator.hardwareConcurrency``) : celui des workers qui tournent vraiment ensemble.
+    ``initializer`` est appelé avant chaque tâche (il n'y a pas de fil à initialiser une fois)."""
+    import concurrent.futures as cf  # noqa: PLC0415
+    import concurrent.futures._base as base  # noqa: PLC0415
+
+    class Future(cf.Future):
+        def result(self, timeout=None):
+            _attendre(self.done, -1 if timeout is None else timeout * 1000)
+            return super().result(0 if not self.done() else None)
+
+        def exception(self, timeout=None):
+            _attendre(self.done, -1 if timeout is None else timeout * 1000)
+            return super().exception(0 if not self.done() else None)
+
+    class ThreadPoolExecutor(cf.Executor):
+        def __init__(self, max_workers=None, thread_name_prefix="", initializer=None, initargs=()):
+            self._max = max_workers or min(32, (os.cpu_count() or 1) + 4)
+            self._initializer, self._initargs = initializer, initargs
+            self._en_cours, self._file, self._ferme = 0, [], False
+
+        def submit(self, fn, /, *args, **kwargs):
+            if self._ferme:
+                raise RuntimeError("cannot schedule new futures after shutdown")
+            f = Future()
+            self._file.append((f, fn, args, kwargs))
+            self._suivant()
+            return f
+
+        def _suivant(self):
+            while self._file and self._en_cours < self._max:
+                self._en_cours += 1
+                bloquant._plus_tard(self._executer, *self._file.pop(0))
+
+        def _executer(self, f, fn, args, kwargs):
+            try:
+                if f.set_running_or_notify_cancel():
+                    if self._initializer is not None:
+                        self._initializer(*self._initargs)
+                    try:
+                        f.set_result(fn(*args, **kwargs))
+                    except BaseException as e:  # noqa: BLE001
+                        f.set_exception(e)
+            finally:
+                self._en_cours -= 1
+                self._suivant()
+
+        def shutdown(self, wait=True, *, cancel_futures=False):
+            self._ferme = True
+            if cancel_futures:
+                for f, *_ in self._file:
+                    f.cancel()
+                self._file.clear()
+            if wait:
+                _attendre(lambda: not self._en_cours and not self._file)
+
+    attendre_futures = cf.wait
+
+    def wait(fs, timeout=None, return_when=cf.ALL_COMPLETED):
+        fs = list(fs)
+        voulu = {cf.FIRST_COMPLETED: lambda: any(f.done() for f in fs),
+                 cf.FIRST_EXCEPTION: lambda: all(f.done() for f in fs) or any(f.done() and not f.cancelled() and f.exception(0)
+                                                                              for f in fs),
+                 cf.ALL_COMPLETED: lambda: all(f.done() for f in fs)}[return_when]
+        _attendre(voulu, -1 if timeout is None else timeout * 1000)
+        return attendre_futures(fs, 0, return_when)
+
+    def as_completed(fs, timeout=None):
+        restants, fin = set(fs), None if timeout is None else time.monotonic() + timeout
+        while restants:
+            _attendre(lambda: any(f.done() for f in restants), -1 if fin is None else max(0, fin - time.monotonic()) * 1000)
+            finis = {f for f in restants if f.done()}
+            if not finis:
+                raise cf.TimeoutError(f"{len(restants)} (of {len(fs)}) futures unfinished")
+            restants -= finis
+            yield from finis
+
+    cf.ThreadPoolExecutor, cf.Future, cf.wait, cf.as_completed = ThreadPoolExecutor, Future, wait, as_completed
+    base.wait, base.as_completed = wait, as_completed  # Executor.map passe par Future.result : déjà doublé
+
+    import js  # noqa: PLC0415
+    coeurs = int(getattr(js.navigator, "hardwareConcurrency", 0) or 0)
+    if coeurs:
+        os.cpu_count = lambda: coeurs
