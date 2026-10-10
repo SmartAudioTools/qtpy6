@@ -181,6 +181,109 @@ suite (un seul Worker préchauffé) ; un REPL persistant ; la frappe directe dan
 ressenti à la main. Le démarrage à froid a été mesuré site déjà en cache du navigateur : au premier chargement il
 comprend le téléchargement de Pyodide-Qt.
 
+### Résultat du jalon 4 (10/10/2026, 07 h 55) : la complétion, jedi dans un Worker, sans serveur de langage
+
+Demande de l'utilisateur (07 h 40) : « oui, lance le jalon 4 » (rallonge de 2,5 points de quota pour les jalons 4 et 5).
+Mesuré avec `essais/spyder/jalon4.py` (bureau offscreen et page, `site/index.html?script=jalon4.py`, sonde `--pilote`) : le
+`CodeEditor` de Spyder avec les 2 000 premières lignes de `codeeditor.py` du fork, `completions_available = True`, et son
+signal `sig_perform_completion_request` branché, à la place du client LSP, sur deux moteurs : **A**, jedi importé dans
+l'interpréteur de la page (`jalon4_jedi.completer`) ; **B**, le même `jalon4_jedi.py` lancé en serveur (une requête JSON
+par ligne sur stdin, une réponse par ligne sur stdout) par `qtpy6.QtCore.QProcess` — un vrai processus SmartPython sur le
+bureau, `ProcessusWeb` (Web Worker) dans la page, par `start(sys.executable, ["-u", serveur])`, strictement le même code
+appelant. Les réponses reviennent par `handle_response(DOCUMENT_COMPLETION)`, le chemin normal de Spyder. Trois requêtes
+sur chaque moteur, dans le même ordre (`os.pa` à froid puis à chaud, `CodeEditor.set`, `"".up`), B deux fois (Worker à
+froid, puis Worker préchauffé par `prechauffer(["jedi", "parso"])`), puis le geste réel : un clic dans l'éditeur, la
+frappe de `import os` et `os.pat` (le « . » déclenche la complétion automatique de Spyder), Entrée sur la liste.
+
+| Mesure (page : Firefox, site en cache, charge machine ≈ 2,5, 4 lancements qui passent ; bureau offscreen, 5) | Navigateur, A (page) | Navigateur, B (Worker) | Bureau, A | Bureau, B (QProcess) |
+|---|---|---|---|---|
+| moteur prêt (B : Pyodide démarré + `import jedi`) | 0 ms (jedi déjà importé par Spyder) | **801–898 ms** à froid, dont 518–576 d'`import jedi` ; **307–358 ms** préchauffé | 0 ms | 63–75 ms |
+| `os.pa` à froid, 1re complétion (jedi lit typeshed) | **1 586–1 741 ms** | **1 391–1 517 ms** (aller-retour +8 ms), préchauffé ou non | 1 117–1 246 ms | 370–434 ms |
+| `os.pa` à chaud | 83–88 ms | 69–75 ms (aller-retour 79–84) | 89–102 ms | 79–87 ms |
+| `CodeEditor.set` (une classe du fichier) | **0 item, erreur** (364 ms) | 25 items, 62–68 ms | 141 items, **5 285–5 589 ms** | 25 items, 29–34 ms |
+| `"".up` | 254–289 ms | 226–247 ms | 52–62 ms | 50–59 ms |
+| plus long silence de la page pendant la série | **1 678–1 765 ms (page figée)** | **54–60 ms** | 5 337–5 637 ms | 50–52 ms |
+| tas WebAssembly de la page | 103 → 124 Mio | 124 Mio, stable (le Worker a le sien) | — | — |
+| geste réel (B) : frappe → réponse du widget, puis liste affichée | — | 102–107 ms (jedi 94–99), liste 50–59 ms après | — | 88 ms, liste 398–418 ms après |
+| script entier | 16,7–16,9 s | | 10,4–10,7 s | |
+
+Tout passe : « insertion : ok » (« os.path » sur la ligne du curseur après Entrée), une seule requête par frappe, captures
+`capture_jalon4_liste.png` / `_fin.png` (page) et `_bureau_liste.png` / `_bureau_fin.png`, relues : la liste de Spyder
+(« path variable », « pathsep », « pathconf »…) s'affiche aux deux endroits.
+
+**Verdict (exigence du Superviseur, 07 h 46) : B, jedi dans un Worker derrière `qtpy6.QtCore.QProcess`.** Ce qui le dit :
+la page reste réactive (54–64 ms de silence au pire) là où A la fige 1,7 s au premier appel — et 5,5 s sur le bureau pour
+une classe du fichier (le cas de la classe de 2 000 lignes, pas celui d'un élève, mais c'est l'éditeur qui gèle). Et le
+coût caché de A, qu'aucune durée ne montre : jedi (`InterpreterEnvironment`) IMPORTE dans l'interpréteur de l'éditeur les
+modules que le fichier nomme (1 module par première complétion, relevé par différence de `sys.modules`) ; sur le bureau,
+`import PySide2` (cassé dans SmartPython, nommé par qtpy) a fait tomber l'éditeur (core dump, deux fois, jusqu'à bloquer
+ces imports dans `jalon4_jedi.py`) ; dans la page, le PySide6 de Pyodide-Qt rend `AttributeError: 'CompiledValue' object
+has no attribute 'py__path__'` (0 item, la ligne « erreur » du tableau). Un moteur dans l'éditeur tombe avec le fichier de
+l'élève ; dans un Worker, c'est le Worker qui tombe, et l'éditeur en relance un. Ce que B coûte : le démarrage (0,8 s à
+froid, 0,3 s préchauffé) et la première complétion (~1,4 s, préchauffé ou non : `prechauffer` installe les roues mais jedi
+lit typeshed à la première requête). Un Worker de réserve lancé à l'ouverture de l'éditeur, qui reçoit une complétion
+factice (`import os\nos.pa`), cacherait les deux à l'élève ; non mesuré. B ne voit que le dossier de l'élève (filtre de
+`configurer`) : 25 items sur `CodeEditor.set` contre 141 pour A, parce que les imports de Spyder ne s'y résolvent pas ;
+pour un fichier d'élève (`os`, `math`, `random`, `json` : stdlib, typeshed) c'est sans effet.
+
+**Les stubs tiers (exigence du Superviseur)** : retirer `jedi/third_party/typeshed/stubs/` (12 Mio : requests, six…) ne
+change AUCUNE des 8 listes comparées (`os.pa`, `CodeEditor.set`, `"".up`, `os.pat`, `json.du`, `random.ra`,
+`from math import s`, `l.ap` ; bureau, sous-processus, même `sys.path`, jedi complet contre la roue sans stubs) ; la
+stdlib de typeshed reste. `essais/spyder/roues_jedi.py` reconstruit les deux roues (`jedi-0.20.0+sansstubs`, 1 262 Kio,
+et `parso-0.8.7`) dans `essais/roues/`, non versionné (`.gitignore`) : `$P essais/spyder/roues_jedi.py`.
+`essais/spyder/construire_site.py` les copie dans le site (`roues=` de `construire`) et les nomme dans `window.roues`
+pour le Worker ; `app.zip` : 24 144 Kio (site reconstruit après la correction du chemin des roues, `ICI.parent / "roues"` : les deux roues trouvées).
+
+**Même code natif et web (consigne de l'utilisateur, 07 h 55, transmise par le Superviseur : « j'aimerais avoir le même code
+pour les versions natives et web de SmartPythonEditor. C'est à qtpy6 de rendre le code agnostique en créant des
+doublures »)** — pour chaque mécanisme des jalons 3 et 4, ce qui est doublure qtpy6 et ce qui resterait propre au web :
+  - **exécution du fichier (jalon 3)** : `ShellBaseWidget` + `qtpy6.QtCore.QProcess` ; natif, un vrai `QProcess` Python ;
+    web, `ProcessusWeb`. Doublure déjà en service, aucune branche dans le code appelant.
+  - **complétion (jalon 4)** : `jalon4_jedi.py` en serveur sous le même `QProcess` : `jalon4.py` le lance par la même ligne
+    des deux côtés, et le protocole (JSON par ligne) ne sait pas où il tourne. Doublure déjà en service. Dans le port : un
+    fournisseur de complétion de Spyder (à la place du client LSP) qui parle à ce serveur ; survol, signature, aller à la
+    définition : les mêmes appels jedi, le même canal.
+  - **explorateur de variables (question de l'utilisateur, 10/10 au matin, non tranchée)** : il faut un interpréteur qui
+    survive à la fin du script ; même mécanisme, pas codé : le serveur du processus garde l'espace de noms du script une
+    fois celui-ci fini (`exec` dans un `globals()` conservé, comme `console_enfant.py` du lecteur SmartTeacher le fait
+    déjà) et répond à « donne tes variables » (nom, type, taille, repr : ce que `get_remote_data` de spyder_kernels rend)
+    sur le même canal JSON, par la même API des deux côtés (`QProcess.write`). Coût estimé : quelques jours pour le
+    protocole des variables ; brancher `NamespaceBrowser` de Spyder (qui attend un `shellwidget` jupyter) sur ce canal
+    est la partie Spyder, hors qtpy6. Ce que ça exclut : un objet non sérialisable reste côté Worker (seul son repr
+    passe), et l'édition en place d'une variable est une seconde commande.
+  - **ce qui resterait propre au web, à soumettre à l'utilisateur** (c'est ce que `jalon4.py` fait aujourd'hui sous
+    `if WEB`, l'instrumentation de l'essai mise à part : état de la page pour la sonde, tas, captures, plein écran) :
+    1. `travailleur.configurer(indexURL, roues, filtre)` : quel Pyodide le Worker charge, quelles roues il installe (jedi,
+       parso), quels fichiers il reçoit. Le natif n'a pas d'équivalent (le processus voit le disque et `site-packages`).
+       Pour effacer la branche : une API commune sur `qtpy6.QtCore.QProcess` (un réglage « roues / dossier de travail »
+       sans effet en natif), ou la page qui les pose elle-même à la construction (ce que `window.roues` fait déjà). À
+       décider : où vit la liste des roues ;
+    2. `travailleur.prechauffer(modules)`, le Worker de réserve : une doublure qui ne fait rien en natif (un processus
+       démarre en 63 ms) suffit, mais c'est un appel qui n'existe que pour le web ;
+    3. `waitForFinished` : absent de `ProcessusWeb` (une page n'attend pas), nécessaire en natif pour ne pas détruire un
+       `QProcess` en cours. Soit `ProcessusWeb` l'offre (retour immédiat), soit le code appelant se fie à `finished` ;
+    4. le dossier de l'élève existe des deux côtés, mais dans la page il est dans le système de fichiers virtuel, effacé
+       au rechargement : c'est le jalon 5.
+
+Ce qu'il a fallu corriger (tout dans `jalon4.py` et `jalon4_jedi.py`, aucun fichier de `qtpy6/` touché) :
+  - **jedi importe les modules compilés qu'il rencontre** : `sys.modules[m] = None` pour PySide2, shiboken2, PyQt5, PyQt6
+    avant `import jedi` (ImportError propre au lieu du core dump) ; dans la page, `try/except` autour de `complete`,
+    l'erreur va sur stderr et la liste est vide (le tableau le montre, ce n'est pas masqué) ;
+  - **le moteur A appelait `pret()` dans son constructeur**, avant d'être posé comme moteur courant : `QTimer.singleShot(0)` ;
+  - **une réponse du serveur arrive en plusieurs morceaux** (`readyReadStandardOutput`, page comme bureau) : tampon
+    découpé sur `\n`, la dernière ligne incomplète attend la suite ;
+  - **un `QProcess` tué puis détruit** fait râler Qt à la sortie sur le bureau : `waitForFinished(1000)` après `kill`
+    (branche native, voir le point 3 ci-dessus) ;
+  - **l'insertion se vérifie sur la ligne du curseur**, pas sur la dernière ligne du fichier : le vrai clic de la sonde
+    pose le curseur au milieu du fichier (ligne 1 978), là où « os.path » est inséré ;
+  - **les roues ne sont pas dans `app.zip`** mais à côté de la page : `construire_site.py` les nomme dans `window.roues`,
+    que `jalon4.py` relit pour `configurer`.
+
+Ce que le jalon ne mesure pas : le ressenti à la main ; plusieurs complétions enchaînées (un seul geste réel) ; le tas du
+Worker ; le premier chargement sans cache (les roues jedi et parso s'ajoutent à Pyodide-Qt, 1,3 Mio) ; le survol, la
+signature et l'aller-à-la-définition (mêmes appels jedi, non lancés) ; un Worker de réserve qui aurait déjà fait une
+première complétion.
+
 ## Conclusion en cinq lignes
 
 | | Verdict |
@@ -353,6 +456,11 @@ précédent dont la voie B copierait l'architecture noyau ; Binder : un vrai Spy
   `jalon3_bureau.log`, captures relues (page et bureau identiques). Les durées de la page viennent d'UN lancement qui
   passe, machine à charge 8 : ordres de grandeur. Les modules tirés par `ShellBaseWidget` : différence de `sys.modules`
   sur le bureau, non refaite dans la page.
+- Jalon 4 : **mesuré en direct**, quatre lancements de la page qui passent (après trois arrêtés par les défauts corrigés)
+  et cinq du bureau, journaux `essais/spyder/sonde_jalon4.log` et `jalon4_bureau.log`, captures relues (liste et
+  insertion, page et bureau). Les fourchettes du tableau sont les extrêmes de ces lancements. L'effet des stubs tiers :
+  8 listes comparées sur le bureau (script de session, non conservé ; `roues_jedi.py` reconstruit la roue comparée).
+  Les modules importés par A : différence de `sys.modules` autour de chaque complétion, page et bureau.
 - Disponibilité des roues Pyodide pour les extensions C : **non vérifiée** (aucune n'a été nécessaire au jalon 1).
 - Les durées sont des ordres de grandeur, pas des estimations fondées sur une mesure.
 
@@ -403,12 +511,19 @@ précédent dont la voie B copierait l'architecture noyau ; Binder : un vrai Spy
   le renommage, l'essai avec alias conservés plante (core dump) ; après, il passe en natif (capture) et dans Firefox
   (site reconstruit, sonde : 2,9 s, tas 86 Mio, capture relue, la page est identique). Le contournement générique
   n'est donc plus en service. Pourquoi PySide6 plante au lieu de lever n'a pas été cherché.
-- Jalons 1, 2 et 3 atteints (le 3 : exécution dans un Worker par `ProcessusWeb`, pas dans le même interpréteur, qui fige
-  la page) : les jalons suivants de la voie B, dans l'ordre où chacun peut faire échouer le projet seul :
-  4. la complétion (jedi en direct, sans serveur de langage) ; 5. les fichiers (lire, enregistrer, retrouver — stockage
-  du navigateur ou téléchargement). Chacun : un `essais/spyder/jalonN.py`, mesuré par la sonde, avant de toucher au fork.
-  Dans le port lui-même : monter `max_line_count` de la console (300 lignes), garder un Worker de réserve
-  (`prechauffer()`) entre deux exécutions, et décider si un REPL persistant est voulu (voir le verdict du jalon 3).
+- Jalons 1, 2, 3 et 4 atteints (le 3 : exécution dans un Worker par `ProcessusWeb`, pas dans le même interpréteur, qui fige
+  la page ; le 4 : complétion jedi dans un Worker par le même `QProcess`, pas dans la page) : reste le jalon 5 de la voie
+  B, les fichiers (lire, enregistrer, retrouver — stockage du navigateur ou téléchargement), un `essais/spyder/jalon5.py`
+  mesuré par la sonde avant de toucher au fork. Dans le port lui-même : monter `max_line_count` de la console (300
+  lignes), garder un Worker de réserve (`prechauffer()`) entre deux exécutions et lui faire faire une première complétion
+  factice (jalon 4 : `prechauffer` installe les roues, mais la première requête jedi coûte encore 1,4 s), et décider si
+  un REPL persistant est voulu (voir le verdict du jalon 3 et l'explorateur de variables au jalon 4).
+- Les quatre points « propres au web » du jalon 4 (réglages du Worker, `prechauffer`, `waitForFinished`, dossier de
+  l'élève) sont à trancher par l'utilisateur avant le port : ce sont les seules lignes qui, aujourd'hui, ne sont pas les
+  mêmes sur le bureau et dans la page.
+- `jalon2.py`, `jalon3.py` et `jalon4.py` recopient les mêmes outils (horloge de silence, gestes de la sonde, captures,
+  chien de garde) : un `essais/spyder/commun.py` à faire au jalon 5, pas avant (les trois essais mesurés restent tels
+  qu'ils ont été lancés).
 - La sonde (`web/sonde.py`) ne protège pas contre un geste demandé pendant qu'elle finit le précédent (jalon 3) : un
   `_fait` posé par compare-and-set la rendrait sûre ; hunk à proposer au Superviseur si un autre essai y tombe.
 - La règle « un slot qui reçoit un QEvent s'exécute sur place » (`bloquant.py`) n'a pas de test unitaire dans

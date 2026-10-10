@@ -4,12 +4,14 @@ editeur.py sans), puis le mesure avec la sonde :
     $P construire_site.py            # construit
     $P -m qtpy6.web.sonde site/index.html capture_web.png --racine site --delai 600
     $P -m qtpy6.web.sonde 'site/index.html?script=jalon2.py' capture_jalon2.png --racine site --delai 600 --pilote
+    $P -m qtpy6.web.sonde 'site/index.html?script=jalon4.py' capture_jalon4.png --racine site --delai 600 --pilote
 
 Même mécanisme que ``python -m qtpy6.web.construire``, avec en plus : le fork Spyder et les roues pures sur sys.path (d'où
 ``--paquet spyder`` prend le fork), les paquets purs que l'import de CodeEditor tire (relevé par audit de sys.modules sur le
 bureau), les dossiers de Spyder inutiles ici laissés dehors (MathJax de l'aide : 29 Mo, traductions : 6 Mo, tests : 4 Mo),
 les polices DejaVu, et deux mesures imprimées dans le journal de la page : durée totale et tas WebAssembly."""
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -27,9 +29,12 @@ PAQUETS = ("spyder qtpy IPython asttokens colorama decorator diff_match_patch ex
            "prompt_toolkit pure_eval pygments qdarkstyle qtawesome qtconsole sortedcontainers spyder_kernels textdistance "
            "stack_data superqt tinycss2 traitlets wcwidth webencodings").split()
 DISTRIBUTIONS = ["qstylizer", "ipython_pygments_lexers", "typing_extensions"]  # modules d'un seul fichier : --paquet prendrait site-packages
-EXCLURE = ["spyder/plugins/help/utils/js/", "spyder/locale/", "qtpy6/web/js/pdfjs/"]
+EXCLURE = ["spyder/plugins/help/utils/js/", "spyder/locale/", "qtpy6/web/js/pdfjs/",
+           "jedi/third_party/typeshed/stubs/"]  # stubs tiers (12 Mo) : jamais consultés ici, voir roues_jedi.py
 EXCLURE_TESTS = "/tests/"
 POLICES = [f"/usr/share/fonts/TTF/DejaVu{n}.ttf" for n in ("Sans", "Sans-Bold", "SansMono", "SansMono-Bold")]
+ROUES = sorted(str(r) for m in ("jedi-*.whl", "parso-*.whl")  # jalon 4 : jedi dans la page (moteur A) et dans le
+              for r in (ICI.parent / "roues").glob(m))  # Worker (B, travailleur.configurer) ; roues_jedi.py
 
 MESURE = ('  await rendu();\n'
           '  print("durée totale : " + (performance.now() / 1000).toFixed(1) + " s ; tas wasm : "'
@@ -65,7 +70,7 @@ SITE.mkdir(exist_ok=True)
 lien = SITE / "pyodide-qt"
 if not lien.exists():
     lien.symlink_to(PYODIDE_QT)
-taille = _construire.construire(ICI / "editeur.py", SITE, "./pyodide-qt/", PAQUETS, DISTRIBUTIONS, POLICES, (),
+taille = _construire.construire(ICI / "editeur.py", SITE, "./pyodide-qt/", PAQUETS, DISTRIBUTIONS, POLICES, ROUES,
                                 "CodeEditor de Spyder dans qtpy6")
 page = SITE / "index.html"
 texte = page.read_text(encoding="utf-8")
@@ -74,5 +79,8 @@ texte = texte.replace("  await rendu();\n", MESURE)
 assert texte.count('"/home/pyodide/app/editeur.py"') == 1
 texte = texte.replace('"/home/pyodide/app/editeur.py"',  # un seul site pour tous les essais : index.html?script=jalon2.py
                       '"/home/pyodide/app/" + (new URLSearchParams(location.search).get("script") || "editeur.py")')
+assert texte.count('window.etat = "en cours";') == 1
+texte = texte.replace('window.etat = "en cours";',  # les roues, pour le Worker du jalon 4 (travailleur.configurer)
+                      'window.etat = "en cours"; window.roues = ' + json.dumps([f"./{Path(r).name}" for r in ROUES]) + ";")
 page.write_text(texte, encoding="utf-8")
 print(f"site/app.zip : {taille // 1024} Kio")
