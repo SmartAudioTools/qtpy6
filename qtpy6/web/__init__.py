@@ -26,7 +26,6 @@ Le reste, qui n'a pas d'équivalent Qt, est dans ce paquet :
     bloquant                         exec() des boîtes, menus, boucles et de l'application, et les boîtes statiques
     fils                             QThread, QThreadPool, verrous : des fils coopératifs sur le fil unique de la page
     stockage                         localStorage, un dossier rangé dans IndexedDB, téléchargement d'un fichier
-    audio                            jouer un son embarqué (octets en mémoire), natif ou navigateur
     assembler                        l'archive que la page dépaquette : fichiers, paquets, distributions, polices
     construire                       ``python -m qtpy6.web.construire app.py site/`` : la page, l'archive, le chargeur
     sonde                            ``python -m qtpy6.web.sonde`` : la page dans Firefox sans interface, journal et capture
