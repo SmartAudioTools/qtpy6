@@ -21,7 +21,8 @@ jumeaux .br, pyodide-qt.mjs retombe sur le .so brut après un 404 du .br) :
     319 » en console.warn) et le play() de l'élément audio est refusé (NotAllowedError : pas de geste utilisateur).
   - Quick : import et QQuickWidget Ready (14 h, après le correctif de pyodide-qt.mjs : dépendance OpenGL, chargement global) ;
     rendu non vérifié ici, ce Firefox n'a pas de WebGL (« Failed to get a QRhi »). Avant : SuspendError à l'import.
-  - `?sans=quick` isole Charts et Multimedia (diagnostic). Journaux : sonde*.log.
+  - `?sans=quick` isole Charts et Multimedia (diagnostic). Journaux : sonde*.log. Jumeaux `.br` : `site/pyodide-qt-br/`
+    (liens vers dist/ + `brotli -q 11` des nouveaux .so), `site/pyodide-qt` pointé dessus : chargés sans repli (sonde_br.log).
 """
 
 import math

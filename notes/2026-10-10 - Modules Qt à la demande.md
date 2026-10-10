@@ -265,8 +265,14 @@ liaison que l'init de QtQuick importe (c'est le défaut corrigé). Restent trois
   `VERDICT quick : OK QQuickWidget statut=Ready, framebuffer 978x170, 6612 points rouges, 4,03 s depuis l'import` ;
   capture `capture_hors_bac.png` relue (rectangle rouge « Qt Quick QML » sous la courbe Charts). Journal `sonde_hors_bac.log`.
   Commit `321f079`, release `pyodide-pyside6-0.29.3.2` publiée, push fait (`5e1b254..321f079`).
-- Les jumeaux `.br` des sept nouveaux `.so` : servis par `site/` depuis `dist/` brut, donc non testés dans cette page
-  (ceux de qtbase l'ont été dans l'essai précédent, même mécanisme).
+- Les jumeaux `.br` des sept nouveaux `.so` : **testés** à 14 h 55 (demande de l'utilisateur : « teste les .br des nouveaux
+  modules dans la page »). `site/pyodide-qt-br/` = liens vers `dist/` + `brotli -q 11` des sept (mêmes tailles que ci-dessus),
+  `site/pyodide-qt` pointé dessus, même sonde (`sonde_br.log`). La ligne des ressources ne montre que `pyside_QtCharts.so.br`,
+  `pyside_QtMultimedia.so.br`, `pyside_QtQml.so.br`, `pyside_QtQuick.so.br`, `pyside_QtQuickWidgets.so.br` : décompressés par
+  `DecompressionStream("brotli")`, chargés, sans repli sur le `.so` (les modules de qtbase, sans `.br` dans ce dossier,
+  montrent le repli `.br` puis `.so` : c'est le témoin que le repli ne se confond pas avec le succès). Verdicts inchangés
+  (Charts OK, Multimedia OK, Quick Ready sans rendu : Firefox du bac, pas de WebGL). `exemple/pyodide-qt` reste en 0.29.3.1
+  jusqu'à un `hebergement/telecharger.sh` (réseau : curl de la roue sqlite3, hors bac à sable).
 - Style des Controls (`QQuickStyle`) : rien de réglé, le style Basic est celui que les greffons statiques apportent.
 - `pyodide-qt.mjs` : l'`ImportError` « introuvable » d'un module absent de `DEMANDE` reste bruyante (pile JS entière).
 - `sonde_console.py` n'affiche pas `x.message` d'une exception JS (une copie de travail l'ajoutait) : à intégrer.
