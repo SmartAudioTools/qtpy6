@@ -248,7 +248,7 @@ lit les verdicts. Journal `essais/modules_qt_suite/sonde.log`, capture `capture.
   verte avec `global: true` ; dans la page, QtQuick et QtQuickWidgets s'importent (0,14 s), `QQuickWidget` passe à `Ready`
   sans erreur QML. Le rendu, lui, échoue faute de WebGL dans ce Firefox (« WebGL context creation failed », « QQuickWidget:
   Failed to get a QRhi ») ; forcer le WebGL logiciel par préférences (`webgl.force-enabled`, `gfx.webrender.software`,
-  `LIBGL_ALWAYS_SOFTWARE=1`) ne change rien, essai fait. Ce verdict-là attend un navigateur hors bac à sable.
+  `LIBGL_ALWAYS_SOFTWARE=1`) ne change rien, essai fait. Ce verdict-là est venu du navigateur hors bac à sable (points ouverts).
 - Le zip `0.29.3.2` a été reconstruit après le correctif (il embarque `pyodide.mjs`) ; sha256 reporté dans
   `versions.json` et ci-dessus.
 
@@ -261,7 +261,10 @@ liaison que l'init de QtQuick importe (c'est le défaut corrigé). Restent trois
 
 ### Points ouverts (à regarder en premier)
 
-- Rendu de Qt Quick dans un vrai navigateur (WebGL) : non vérifié. Commande hors bac à sable donnée à l'utilisateur.
+- Rendu de Qt Quick : **vérifié** à 14 h 51, même sonde lancée par l'utilisateur hors bac à sable (Firefox 155 avec WebGL) :
+  `VERDICT quick : OK QQuickWidget statut=Ready, framebuffer 978x170, 6612 points rouges, 4,03 s depuis l'import` ;
+  capture `capture_hors_bac.png` relue (rectangle rouge « Qt Quick QML » sous la courbe Charts). Journal `sonde_hors_bac.log`.
+  Commit `321f079`, release `pyodide-pyside6-0.29.3.2` publiée, push fait (`5e1b254..321f079`).
 - Les jumeaux `.br` des sept nouveaux `.so` : servis par `site/` depuis `dist/` brut, donc non testés dans cette page
   (ceux de qtbase l'ont été dans l'essai précédent, même mécanisme).
 - Style des Controls (`QQuickStyle`) : rien de réglé, le style Basic est celui que les greffons statiques apportent.
