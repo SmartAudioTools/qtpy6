@@ -20,8 +20,10 @@ sonde pose ``window.etat = "glissé"`` une fois le glissé fait, et attend que l
 qui vérifie le résultat du glissé, et un test automatique qui en dépend. ``--pilote`` : pendant que la page tourne, ses
 demandes de gestes réels, qu'un événement synthétique de Qt ne remplace pas (un slot qu'un vrai clic déclenche est reporté
 par ``bloquant``, pas celui de ``click()``) : ``window.etat = "cliquer"`` (en ``window.clic = [x, y]``, pixels CSS) ou
-``"taper"`` (``window.texte``, au clavier, là où est le focus) ; la sonde fait le geste et répond ``window.etat`` suivi
-de ``"_fait"``, puis la page poursuit.
+``"taper"`` (``window.texte``, au clavier, là où est le focus), ``"fichier"`` (``window.fichier = {nom, texte}``, déposé
+dans le sélecteur de fichiers que la page vient d'ouvrir par ``QFileDialog.getOpenFileName``) ou ``"recharger"`` (la page
+rechargée, sans réponse : elle repart de zéro et reconnaît un second passage à ce qu'elle retrouve) ; la sonde fait le
+geste et répond ``window.etat`` suivi de ``"_fait"``, puis la page poursuit.
 
 Firefox par défaut, parce que Chromium n'ouvre pas sans socket Unix (son verrou d'instance unique,
 ``process_singleton_posix``), ce qu'un bac à sable peut interdire. ``--chromium`` passe par QtWebEngine, le même moteur
@@ -112,8 +114,8 @@ def attendre(navigateur, etat, fin, pilote=False):
         if lu in (etat, "erreur"):
             return lu
         if pilote and lu in GESTES:
-            GESTES[lu](navigateur)
-            navigateur.execute_script(f"window.etat = '{lu}_fait'")
+            if GESTES[lu](navigateur) is not False:  # False : un geste qui ne se répond pas (recharger)
+                navigateur.execute_script(f"window.etat = '{lu}_fait'")
             continue
         time.sleep(0.2 if pilote else 0.5)
     return "délai dépassé"
@@ -155,7 +157,48 @@ def taper(navigateur):
     repeint(navigateur)
 
 
-GESTES = {"cliquer": cliquer, "taper": taper}
+def fichier(navigateur):
+    """``window.fichier`` ({nom, texte}) déposé dans le sélecteur de fichiers que la page a ouvert (``bloquant.ELEMENT_FICHIERS``,
+    déjà présent : la page ne rend la main qu'une fois suspendue dessus) : ce que l'utilisateur fait en choisissant un fichier
+    de son disque. Écrit dans un dossier temporaire, qui reste : le navigateur ne lit le fichier qu'après le geste."""
+    import tempfile  # noqa: PLC0415
+
+    from .bloquant import ELEMENT_FICHIERS  # noqa: PLC0415
+
+    f = navigateur.execute_script("return window.fichier")
+    chemin = os.path.join(tempfile.mkdtemp(prefix="sonde-"), f["nom"])
+    Path(chemin).write_text(f["texte"], encoding="utf-8")
+    if isinstance(navigateur, Blink):
+        racine = navigateur.cdp("DOM.getDocument")["root"]["nodeId"]
+        noeud = navigateur.cdp("DOM.querySelector", nodeId=racine, selector="#" + ELEMENT_FICHIERS)["nodeId"]
+        navigateur.cdp("DOM.setFileInputFiles", files=[chemin], nodeId=noeud)
+    else:
+        from selenium.webdriver.common.by import By  # noqa: PLC0415
+
+        navigateur.find_element(By.ID, ELEMENT_FICHIERS).send_keys(chemin)
+    repeint(navigateur)
+
+
+def recharger(navigateur):
+    """La page rechargée (F5), sans réponse « _fait » (rend False) : le nouveau document repart de zéro — son chargeur pose
+    ``window.etat = "en cours"`` — et reconnaît un second passage à ce qu'il retrouve (IndexedDB, localStorage). Rend la
+    main une fois le nouveau document chargé (Blink : rechargement asynchrone, attendu sur ce témoin et readyState)."""
+    if isinstance(navigateur, Blink):
+        navigateur.cdp("Page.reload")
+        fin = time.time() + 60
+        while time.time() < fin:
+            try:
+                if navigateur.execute_script("return document.readyState === 'complete' && window.etat !== 'recharger'"):
+                    break
+            except RuntimeError:  # l'évaluation tombe sur le document en cours de déchargement
+                pass
+            time.sleep(0.2)
+    else:
+        navigateur.refresh()  # bloque jusqu'au chargement du nouveau document
+    return False
+
+
+GESTES = {"cliquer": cliquer, "taper": taper, "fichier": fichier, "recharger": recharger}
 
 
 def repeint(navigateur):

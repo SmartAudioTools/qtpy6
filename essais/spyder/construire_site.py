@@ -25,7 +25,7 @@ from qtpy6.web import assembler as _assembler, construire as _construire  # noqa
 ICI = Path(__file__).resolve().parent
 SITE = ICI / "site"
 PYODIDE_QT = Path("/DATA/Python/qtpy6/exemple/pyodide-qt")
-PAQUETS = ("spyder qtpy IPython asttokens colorama decorator diff_match_patch executing intervaltree jedi packaging parso "
+PAQUETS = ("spyder qtpy IPython asttokens chardet colorama decorator diff_match_patch executing intervaltree jedi packaging parso "
            "prompt_toolkit pure_eval pygments qdarkstyle qtawesome qtconsole sortedcontainers spyder_kernels textdistance "
            "stack_data superqt tinycss2 traitlets wcwidth webencodings").split()
 DISTRIBUTIONS = ["qstylizer", "ipython_pygments_lexers", "typing_extensions"]  # modules d'un seul fichier : --paquet prendrait site-packages

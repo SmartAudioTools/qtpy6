@@ -284,6 +284,99 @@ Worker ; le premier chargement sans cache (les roues jedi et parso s'ajoutent à
 signature et l'aller-à-la-définition (mêmes appels jedi, non lancés) ; un Worker de réserve qui aurait déjà fait une
 première complétion.
 
+### Résultat du jalon 5 (10/10/2026, 08 h 54) : les fichiers — lire, enregistrer, retrouver après un rechargement
+
+Demande de l'utilisateur (08 h 10) : « oui, lance le jalon 5 » ; puis (08 h 12) « il faudrait qu'on reflechisse ensemble à
+où sont stockés les fichiers », et ses deux décisions, plus bas. Mesuré avec `essais/spyder/jalon5.py` (bureau offscreen et
+page, `site/index.html?script=jalon5.py`, sonde `--pilote`) : l'éditeur reçoit un dossier de l'élève (`/tmp/claude-1001/jalon5`
+sur le bureau, `/tmp/jalon5` dans la page), y écrit deux fichiers par `spyder.utils.encoding.write` (`exercice1.py`, les
+77 269 caractères de `codeeditor.py` ; `notes.txt`, 43 caractères accentués), retouche le premier, puis **la page est
+rechargée** (geste « recharger » de la sonde ; sur le bureau la séquence s'enchaîne sans rechargement, le disque ne se vide
+pas) ; phase 2 : les deux fichiers retrouvés, relus par `encoding.read` et comparés à ce qui a été écrit, le premier posé dans
+le `CodeEditor` ; puis les deux gestes réels de l'élève : « Ouvrir » (`QFileDialog.getOpenFileName` ; dans la page, la sonde
+dépose `televerse.py` dans le sélecteur de fichiers de `bloquant`, geste « fichier » ; sur le bureau, `accepter()` remplit le
+dialogue natif) et « Enregistrer sous » (`getSaveFileName` → `rendu.py` : la page le télécharge, le bureau l'écrit sur le disque).
+
+| Mesure (page : Firefox 155, site en cache, 3 lancements de la phase 1 identiques, 1 phase 2 complète ; bureau offscreen, 1) | Navigateur | Bureau |
+|---|---|---|
+| dossier de l'élève prêt, phase 1 (page : `stockage.monter`, IDBFS vide) | 5–7 ms, 0 fichier | 0 ms |
+| deux écritures puis une retouche (`encoding.write`) | 0–1 ms chacune | 0 ms |
+| persistance (page : `stockage.synchroniser(attendre=True)`, copie dans IndexedDB) | **2–3 ms**, après deux fichiers comme après une retouche | sans objet |
+| rechargement → dossier prêt, phase 2 | 5 ms, **2 fichiers retrouvés** | — |
+| `exercice1.py` relu (77 269 caractères), identique | 1 ms | 0 ms |
+| `notes.txt` relu, identique | **51 ms, tas 86 → 149 Mio** (`chardet`, plus bas) | 20 ms |
+| `exercice1.py` posé dans l'éditeur, rendu | 215 ms | 126 ms |
+| Ouvrir : dialogue → `televerse.py` relu, « é » conservé | 160 ms (clic réel qui précède : 710 ms) | 192 ms |
+| Enregistrer sous : dialogue → `rendu.py` écrit | 30 ms, puis persistance 2 ms | 196 ms |
+| `rendu.py` (47 octets) téléchargé, reçu par la sonde, identique | 344 ms | sans objet, sur le disque |
+| script entier | phase 1 : 2,7 s ; phase 2 : 3,6 s ; tas 149 Mio | 1,4 s |
+
+Tout passe : « exercice1.py : ok », « notes.txt : ok », « ouvert : ok », « téléchargement : ok », « enregistré : ok », état
+« fini » ; captures relues : `capture_jalon5_relu.png` (page) et `capture_jalon5_bureau_relu.png` montrent `exercice1.py`
+dans l'éditeur, coloré ; `capture_jalon5_fin.png` et `_bureau_fin.png`, `televerse.py` avec son « é ».
+
+**Verdict : les fichiers ne coûtent rien, et ce que le jalon révèle est un manque de qtpy6, pas un obstacle.** Même
+`encoding.read`/`write` de Spyder, même `QFileDialog`, même dossier des deux côtés ; dans la page, lire et écrire sont de
+l'ordre de la milliseconde, et la copie dans IndexedDB coûte 2–3 ms : qtpy6 peut synchroniser à CHAQUE écriture (ou sur
+une minuterie courte), plus à la fermeture, sans que l'élève le voie. **Les deux seules branches web de `jalon5.py` hors
+instrumentation** (en tête du fichier, « Le manque de qtpy6 ») : `dossier_persistant` (`stockage.monter(chemin)` dans la
+page, `os.makedirs` sur le bureau) et `persister` (`stockage.synchroniser` dans la page, rien sur le bureau). À devenir un
+réglage de qtpy6, donné UNE fois : `application(persistant=chemin)`, qui monte le dossier dans IndexedDB, y remet ce qu'une
+visite précédente a laissé et le synchronise seul (après chaque écriture — le coût mesuré le permet — et au `beforeunload`),
+sans effet en natif ; l'éditeur n'écrirait alors que `os.makedirs`, et plus aucune de ses lignes ne saurait où elle tourne.
+Coût de la doublure : une option de `application()` et une surveillance des écritures dans `stockage.py`, une vingtaine de
+lignes ; pas codée au jalon (`qtpy6/` intact sauf la sonde, condition du Superviseur ; l'essai est fait pour mesurer, pas pour
+porter). Rien d'autre n'est propre au web : « Ouvrir » et « Enregistrer sous » passent par les doublures déjà en service de
+`bloquant.py` (sélecteur de fichiers, téléchargement), sans une ligne dans l'essai.
+
+**Où vivent les fichiers (décisions de l'utilisateur).** 08 h 19 : « pourrait-on avoir comme pour les qcm SmartTeacher, un
+dosseir par élève sur drophox, avec dans ce cas la necessité de renseigner son nom, prenom et mot de passe, si ouverture
+dans un nouveau navigateur qui ne les aurait pas retenu ? » ; 08 h 25 : « les fichier ne contienent pas la correction, pas
+besoin de les chiffrer ». Retenu : l'éditeur lit et écrit des fichiers ordinaires dans le dossier que qtpy6 lui donne (disque
+en natif, IndexedDB dans la page — ce que ce jalon mesure) ; au-dessus, une couche SmartTeacher, hors qtpy6 (`QCM/web/pyqt6/dropbox.js`,
+la clé d'application déjà dans la page du lecteur), synchronise ce dossier avec `Eleves/<Nom Prenom>/` sur Dropbox, en clair ;
+nom, prénom et mot de passe redemandés dans un navigateur qui ne les a pas retenus. Pas dans ce jalon ; point ouvert : le
+raccordement côté professeur (`dropbox_professeur.py`, `sauvegarde_travaux.py`, `code_eleve.py`), à décider par
+l'utilisateur. Écartés : le chiffrement (décision ci-dessus) ; le seul couple téléversement/téléchargement (ce que « Ouvrir »
+et « Enregistrer sous » font ici : ça marche, mais l'élève retrouverait ses fichiers dans ses Téléchargements, pas dans
+l'éditeur à la séance suivante). Question de l'utilisateur (08 h 41) : « on ne peux pas donner à la version web accès à un
+repertoir du disc en ecriture et lecture, si l'élève donne l'autorisation ? pour pouvoir utilise SmartPythonEditor comme s'il
+était en local ? » — oui, sous Chrome et Edge seulement (File System Access : `showDirectoryPicker`, autorisation
+mémorisable, et `pyodide.mountNativeFS` qui monte le dossier autorisé à la place d'IDBFS), pas sous Firefox ni Safari. Pour
+l'élève et pour l'éditeur c'est un disque (08 h 49 : « dossier réel autorisé et disque natif ne sont pas la meme chose ?? » —
+même chose, la différence est interne à qtpy6 : un troisième emplacement du même réglage `persistant`). Non mesuré : Chromium
+ne démarre pas dans le bac à sable ; à mesurer dans le navigateur de l'utilisateur si les postes du lycée sont sous
+Chrome/Edge (question posée, sans réponse à l'écriture de cette note).
+
+**`chardet`, ce que la lecture coûte réellement** : `encoding.read` → `get_coding`, qui, sans BOM ni ligne `coding:`,
+importe `chardet` et devine ; `notes.txt` n'en a pas : 51 ms et +63 Mio de tas (les tables de chardet), là où
+`exercice1.py`, qui déclare son encodage, se lit en 1 ms. `chardet` est ajouté aux `PAQUETS` de `construire_site.py`
+(`app.zip` 25 024 Kio) pour que l'essai mesure Spyder tel quel (première page : `ModuleNotFoundError: chardet`). Pour le port :
+une doublure `chardet.detect → utf-8` économiserait les 63 Mio — les fichiers d'un élève sont écrits en UTF-8 par l'éditeur
+lui-même, et un fichier déposé par « Ouvrir » dans un autre encodage se lirait mal, comme il arrive déjà à Spyder natif quand
+chardet se trompe. À décider, pas fait.
+
+Ce qu'il a fallu corriger :
+  - **la sonde, deux gestes** (`qtpy6/web/sonde.py`, hunk approuvé par le Superviseur, le seul fichier de `qtpy6/` touché) :
+    « fichier » (`window.fichier = {nom, texte}`, écrit dans un dossier temporaire puis déposé dans l'`<input type=file>` de
+    `bloquant` — `send_keys` sous geckodriver, `DOM.setFileInputFiles` sous Blink) et « recharger » (la page rechargée ; le
+    geste attend lui-même `readyState === 'complete'` et un `window.etat` qui n'est plus « recharger », puis rend `False`
+    pour qu'`attendre()` n'écrive pas de `_fait` dans un document disparu — défaut du premier jet, relevé par le Superviseur) ;
+  - **la page reprend sur l'événement du dialogue AVANT que la sonde n'ait écrit `_fait`** : si elle demande aussitôt le
+    geste suivant, la réponse de la sonde l'écrase (« BLOQUÉ : état 'fichier_fait' ») — `attendre("fichier", suite)` puis
+    `attendre("taper", suite)` après chaque dialogue. C'est la course déjà aux points ouverts (compare-and-set), rencontrée
+    une seconde fois ;
+  - **sur le bureau, `QFileDialog.selectFile()` ne remplit pas le champ quand celui-ci a le focus** (code de Qt) :
+    `accepter()` écrit dans `fileNameEdit` et n'accepte que quand `selectedFiles() == [chemin]` ;
+  - bureau : `python -u` (stdout tamponné, journal vide sous `timeout`), et `QT_QPA_PLATFORM=offscreen`.
+
+Ce que le jalon ne mesure pas : **Blink** (la phase 2 était demandée « Firefox ET Blink » par le Superviseur ; Chromium ne
+démarre pas dans le bac à sable — à lancer hors bac, les deux gestes de la sonde ont leur branche Blink, écrite, jamais
+exécutée) ; un vrai fichier dans les Téléchargements de l'élève (la sonde reçoit le téléchargement, pas le disque) ; la
+taille d'un dossier d'élève au-delà de 77 Ko et le quota IndexedDB ; deux onglets sur le même dossier ; une fermeture
+brutale avant synchronisation ; le dossier autorisé Chromium ; Dropbox. Niveau de preuve : page Firefox, journaux
+`essais/spyder/sonde_jalon5.log` (3 phases 1, 1 phase 2) et `jalon5_bureau.log` (offscreen, 1), captures relues.
+
 ## Conclusion en cinq lignes
 
 | | Verdict |
@@ -511,21 +604,27 @@ précédent dont la voie B copierait l'architecture noyau ; Binder : un vrai Spy
   le renommage, l'essai avec alias conservés plante (core dump) ; après, il passe en natif (capture) et dans Firefox
   (site reconstruit, sonde : 2,9 s, tas 86 Mio, capture relue, la page est identique). Le contournement générique
   n'est donc plus en service. Pourquoi PySide6 plante au lieu de lever n'a pas été cherché.
-- Jalons 1, 2, 3 et 4 atteints (le 3 : exécution dans un Worker par `ProcessusWeb`, pas dans le même interpréteur, qui fige
-  la page ; le 4 : complétion jedi dans un Worker par le même `QProcess`, pas dans la page) : reste le jalon 5 de la voie
-  B, les fichiers (lire, enregistrer, retrouver — stockage du navigateur ou téléchargement), un `essais/spyder/jalon5.py`
-  mesuré par la sonde avant de toucher au fork. Dans le port lui-même : monter `max_line_count` de la console (300
+- Les cinq jalons de la voie B sont atteints (le 3 : exécution dans un Worker par `ProcessusWeb`, pas dans le même
+  interpréteur, qui fige la page ; le 4 : complétion jedi dans un Worker par le même `QProcess`, pas dans la page ; le 5 :
+  fichiers écrits, retrouvés après rechargement dans IndexedDB, relus, « Ouvrir » et « Enregistrer sous » par le
+  `QFileDialog` de la page). Dans le port lui-même : monter `max_line_count` de la console (300
   lignes), garder un Worker de réserve (`prechauffer()`) entre deux exécutions et lui faire faire une première complétion
   factice (jalon 4 : `prechauffer` installe les roues, mais la première requête jedi coûte encore 1,4 s), et décider si
   un REPL persistant est voulu (voir le verdict du jalon 3 et l'explorateur de variables au jalon 4).
 - Les quatre points « propres au web » du jalon 4 (réglages du Worker, `prechauffer`, `waitForFinished`, dossier de
   l'élève) sont à trancher par l'utilisateur avant le port : ce sont les seules lignes qui, aujourd'hui, ne sont pas les
-  mêmes sur le bureau et dans la page.
-- `jalon2.py`, `jalon3.py` et `jalon4.py` recopient les mêmes outils (horloge de silence, gestes de la sonde, captures,
-  chien de garde) : un `essais/spyder/commun.py` à faire au jalon 5, pas avant (les trois essais mesurés restent tels
-  qu'ils ont été lancés).
-- La sonde (`web/sonde.py`) ne protège pas contre un geste demandé pendant qu'elle finit le précédent (jalon 3) : un
-  `_fait` posé par compare-and-set la rendrait sûre ; hunk à proposer au Superviseur si un autre essai y tombe.
+  mêmes sur le bureau et dans la page. Le quatrième est mesuré au jalon 5 et a sa doublure nommée :
+  `application(persistant=chemin)`, à écrire dans qtpy6 (montage IndexedDB et synchronisation à chaque écriture, 2–3 ms).
+- Autour du jalon 5, hors qtpy6 : la couche Dropbox de SmartTeacher (dossier par élève en clair, décision de l'utilisateur)
+  et son raccordement côté professeur ; le dossier autorisé Chromium (File System Access), à mesurer dans le navigateur de
+  l'utilisateur si les postes du lycée sont sous Chrome/Edge ; et la phase 2 du jalon 5 sous Blink, non mesurée.
+- `jalon2.py` à `jalon5.py` recopient les mêmes outils (horloge de silence, gestes de la sonde, captures, chien de
+  garde) : le `essais/spyder/commun.py` prévu au jalon 5 n'a pas été fait — le 5 était le dernier essai, personne ne le
+  réutiliserait dans `essais/`, et les quatre mesurés restent tels qu'ils ont été lancés ; ces outils renaissent dans le
+  port, pas ici.
+- La sonde (`web/sonde.py`) ne protège pas contre un geste demandé pendant qu'elle finit le précédent (jalon 3, et de
+  nouveau jalon 5 après chaque dialogue) : un `_fait` posé par compare-and-set la rendrait sûre ; hunk à proposer au
+  Superviseur si un autre essai y tombe.
 - La règle « un slot qui reçoit un QEvent s'exécute sur place » (`bloquant.py`) n'a pas de test unitaire dans
   `tests/test_web.py` ; seul l'essai jalon 2 la prouve (réserve du Superviseur, 09/10/2026 : à écrire sur le modèle du
   test des DeferredDelete de 50a2747).
