@@ -501,12 +501,61 @@ enregistrement (voir l'écouteur écarté). **Laissé hors de cette étape** : l
 dossier autorisé de Chrome, jalon 5 bis, et son bouton « Réautoriser ») — la demande nomme le réglage, pas Chrome ; il
 s'ajoutera comme une valeur de plus de `persistant` ou un réglage voisin, sans rien changer à l'éditeur.
 
+### Résultat du jalon 6 (10/10/2026, 10 h 50) : la fenêtre principale entière s'importe dans la page en une seconde et 31 Mio
+
+Question de l'utilisateur (10 h 25), sur « plusieurs semaines » : « ce n'est pas exagéré ? » — réponse : l'estimation datait
+d'avant les jalons, et la seule mesure qui tranche, celle que la voie B met en premier, n'avait pas été faite ; « oui, lance le
+jalon 6 » (10 h 28). Mesuré avec `essais/spyder/jalon6.py` (bureau et page, même script, sonde sans geste) : `import
+spyder.app.mainwindow` NU, puis l'import un par un des 33 plugins internes (la liste des points d'entrée de `setup.py`,
+recopiée : `find_internal_plugins` lit les métadonnées, que le fork n'a pas sur `sys.path`), chacun chronométré, les échecs
+relevés ; aucune fenêtre n'est ouverte.
+
+| Mesure (page : Firefox 155, archive 29,4 Mio en cache, deux lancements ; bureau offscreen, extensions C rendues inimportables) | Navigateur | Bureau |
+|---|---|---|
+| `import spyder.app.mainwindow` | 0,55 s et 0,99 s ; tas 29 → 42 Mio | 0,3–0,4 s ; RSS 16 → 125 Mio (les bibliothèques Qt mappées) |
+| import des 33 plugins | 0,53 s et 0,93 s ; tas 42 → 60 Mio ; 32 réussis | 0,24 s ; RSS 125 → 149 Mio ; 32 réussis |
+| modules Python chargés | 1 038 | 1 055 |
+| de l'ouverture de la page à la fin | 3,9 s et 5,4 s (dont Pyodide-Qt 0,9 s) | 0,7 s |
+
+**Le seul plugin qui ne s'importe pas, `pylint`, ne l'est pas non plus sur le bureau** (`PackageNotFoundError : pylint`, les
+métadonnées du paquet, absent de SmartPython comme de l'archive) : rien de propre au navigateur. Les 32 autres, `editor`,
+`ipythonconsole`, `debugger`, `variableexplorer`, `completion`, `projects` compris, s'importent dans la page.
+
+**Ce qu'il a fallu pour y arriver, et qui dit où sont les vrais obstacles** (tout dans `preparer.py` et `construire_site.py`,
+rien dans qtpy6) :
+- sept paquets purs de plus dans l'archive (`dateutil jupyter_client jupyter_core msgpack platformdirs pyuca tornado watchdog`,
+  `six`) : 25,2 → 29,4 Mio ;
+- une doublure `zmq` (extension C sans roue Pyodide) : les noms que jupyter_client, spyder_kernels et Spyder lisent À L'IMPORT
+  — classes de base et annotations (`Context`, `Socket`, `Message`, `Poller`, `ZMQStream`…), dix constantes. Sans elle, trois
+  plugins tombent (`debugger`, `ipythonconsole`, `profiler`, par `zmq.asyncio`). C'est l'obstacle 1 de la note, intact : la
+  doublure permet l'import, pas une connexion ;
+- une doublure `PySide6.QtPrintSupport` (non lié dans Pyodide-Qt, obstacle 3) : quatre classes, plus `QPageSetupDialog` que
+  qtpy aliasse, et les trois énumérations que `printer.py` lit en valeur par défaut d'argument. Sans elle, quatre plugins
+  tombent (`editor`, `ipythonconsole`, `debugger`, `profiler`) ;
+- `numpy`, `rtree`, `orjson`, `mako` absents : Spyder s'en passe seul à l'import (relevé sur le bureau en les rendant
+  inimportables : aucun échec de plus). `watchdog` s'importe (polling pur) ; `msgpack` retombe sur son python pur.
+
+**Ce que ça change à l'estimation.** L'inconnu principal de la voie B (« si la mémoire ou le chargement dépassent ce qu'un
+poste d'élève tolère, le reste est sans objet ») est levé : 31 Mio de tas et une à deux secondes pour tout le code de Spyder,
+quand le jalon 1 en mesurait 86 à 104 Mio pour le seul `CodeEditor` affiché — les widgets et le rendu coûtent, pas le code.
+« Plusieurs semaines » était donc exagéré. Ce qui reste n'est pas de l'import, c'est de l'exécution, et c'est mesurable au
+jalon suivant : instancier `MainWindow` (registre des plugins, `CONF`, disposition, menus, barre d'état) avec les plugins
+poste désactivés par `enable`, et voir lequel appelle un processus, un fil réel, une socket, un `exec()` hors slot. Les deux
+doublures d'ici sont des manques de qtpy6 au sens de sa règle (une doublure sous le nom Qt) : `QtPrintSupport` vide dans le
+navigateur a sa place dans qtpy6, `zmq` non (ce n'est pas Qt : il relève de la réécriture du transport, obstacle 1).
+
+**Niveau de preuve.** Page : deux lancements de la sonde, journaux `sonde_jalon6.log` et `sonde_jalon6b.log`, capture
+`capture_jalon6.png` (page vide, l'essai n'affiche rien) ; bureau : `jalon6_bureau.log`. Le tas wasm est lu par
+`HEAPU8.length` avant et après chaque import (croissance de l'arène Emscripten, pas la mémoire Python fine) ; la RSS du
+bureau compte les bibliothèques Qt mappées à l'import de PySide6, d'où l'écart. Non mesuré : Chrome ; l'instanciation de
+quoi que ce soit.
+
 ## Conclusion en cinq lignes
 
 | | Verdict |
 |---|---|
 | Spyder entier dans le navigateur | **pas tel quel, mais rien n'y est indispensable** (objection de l'utilisateur, voir « Ce qui est indispensable » ci-dessous) : ZMQ, les processus, les fils réels, psutil, git, conda sont des MÉCANISMES, chacun remplaçable ou désactivable ; ce qui est indispensable, c'est un noyau qui exécute et le protocole Jupyter que parlent les widgets de console, et ces deux-là passent dans un Worker (précédent JupyterLite). Le vrai inconnu est la mémoire et le chargement de ~220 000 lignes |
-| Un « Spyder allégé » : Spyder avec ses plugins poste désactivés, une console sur Web Worker | **possible mais lourd**, et c'est la voie réelle : plusieurs semaines, qui réécrivent la couche transport (noyau et LSP) sans toucher au protocole, et qui doivent d'abord prouver que la mémoire tient |
+| Un « Spyder allégé » : Spyder avec ses plugins poste désactivés, une console sur Web Worker | **possible**, et c'est la voie réelle. Écrit le 09/10 : « plusieurs semaines, qui doivent d'abord prouver que la mémoire tient » ; **mesuré depuis** : le code entier s'importe dans la page en 1 à 2 s et 31 Mio (jalon 6), le noyau en Worker et la complétion sans LSP tournent (jalons 3, 4) ; ce qui reste à mesurer est l'instanciation de `MainWindow` |
 | Ce que vise sans doute la demande, un éditeur Python exécutable dans le navigateur pour les élèves | **déjà là** : `editeur_code.py` + `console_code.py` + `console_enfant.py` du lecteur SmartTeacher (1 770 lignes) tournent dans le navigateur depuis septembre ; les étendre coûte des jours, pas des semaines |
 | Ce qu'un essai devrait mesurer en premier, si la voie « Spyder allégé » est retenue | la mémoire et le temps de chargement d'un `import spyder` nu sous Pyodide-Qt, avant d'écrire une ligne |
 | La question « sur qtpy6 » | n'est pas l'obstacle : Spyder accepte déjà PySide6 et c'est l'API que qtpy6 expose ; une ligne d'alias (`qtpy.QtCore` → `qtpy6.QtCore`) suffirait sur le papier pour que Spyder reçoive les doublures du navigateur |
@@ -633,9 +682,10 @@ n'a pas de port WebAssembly : son « Try Spyder online » est un bureau distant 
 `variableexplorer`, désactiver par `enable` les plugins poste (vcs, explorer distant, mises à jour, remoteclient, console
 interne), et réécrire : un client noyau sur `ProcessusWeb` + un `spyder_kernels` sans ZMQ (obstacle 1), le
 transport LSP en stdio sans relais (obstacle 2), des doublures vides pour QtPrintSupport, keyring, psutil, watchdog
-(obstacle 3), puis l'audit des `exec()` et des `threading.Thread`. Ordre de grandeur : plusieurs semaines, et le premier
-jalon n'est pas une fenêtre, c'est la mesure d'un `import spyder.app.mainwindow` nu sous Pyodide-Qt (mémoire, durée) —
-si elle dépasse ce qu'un poste d'élève tolère, le reste est sans objet. À lancer sur `exemple/` de qtpy6, avec les roues
+(obstacle 3), puis l'audit des `exec()` et des `threading.Thread`. Ordre de grandeur écrit le 09/10 : plusieurs
+semaines ; **revu au jalon 6 (10/10) : l'import nu de `mainwindow` et des 33 plugins coûte 1 à 2 s et 31 Mio dans la page, ce
+n'est plus l'inconnu, et les jalons 3 et 4 ont déjà réglé le noyau et la complétion — il reste l'instanciation à mesurer.**
+Le premier jalon n'était pas une fenêtre, c'était cette mesure d'import. À lancer sur `exemple/` de qtpy6, avec les roues
 pures de Spyder dans l'archive.
 
 **C. Étendre l'éditeur du lecteur SmartTeacher.** `editeur_code.py` (QPlainTextEdit, indentation, couleurs

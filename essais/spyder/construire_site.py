@@ -27,8 +27,9 @@ SITE = ICI / "site"
 PYODIDE_QT = Path("/DATA/Python/qtpy6/exemple/pyodide-qt")
 PAQUETS = ("spyder qtpy IPython asttokens chardet colorama decorator diff_match_patch executing intervaltree jedi packaging parso "
            "prompt_toolkit pure_eval pygments qdarkstyle qtawesome qtconsole sortedcontainers spyder_kernels textdistance "
-           "stack_data superqt tinycss2 traitlets wcwidth webencodings").split()
-DISTRIBUTIONS = ["qstylizer", "ipython_pygments_lexers", "typing_extensions"]  # modules d'un seul fichier : --paquet prendrait site-packages
+           "stack_data superqt tinycss2 traitlets wcwidth webencodings "
+           "dateutil jupyter_client jupyter_core msgpack platformdirs pyuca tornado watchdog").split()  # jalon 6 : mainwindow + 33 plugins
+DISTRIBUTIONS = ["qstylizer", "ipython_pygments_lexers", "typing_extensions", "six"]  # modules d'un seul fichier : --paquet prendrait site-packages
 EXCLURE = ["spyder/plugins/help/utils/js/", "spyder/locale/", "qtpy6/web/js/pdfjs/",
            "jedi/third_party/typeshed/stubs/"]  # stubs tiers (12 Mo) : jamais consultés ici, voir roues_jedi.py
 EXCLURE_TESTS = "/tests/"

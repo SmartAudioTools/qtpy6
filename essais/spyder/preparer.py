@@ -49,6 +49,30 @@ doublure("jellyfish", levenshtein_distance=lambda a, b: 0)   # extension C, sans
 doublure("bcrypt")                                           # extension C, remoteclient seulement
 doublure("keyring", __path__=[], get_password=lambda *a: None, set_password=lambda *a: None)
 doublure("keyring.errors", NoKeyringError=type("NoKeyringError", (Exception,), {}))
+# zmq (extension C, sans roue Pyodide) : ce que jupyter_client, spyder_kernels et Spyder en lisent à l'IMPORT (classes de base,
+# annotations, constantes) ; aucun socket n'est jamais ouvert ici (jalon 6 : import nu). Le transport réel est l'obstacle 1 de la note.
+_Classe = type("Classe", (), {"shadow": classmethod(lambda cls, *a: cls())})
+doublure("zmq", __path__=[], Context=_Classe, Socket=_Classe, Message=_Classe, MessageTracker=_Classe, Poller=_Classe,
+         ZMQError=type("ZMQError", (Exception,), {}), curve_keypair=lambda: (b"", b""),
+         **{n: i for i, n in enumerate("DEALER REQ SUB SUBSCRIBE POLLIN NOBLOCK IDENTITY EAGAIN ROUTER PUB".split())})
+for _nom, _attrs in (("zmq.asyncio", dict(Context=_Classe, Socket=_Classe, Poller=_Classe)),
+                     ("zmq.eventloop", dict(__path__=[])), ("zmq.eventloop.zmqstream", dict(ZMQStream=_Classe)),
+                     ("zmq.sugar", dict(__path__=[])), ("zmq.sugar.socket", dict(Socket=_Classe)),
+                     ("zmq.utils", dict(__path__=[])), ("zmq.utils.garbage", dict(gc=None))):
+    if "zmq" in sys.modules and not getattr(sys.modules["zmq"], "__file__", None):  # la doublure, pas le vrai
+        doublure(_nom, **_attrs)
+        setattr(sys.modules[_nom.rpartition(".")[0]], _nom.rpartition(".")[2], sys.modules[_nom])
+# QtPrintSupport (non lié dans Pyodide-Qt, obstacle 3 de la note) : les quatre classes que Spyder importe, et ce qu'il en lit à
+# l'import (printer.py : `mode=QPrinter.PrinterMode.ScreenResolution` en valeur par défaut). Imprimer n'a pas de sens dans la page.
+_QPrinter = type("QPrinter", (), {
+    "PrinterMode": type("PrinterMode", (), {"ScreenResolution": 0, "PrinterResolution": 1, "HighResolution": 2}),
+    "ColorMode": type("ColorMode", (), {"GrayScale": 0, "Color": 1}),
+    "PageOrder": type("PageOrder", (), {"FirstPageFirst": 0, "LastPageFirst": 1}),
+    "HighResolution": 2, "__init__": lambda self, *a, **k: None})
+doublure("PySide6.QtPrintSupport", QPrinter=_QPrinter, QPrintDialog=type("QPrintDialog", (), {"Accepted": 1}),
+         QPrintPreviewDialog=type("QPrintPreviewDialog", (), {}), QPageSetupDialog=type("QPageSetupDialog", (), {}),  # qtpy l'aliasse
+         QAbstractPrintDialog=type("QAbstractPrintDialog", (), {
+             "PrintDialogOption": type("PrintDialogOption", (), {"PrintSelection": 2})}))
 doublure("inflection",                                       # pour qstylizer ; les deux seules fonctions qu'il appelle
          underscore=lambda m: re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", m)).lower(),
          camelize=lambda m, maj=True: "".join(x.title() if i or maj else x for i, x in enumerate(m.split("_"))))
