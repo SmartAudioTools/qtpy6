@@ -2,6 +2,12 @@
 
 ## Non publié
 
+- `application(persistant=chemin)` : le dossier des fichiers de l'utilisateur, qui survit d'un lancement à l'autre. En
+  natif un dossier du disque, créé au besoin ; dans le navigateur le même chemin rangé dans IndexedDB, d'où reviennent
+  les fichiers de la visite précédente et où le navigateur recopie seul chaque écriture (`autoPersist` d'IDBFS :
+  `stockage.monter` le demande, plus de `synchroniser` à appeler). L'application y lit et y écrit des fichiers
+  ordinaires sans savoir où elle tourne : l'éditeur de Spyder (`essais/spyder/jalon5.py`) n'a plus une ligne propre au
+  web pour ses fichiers (`web.md`, point 5).
 - Dans le navigateur, `concurrent.futures.ThreadPoolExecutor` est doublé sur les fils coopératifs : N `subprocess.run`
   soumis au pool font tourner N Web Workers en même temps, au lieu de lever `RuntimeError` (pas de fils dans Pyodide).
   `os.cpu_count()` y rend le nombre de cœurs du navigateur. Une application garde son pool natif tel quel : SmartTeacher

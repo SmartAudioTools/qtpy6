@@ -11,14 +11,14 @@ ouvrir » (dans la page, qtpy6 ouvre le sélecteur de fichiers du navigateur, qu
 Qt est accepté par une minuterie) ; « enregistrer sous » (dans la page, qtpy6 demande le nom — Entrée tapée — puis télécharge
 le fichier dès qu'il est écrit ; mesuré par un espion sur `stockage.telecharger`). Capture « fin ».
 
-Ce qui reste propre au web ici, hors instrumentation (état de la page, journal, captures, témoin de phase), est dans
-`dossier_persistant` et `persister` : le manque de qtpy6 à combler (CLAUDE.md du dépôt), chiffré dans le journal. État de la
+Rien n'est propre au web ici hors instrumentation (état de la page, journal, captures, témoin de phase) depuis la doublure
+`application(persistant=DOSSIER)` (10/10/2026) : elle remplace `dossier_persistant` et `persister`, les deux branches du
+premier jet (le manque de qtpy6, chiffré au jalon : montage 15 ms, copie 2–3 ms). État de la
 page : « jalon5 » pendant le travail, « fini » à la fin (ou « erreur » : l'exception est dans le journal)."""
 
 import base64
 import gc
 import os
-import shutil
 import sys
 import tempfile
 import time
@@ -92,32 +92,11 @@ def capturer(suffixe):
         image.save(os.path.join(ICI, f"capture_jalon5_bureau_{suffixe}.png"))  # la sonde écrit capture_jalon5_<suffixe>.png
 
 
-# --- Le manque de qtpy6 (CLAUDE.md : « c'est qtpy6 qui prévoit ») : les deux seules branches web hors instrumentation. ---
+# --- L'éditeur. Le dossier de l'élève survit à la fermeture : qtpy6 s'en charge (`persistant`), l'éditeur n'en sait rien. ---
 
-def dossier_persistant(chemin):
-    """Le dossier de l'élève, qui survit à la fermeture : sur le bureau un dossier du disque ; dans la page, un dossier monté
-    dans IndexedDB (`stockage.monter`), où qtpy6 remet ce qu'une visite précédente y a laissé. À devenir un réglage de qtpy6
-    (`application(persistant=chemin)`, sans effet en natif) : l'application n'écrirait que `os.makedirs`."""
-    t = time.monotonic()
-    if WEB:
-        stockage.monter(chemin)
-    else:
-        os.makedirs(chemin, exist_ok=True)
-    mesure(f"dossier de l'élève prêt, {len(os.listdir(chemin))} fichiers retrouvés", t)
-
-
-def persister(nom):
-    """Après une écriture : la copie dans IndexedDB (`stockage.synchroniser`), rien sur le bureau. À faire par qtpy6 seul,
-    périodiquement (le coût mesuré ici dit à quelle cadence) et à la fermeture de la page."""
-    t = time.monotonic()
-    if WEB:
-        stockage.synchroniser(attendre=True)
-    mesure(f"persistance après {nom}", t)
-
-
-# --- L'éditeur. ---
-
-app = qtpy6.web.application(polices=os.path.join(ICI, "polices"), defaut=("DejaVu Sans", 10))
+t = time.monotonic()
+app = qtpy6.web.application(polices=os.path.join(ICI, "polices"), defaut=("DejaVu Sans", 10), persistant=DOSSIER)
+mesure(f"application prête, dossier de l'élève : {len(os.listdir(DOSSIER))} fichiers retrouvés", t)
 fenetre = QMainWindow()
 editeur = CodeEditor(fenetre)
 editeur.setup_editor(linenumbers=True, language="Python", markers=True, tab_mode=False, font=QFont("DejaVu Sans Mono", 10),
@@ -221,17 +200,15 @@ PHASE = 2 if WEB and stockage.lire("jalon5") else 1
 
 @garde
 def ecrire():
-    shutil.rmtree(DOSSIER, ignore_errors=True)  # un essai précédent, sur le bureau ; dans la page, rien encore
-    dossier_persistant(DOSSIER)
+    for nom in os.listdir(DOSSIER):  # un essai précédent (le dossier lui-même reste : dans la page, c'est le montage)
+        os.remove(os.path.join(DOSSIER, nom))
     for nom, texte in FICHIERS.items():
         t = time.monotonic()
         encoding.write(texte, os.path.join(DOSSIER, nom))
         mesure(f"{nom} écrit ({len(texte)} caractères)", t)
-    persister("deux fichiers")
     t = time.monotonic()
     encoding.write(ATTENDU["exercice1.py"], os.path.join(DOSSIER, "exercice1.py"))
     mesure("exercice1.py retouché", t)
-    persister("une retouche")
     if WEB:
         stockage.ecrire("jalon5", "\n".join(JOURNAL))  # le témoin de phase, et le journal par-dessus le rechargement
         geste("recharger")
@@ -246,7 +223,6 @@ def reprise():
     for ligne in stockage.lire("jalon5").splitlines():
         print("phase 1 |", ligne)
     stockage.effacer("jalon5")
-    dossier_persistant(DOSSIER)
     relire()
 
 
@@ -319,7 +295,6 @@ def enregistrer():
 def ecrire_rendu(chemin, texte):
     t = time.monotonic()
     encoding.write(texte, chemin)
-    persister(RENDU)
     des_que(lambda: telechargements or not WEB, lambda: telecharge(t, chemin, texte), "téléchargement attendu")
 
 

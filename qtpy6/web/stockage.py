@@ -1,9 +1,14 @@
 """Ce que le navigateur offre à l'application pour ses fichiers : ``localStorage`` (du texte, quelques Mio, propre à
 l'origine de la page, qui survit au rechargement), un dossier rangé dans IndexedDB (``monter`` : des fichiers ordinaires,
-binaires compris, sans autre limite que le quota de l'origine) et le téléchargement (le seul chemin vers le disque de
-l'utilisateur). Chaque fonction importe ``js`` à l'appel : le module s'importe en natif, où rien ici n'a de sens."""
+binaires compris, sans autre limite que le quota de l'origine, que le navigateur recopie seul après chaque écriture) et le
+téléchargement (le seul chemin vers le disque de l'utilisateur). Chaque fonction importe ``js`` à l'appel : le module
+s'importe en natif, où rien ici n'a de sens. Une application n'a rien à importer d'ici pour ses fichiers :
+``application(persistant=chemin)`` monte son dossier, et ``QFileDialog`` ouvre, télécharge."""
+
+import os
 
 _synchro = {"etat": None, "attente": []}  # etat : None, "en cours" ou "encore" (une écriture est venue pendant la copie)
+_montes: set[str] = set()  # les dossiers rangés dans IndexedDB par monter
 
 
 def lire(cle):
@@ -51,16 +56,18 @@ def telecharger(nom, contenu, mime="application/octet-stream", lien=None):
         lien.hidden = False
 
 
-def monter(dossier):
+def monter(dossier: str | os.PathLike[str]) -> None:
     """Range le dossier ``dossier`` dans IndexedDB (IDBFS d'Emscripten) et y remet ce qu'une visite précédente y avait
-    laissé : l'application continue d'y lire et d'y écrire des fichiers ordinaires, et ``synchroniser()`` les recopie
-    dans IndexedDB après ses écritures. Le dossier doit être vide ou absent (le montage cache ce qu'il contenait : les
+    laissé : l'application continue d'y lire et d'y écrire des fichiers ordinaires, et le navigateur les recopie seul
+    dans IndexedDB après chaque écriture (``autoPersist`` d'Emscripten : à la fermeture d'un fichier écrit, à une
+    création, une suppression, un renommage ; une copie à la fois, lancée au tour de boucle suivant, les écritures venues
+    pendant une copie en relancent une seule à sa fin). ``synchroniser(attendre=True)`` reste là pour qui doit être sûr
+    que tout est copié. Le dossier doit être vide ou absent (le montage cache ce qu'il contenait : les
     fichiers livrés avec l'application vont ailleurs, et l'application les recopie au premier lancement). Demande aussi
     au navigateur de ne pas effacer ce stockage quand la place manque (``navigator.storage.persist``, que Firefox
     soumet à l'utilisateur). Suspend jusqu'à la fin de la restauration : à appeler d'une entrée suspendable (le script
-    lancé par ``lancer``, un slot) ; ``OSError`` si IndexedDB refuse (navigation privée de certains navigateurs)."""
-    import os  # noqa: PLC0415
-
+    lancé par ``lancer``, un slot) ; ``OSError`` si IndexedDB refuse (navigation privée de certains navigateurs).
+    C'est ce que ``application(persistant=chemin)`` fait pour l'application."""
     import js  # noqa: PLC0415
     import pyodide_js  # noqa: PLC0415
     from pyodide.ffi import create_once_callable  # noqa: PLC0415
@@ -69,7 +76,10 @@ def monter(dossier):
 
     fs = pyodide_js.FS
     os.makedirs(dossier, exist_ok=True)
-    fs.mount(fs.filesystems.IDBFS, js.Object.new(), str(dossier))
+    options = js.Object.new()
+    options.autoPersist = True
+    fs.mount(fs.filesystems.IDBFS, options, str(dossier))
+    _montes.add(str(dossier))
     if getattr(js.navigator, "storage", None) and getattr(js.navigator.storage, "persist", None):
         js.navigator.storage.persist()
     erreur = bloquant._suspendre(lambda resoudre: fs.syncfs(True, create_once_callable(lambda e=None: resoudre(e))))
@@ -77,10 +87,11 @@ def monter(dossier):
         raise OSError(f"IndexedDB : {erreur}")
 
 
-def synchroniser(attendre=False):
-    """Recopie dans IndexedDB les dossiers montés par ``monter``, après une écriture. La copie part tout de suite et
-    l'application continue ; une écriture qui arrive pendant une copie en relance une seule à sa fin. Avec ``attendre``,
-    suspend jusqu'à ce que tout soit copié (entrée suspendable). Un refus d'IndexedDB est écrit au journal."""
+def synchroniser(attendre: bool = False) -> None:
+    """Recopie tout de suite dans IndexedDB les dossiers montés par ``monter``, sans attendre la copie que le navigateur
+    fait seul après chaque écriture. La copie part et l'application continue ; une écriture qui arrive pendant une copie
+    en relance une seule à sa fin. Avec ``attendre``, suspend jusqu'à ce que tout soit copié (entrée suspendable) : pour
+    qui doit en être sûr avant de poursuivre. Un refus d'IndexedDB est écrit au journal."""
     from . import bloquant  # noqa: PLC0415
 
     if _synchro["etat"]:

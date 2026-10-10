@@ -29,6 +29,25 @@ def test_monter_hors_navigateur():
         stockage.monter("/tmp/x")
 
 
+def test_monter_laisse_le_navigateur_recopier_seul(pyodide, monkeypatch, tmp_path):
+    """Le montage demande ``autoPersist`` à IDBFS (la copie après chaque écriture est au navigateur, pas à l'application),
+    restaure (``syncfs(True)``) en suspendant, et note le dossier dans ``_montes`` pour ``application(persistant=...)``."""
+    montages = []
+    fs = sys.modules["pyodide_js"].FS
+    fs.filesystems = types.SimpleNamespace(IDBFS="idbfs")
+    fs.mount = lambda type_, options, chemin: montages.append((type_, options, chemin))
+    monkeypatch.setitem(sys.modules, "js", types.SimpleNamespace(Object=types.SimpleNamespace(new=types.SimpleNamespace),
+                                                                 navigator=types.SimpleNamespace()))
+    monkeypatch.setattr(bloquant, "_suspendre", lambda brancher: (brancher(lambda e=None: None), pyodide[-1][1]()) and None)
+    monkeypatch.setattr(stockage, "_montes", set())
+    dossier = tmp_path / "eleve"
+    stockage.monter(dossier)
+    assert dossier.is_dir()
+    assert [(t, o.autoPersist, c) for t, o, c in montages] == [("idbfs", True, str(dossier))]
+    assert [p for p, _ in pyodide] == [True]  # la restauration, et aucune copie à la charge de l'application
+    assert stockage._montes == {str(dossier)}
+
+
 def test_une_ecriture_pendant_la_copie_en_relance_une_seule(pyodide):
     stockage.synchroniser()
     stockage.synchroniser()

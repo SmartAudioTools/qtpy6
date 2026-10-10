@@ -324,8 +324,9 @@ page, `os.makedirs` sur le bureau) et `persister` (`stockage.synchroniser` dans 
 réglage de qtpy6, donné UNE fois : `application(persistant=chemin)`, qui monte le dossier dans IndexedDB, y remet ce qu'une
 visite précédente a laissé et le synchronise seul (après chaque écriture — le coût mesuré le permet — et au `beforeunload`),
 sans effet en natif ; l'éditeur n'écrirait alors que `os.makedirs`, et plus aucune de ses lignes ne saurait où elle tourne.
-Coût de la doublure : une option de `application()` et une surveillance des écritures dans `stockage.py`, une vingtaine de
-lignes ; pas codée au jalon (`qtpy6/` intact sauf la sonde, condition du Superviseur ; l'essai est fait pour mesurer, pas pour
+Coût de la doublure, estimé ici : une option de `application()` et une surveillance des écritures dans `stockage.py`, une
+vingtaine de lignes (écrite à 10 h 10, section « La doublure » : la surveillance s'est révélée inutile, Emscripten l'a) ; pas
+codée au jalon (`qtpy6/` intact sauf la sonde, condition du Superviseur ; l'essai est fait pour mesurer, pas pour
 porter). Rien d'autre n'est propre au web : « Ouvrir » et « Enregistrer sous » passent par les doublures déjà en service de
 `bloquant.py` (sélecteur de fichiers, téléchargement), sans une ligne dans l'essai.
 
@@ -445,6 +446,60 @@ ZMQStream ; canaux shell/iopub/stdin/control ; reprendre pyodide-kernel de Jupyt
 sur `zmq.FD`. Alternative écartée par lui : une console web maison. Première étape qu'il propose : une journée pour mesurer
 la surface pyzmq réellement utilisée, avec un faux module `zmq` qui journalise. À confronter au verdict du jalon 3 (console
 `ShellBaseWidget` sans noyau) avant de s'y engager.
+
+### La doublure `application(persistant=chemin)` (10/10/2026, 10 h 10) : écrite, mesurée, l'éditeur n'a plus une ligne web
+
+Demande de l'utilisateur (09 h 58) : « rallonge 3 points, fais la doublure application(persistant=chemin) ». Livré dans
+qtpy6, commité avec cette entrée :
+
+- `qtpy6/web/__init__.py` : `application(polices, defaut, persistant)`. `persistant` est le dossier des fichiers de
+  l'utilisateur : en natif `os.makedirs`, dans le navigateur `stockage.monter(persistant)` (une fois : `stockage._montes`
+  retient ce qui est monté, `application()` reste idempotente). Signature annotée (typage progressif), docstring du module
+  et de la fonction.
+- `qtpy6/web/stockage.py` : `monter` demande `autoPersist` à l'IDBFS d'Emscripten et note le dossier dans `_montes` ;
+  `synchroniser` reste, pour `attendre=True`. Docstrings refaites.
+- `essais/spyder/jalon5.py` : `dossier_persistant` et `persister` supprimés, un seul `application(..., persistant=DOSSIER)` ;
+  `grep -n "if WEB"` n'y laisse que l'instrumentation (état de la page, journal, captures, témoin, espion du téléchargement)
+  et la ligne `spyder/locale` de l'assemblage. `shutil` n'y sert plus.
+- `tests/test_stockage.py` (le montage demande `autoPersist`, restaure, note `_montes`), `tests/test_web.py` (natif : dossier
+  créé, redonné sans effet ; navigateur simulé par `en_navigateur` : `monter` appelé une fois pour deux appels).
+- `web.md` (point 5 réécrit autour du réglage, tableau de l'API), `CHANGELOG.md`.
+
+**Le choix qui change tout : le navigateur recopie seul, qtpy6 ne surveille rien.** Le jalon 5 prévoyait « une surveillance
+des écritures dans `stockage.py` » ; avant de l'écrire, lecture de l'IDBFS livré avec Pyodide-Qt 0.29.3
+(`site/pyodide-qt/pyodide.asm.js`) : Emscripten a l'option de montage `autoPersist` — à la fermeture d'un fichier écrit, à
+`mkdir`, `rmdir`, `unlink`, `rename`, `symlink`, il met une copie en file (`queuePersist` : `setTimeout(0)`, une copie à la
+fois, une écriture pendant la copie en relance une seule à sa fin — exactement la file que `synchroniser` recodait en Python).
+C'est le « le logiciel ne le fait-il pas déjà ? » de la passe de simplification, et il enlève tout : ni minuterie, ni
+enrobage de `open`, ni `beforeunload`. Écartés, avec la raison :
+  - une minuterie courte (`QTimer` toutes les 2 s) : attrape tout mais un tour de scan par période ; inutile dès lors
+    qu'Emscripten voit chaque écriture au moment où elle se ferme ;
+  - enrober `builtins.open` : ne voit ni `os.remove` ni `os.rename`, et touche un nom global de l'interpréteur ;
+  - un écouteur `pagehide`/`beforeunload` qui lance `syncfs` : garde-fou sans scénario. La copie part au tour de boucle qui
+    suit la fermeture du fichier, avant qu'une nouvelle entrée de l'utilisateur puisse être traitée ; un onglet fermé « dans
+    la même milliseconde » que l'enregistrement n'est pas un geste humain. Si un jour une perte est observée à la fermeture,
+    c'est là qu'il faudra regarder — et c'est trois lignes dans `monter`.
+Le reste de `synchroniser` est gardé pour `attendre=True` (être sûr avant de poursuivre : un export, un changement de page) ;
+une copie explicite pendant une copie automatique fait seulement avertir Emscripten en console (« syncfs operations in flight
+at once »), sans effet.
+
+**Mesuré** (`essais/spyder/sonde_jalon5.log`, Firefox 155, `jalon5_bureau.log`, offscreen, 10 h 05, site reconstruit avec le
+nouveau qtpy6) : page, phase 1 « application prête, dossier de l'élève : 0 fichiers retrouvés : 10 ms », deux fichiers
+écrits (1 ms), retouche, rechargement sans aucun appel de l'essai à `synchroniser` ; phase 2 « 2 fichiers retrouvés : 11 ms »,
+les deux relus identiques, ouvrir et enregistrer sous comme au jalon 5 ; durée 3,8 s. Bureau : « 3 fichiers retrouvés »
+(l'essai précédent, puis vidé par l'essai), tout ok, 1,6 s. Le temps « persistance après N » du jalon 5 (2–3 ms) n'est plus
+mesurable de l'essai : c'est le navigateur qui copie, hors de tout appel Python. Suite pytest de qtpy6 : 123 passés, 2 sautés,
+15 échecs, tous préexistants (mêmes 15 noms avec mes changements remisés par `git stash` : `fils.doubler_futures` importe
+`js` et lit `js.navigator` dès l'import de qtpy6 sous `sys.platform == "emscripten"`, ce que les faux `js` des tests
+`en_navigateur` n'ont pas ; item ThreadPoolExecutor d'une autre session, commit 1475f75) : pas touché, signalé. Mes trois
+tests donnent `navigator` à leur faux `js`.
+
+**Niveau de preuve.** Montage, restauration après rechargement et copie automatique : mesurés dans Firefox (un passage) et
+hors navigateur (tests). Non mesuré : la copie automatique sous Chrome (même IDBFS, même code Emscripten : rien ne dépend du
+navigateur sauf IndexedDB lui-même, déjà vu au jalon 5 bis) ; le comportement à la fermeture de l'onglet juste après un
+enregistrement (voir l'écouteur écarté). **Laissé hors de cette étape** : le troisième emplacement du même réglage (le
+dossier autorisé de Chrome, jalon 5 bis, et son bouton « Réautoriser ») — la demande nomme le réglage, pas Chrome ; il
+s'ajoutera comme une valeur de plus de `persistant` ou un réglage voisin, sans rien changer à l'éditeur.
 
 ## Conclusion en cinq lignes
 
@@ -682,8 +737,8 @@ précédent dont la voie B copierait l'architecture noyau ; Binder : un vrai Spy
   un REPL persistant est voulu (voir le verdict du jalon 3 et l'explorateur de variables au jalon 4).
 - Les quatre points « propres au web » du jalon 4 (réglages du Worker, `prechauffer`, `waitForFinished`, dossier de
   l'élève) sont à trancher par l'utilisateur avant le port : ce sont les seules lignes qui, aujourd'hui, ne sont pas les
-  mêmes sur le bureau et dans la page. Le quatrième est mesuré au jalon 5 et a sa doublure nommée :
-  `application(persistant=chemin)`, à écrire dans qtpy6 (montage IndexedDB et synchronisation à chaque écriture, 2–3 ms).
+  mêmes sur le bureau et dans la page. Le quatrième est réglé : `application(persistant=chemin)`, écrite dans qtpy6 le 10/10
+  (section « La doublure »), et `jalon5.py` n'a plus de branche web hors instrumentation.
 - Autour du jalon 5, hors qtpy6 : la couche Dropbox de SmartTeacher (dossier par élève en clair, décision de l'utilisateur)
   et son raccordement côté professeur ; le dossier autorisé Chrome (File System Access), mesuré le 10/10 (jalon 5 bis :
   ça marche, permission mémorisée au rechargement mais pas après fermeture de Chrome : un clic « Réautoriser » par séance,

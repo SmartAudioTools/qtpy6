@@ -12,9 +12,10 @@ charge ce nom, sans rien à importer d'ici :
 Le reste, qui n'a pas d'équivalent Qt, est dans ce paquet :
 
     navigateur()                     True sous Pyodide (``sys.platform == "emscripten"``) : l'interrupteur de tout le reste
-    application(polices, defaut)     la QApplication, créée au besoin ; hors écran sans session graphique ; les polices
-                                     livrées avec l'application dans le navigateur, qui n'en a aucune ;
-                                     le ramasse-miettes entre deux événements, jamais au milieu d'un appel de Qt
+    application(polices, defaut, persistant)   la QApplication, créée au besoin ; hors écran sans session graphique ; les
+                                     polices livrées avec l'application dans le navigateur, qui n'en a aucune ; le dossier
+                                     des fichiers de l'utilisateur, qui survit d'un lancement à l'autre (disque en natif,
+                                     IndexedDB dans le navigateur) ; le ramasse-miettes entre deux événements
     tactile                          détecter un écran au doigt, grossir les cibles, faire défiler au doigt
     dispositions                     des dispositions qui se replient quand la place manque (Disposition, Rangee)
     defilement                       ZoneDefilante : une QScrollArea qui, dans le navigateur, ne repeint que la bande qui entre
@@ -24,7 +25,7 @@ Le reste, qui n'a pas d'équivalent Qt, est dans ce paquet :
     lanceur                          un .py ou un .zip quelconque, dont il trouve le point d'entrée (la page du site)
     bloquant                         exec() des boîtes, menus, boucles et de l'application, et les boîtes statiques
     fils                             QThread, QThreadPool, verrous : des fils coopératifs sur le fil unique de la page
-    stockage                         localStorage et téléchargement d'un fichier depuis l'application
+    stockage                         localStorage, un dossier rangé dans IndexedDB, téléchargement d'un fichier
     audio                            jouer un son embarqué (octets en mémoire), natif ou navigateur
     assembler                        l'archive que la page dépaquette : fichiers, paquets, distributions, polices
     construire                       ``python -m qtpy6.web.construire app.py site/`` : la page, l'archive, le chargeur
@@ -34,9 +35,16 @@ Côté page, ``js/qtpy6web.js`` charge Pyodide-Qt et l'archive de l'application 
 Worker, ``js/gabarit.html`` la page minimale. Rien ici n'importe ``js`` au niveau du module, ni Qt : le paquet s'importe
 tel quel en natif, où tout est inerte, et ``QtCore`` l'importe en cours de chargement pour y prendre ``QProcess``."""
 
+from __future__ import annotations
+
 import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from qtpy6.QtGui import QFont
+    from qtpy6.QtWidgets import QApplication
 
 _APP = None
 
@@ -46,15 +54,22 @@ def navigateur():
     return sys.platform == "emscripten"
 
 
-def application(polices=None, defaut=None):
+def application(polices: str | os.PathLike[str] | None = None, defaut: QFont | tuple | None = None,
+                persistant: str | os.PathLike[str] | None = None) -> QApplication:
     """La QApplication du processus, créée au besoin et rendue. Hors session graphique (ni DISPLAY ni WAYLAND_DISPLAY),
     ``QT_QPA_PLATFORM`` passe à ``offscreen`` : les tests et les exports tournent sans écran. Dans le navigateur, Qt n'a
     AUCUNE police système : les fichiers ``.ttf``/``.otf`` du dossier ``polices`` y sont chargés (la première à chasse
     fixe devient ``systemFont(FixedFont)``), et ``defaut`` (un QFont, ou ``("Noto Sans", 9)``) devient la police de
-    l'interface. En natif, ni l'un ni l'autre ne s'appliquent : le système a les siennes. Partout, le ramasse-miettes
-    ne passe plus qu'entre deux événements (``_ramasser``)."""
+    l'interface. En natif, ni l'un ni l'autre ne s'appliquent : le système a les siennes. ``persistant`` est le dossier
+    des fichiers de l'utilisateur, qui survit d'un lancement à l'autre : en natif un dossier du disque, créé au besoin ;
+    dans le navigateur le même chemin, rangé dans IndexedDB (``stockage.monter``), d'où reviennent les fichiers de la
+    visite précédente et où le navigateur recopie seul chaque écriture. L'application y lit et y écrit des fichiers
+    ordinaires, sans savoir où elle tourne ; le montage suspend le temps de la restauration, donc depuis le script ou
+    un slot. Partout, le ramasse-miettes ne passe plus qu'entre deux événements (``_ramasser``)."""
     from qtpy6.QtGui import QFont, QFontDatabase  # noqa: PLC0415 - voir la docstring du module
     from qtpy6.QtWidgets import QApplication  # noqa: PLC0415
+
+    from . import stockage  # noqa: PLC0415
 
     global _APP
     if QApplication.instance() is None:
@@ -70,6 +85,11 @@ def application(polices=None, defaut=None):
                 app.setFont(defaut if isinstance(defaut, QFont) else QFont(*defaut))
             _coller()
             _dessiner_aussitot()
+    if persistant is not None and str(persistant) not in stockage._montes:
+        if navigateur():
+            stockage.monter(persistant)
+        else:
+            os.makedirs(persistant, exist_ok=True)
     return QApplication.instance()
 
 

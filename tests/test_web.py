@@ -37,6 +37,37 @@ def test_application_offscreen(app):
     assert web.application() is app  # idempotente
 
 
+def test_application_persistant_en_natif(app, tmp_path):
+    """Le dossier qui survit d'un lancement à l'autre : en natif, un dossier du disque, créé au besoin ; rien d'autre."""
+    dossier = tmp_path / "eleve" / "fichiers"
+    assert web.application(persistant=dossier) is app
+    assert dossier.is_dir()
+    assert web.application(persistant=dossier) is app  # redonné : rien ne change
+    assert not stockage._montes
+
+
+def test_application_persistant_dans_le_navigateur():
+    """Dans le navigateur, le même réglage monte le dossier dans IndexedDB (``stockage.monter``), une fois."""
+    sortie = en_navigateur("""
+        import types
+        montages = []
+        fs = types.SimpleNamespace(filesystems=types.SimpleNamespace(IDBFS="idbfs"),
+                                   mount=lambda type_, options, chemin: montages.append((options.autoPersist, chemin)),
+                                   syncfs=lambda peupler, rappel: rappel())
+        sys.modules["pyodide_js"] = types.SimpleNamespace(FS=fs)
+        sys.modules["js"] = types.SimpleNamespace(document=types.SimpleNamespace(addEventListener=lambda *a: None),
+                                                  setInterval=lambda *a: 0, Function=types.SimpleNamespace(new=lambda *a: lambda *b: None),
+                                                  Object=types.SimpleNamespace(new=types.SimpleNamespace), navigator=types.SimpleNamespace())
+        sys.modules["pyodide"], sys.modules["pyodide.ffi"] = types.ModuleType("pyodide"), types.SimpleNamespace(create_proxy=lambda f: f, create_once_callable=lambda f: f)
+        from qtpy6.web import application, bloquant
+        bloquant._suspendre = lambda brancher: brancher(lambda e=None: None)
+        application(persistant="/tmp/eleve")
+        application(persistant="/tmp/eleve")
+        print(montages)
+    """)
+    assert sortie == "[(True, '/tmp/eleve')]"
+
+
 def test_tactile_detecte_en_natif(app, monkeypatch):
     """Un écran tactile parmi les périphériques de Qt : détecté ; une souris et un pavé tactile : non (sans écran branché ici,
     les périphériques sont simulés)."""
