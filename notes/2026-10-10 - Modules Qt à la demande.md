@@ -138,3 +138,134 @@ fichiers de la page.
 - `hebergement/telecharger.sh` lancé depuis le bac à sable (sans réseau) : le zip dépaqueté dans `exemple/pyodide-qt`,
   la roue sqlite3 recopiée depuis `SmartTeacher/QCM/web/pyqt6/pyodide-qt` (même empreinte) et les jumeaux br/gz produits à
   la main (les cinq dernières lignes du script) : le dossier est complet, 42 fichiers.
+
+## Suite (12 h 45 → 14 h) : Qt Quick, Multimedia et Charts, les sept derniers modules
+
+### La demande, citée
+
+« je te donne une ralonge de 5 points, pour finir les autres modules Qt comme Quick, Multimedia, Charts, et la doublure
+QPdfView, mais essais d'economier en déléguant beaucoup plus ! » (12 h 45). La doublure `QPdfView` existe déjà
+(`qtpy6/web/pdf.py`, `js/pdf_vue.js`, pdf.js vendu, servie par `qtpy6.QtPdf` et `QtPdfWidgets`) : rien à refaire, dit à
+l'utilisateur. Délégation : la construction entière (recette, patch, liens, fumée) par un sous-agent, l'essai dans une
+page par un second ; la session a relu le diff, les tailles et les journaux, et écrit cette note.
+
+### Ce qui a été livré
+
+- `wasm/telecharger_sources.sh` : qtshadertools, qtdeclarative, qtmultimedia, qtcharts en plus (archives récupérées par
+  l'utilisateur, `journaux/telecharger.log`) ; `wasm/versions.txt` régénéré.
+- `wasm/construire.sh` : `qt_hote <module> <témoin>` (qtshadertools pour `qsb`, qtdeclarative pour `qmltyperegistrar`,
+  `qmlcachegen`… : la compilation croisée de Qt Quick les cherche par `-qt-host-path`) ; `qt_wasm <module> <lib>` pour
+  qtsvg, qtshadertools, qtdeclarative, qtmultimedia, qtcharts, qui applique `wasm/patches/<module>-*.patch` ; `MODULES`
+  à 20 liaisons, `MODULES_DEMANDE` à 15 ; archive `pyside6qml` (libpyside6qml, que QtQml lie) ; phase `dynamique`
+  réécrite (ci-dessous) ; zip `pyodide-pyside6-0.29.3.2`.
+- `wasm/patches/qtmultimedia-sans-fils.patch` : qtmultimedia refuse de se configurer sans la fonctionnalité `thread`
+  (son `CMakeLists`) ; le portail est levé pour Emscripten seulement, et `qsamplecache_p.cpp` ne tire QNetwork que si
+  `QT_CONFIG(network)`. Le greffon `wasm` de Qt Multimedia (balises `<audio>`/`<video>`, Web Audio) n'a pas de fil.
+- `wasm/metatypes_qtcore.cpp` : ~35 instanciations `QMetaTypeInterfaceWrapper<T>` de plus (Qml, Quick, Multimedia,
+  Charts), contre des relocations `R_WASM_MEMORY_ADDR_REL_SLEB` non résolues au lien.
+- `wasm/symboles.py` : sous-commande `croises` (ce qu'un module fournisseur doit exporter aux modules chargés après lui) ;
+  `manquants` ne retire plus ce que les modules exportent (Qml importe `QAbstractItemModel::hasChildren`, que Quick
+  exporte aussi, mais Quick se charge APRÈS Qml : seul l'agrégat peut le servir).
+- `wasm/pyodide-qt.mjs` : table `DEPENDANCES` (Qml ← Network, Quick ← Qml, QuickWidgets et QuickControls2 ← Quick,
+  Multimedia ← Network, MultimediaWidgets ← Multimedia, Charts ← OpenGLWidgets) ; `charge()` charge les dépendances
+  une à une avant le module (le wasm résout ses imports au chargement, pas à l'appel).
+- `wasm/patches/pyodide-pyside6.patch` : `-lopenal` dans `MAIN_MODULE_LDFLAGS` (bibliothèque JS d'Emscripten, que le
+  greffon multimedia importe ; `pyodide.asm.wasm` inchangé, md5 identique à la release, seul `pyodide.asm.js` grossit).
+- `wasm/fumee.mjs` : QJSEngine (`6 * 7`), QQmlComponent qui instancie un `QtObject`, QAudioFormat, QMediaFormat,
+  QLineSeries ; `globalThis.window = globalThis` (le répartiteur d'événements de Qt, une fois un QQmlEngine en poste,
+  programme ses réveils par `window.setTimeout`, que Node n'a pas).
+- `wasm/README.md`, `qtpy6/web/versions.json` (release `0.29.3.2`, sha256
+  `c415eb71d1a11f0afb3bd52296ff24f840184a84316dceae2b3870c478fa9ad2`), `essais/modules_qt_suite/page.py` (l'essai page).
+
+### Les choix, avec l'alternative écartée
+
+- **Une bibliothèque Qt partagée par plusieurs modules vit dans UN module « fournisseur », lié en archive entière, et
+  l'exporte** (Network dans QtNetwork, Qml/QmlMeta/QmlModels dans QtQml, Quick/QuickLayouts/QuickTemplates2 dans
+  QtQuick, Multimedia dans QtMultimedia, OpenGLWidgets dans QtOpenGLWidgets). Écarté : la copie de la bibliothèque dans
+  chaque module qui la lie (l'état statique de Qt dupliqué : deux registres de métatypes, deux moteurs QML). Mécanisme :
+  `deja.txt` liste les archives et objets déjà pris (amorcé par l'agrégat, complété module après module dans l'ordre de
+  chargement) ; `--whole-archive` pour les fournisseurs (Quick importe des membres de Qml que rien dans Qml ne
+  référence : un lien partiel les aurait laissés dehors, vu au premier essai) ; second lien des fournisseurs en
+  `--export-all` dans `tout/`, `symboles.py croises` en déduit la liste `--export=` du lien définitif. Coût accepté :
+  les modules qtbase qui portent une bibliothèque grossissent (Network 927 → 968 Kio, OpenGLWidgets 101 → 158 Kio,
+  Sql 2 009 → 2 064 Kio, PrintSupport 385 → 442 Kio).
+- **L'agrégat est lié en DERNIER**, après le lien définitif des fournisseurs : le second lien d'un fournisseur importe
+  cinq symboles de plus que le premier (`QImage::fill(QColor)`, `QAbstractItemModel::hasChildren`, `sibling`,
+  `QPersistentModelIndex::flags`, `QMetaObject::Connection::operator=`), et `symboles.py verifier` échouait tant que
+  l'agrégat se liait avant. Écarté : lier deux fois l'agrégat (plus long, même résultat).
+- **Greffons QML statiques repris des `.prl`** : les objets `qrc_*.cpp.o` et `*_init.cpp.o` (`Q_IMPORT_QML_PLUGIN`) que
+  les `.prl` de Qt nomment sont liés explicitement, par `prl_objets` et `qml_greffon` ; sans eux `import QtQuick` échoue
+  à l'exécution (« module not installed »). Écarté : `qmlimportscanner` à la construction (il faudrait les `.qml` de
+  l'application, inconnus ici) ; tout greffon QML existant (Controls : seuls les styles Basic et Fusion sont pris, les
+  autres pèsent et demandent des ressources natives). Point ouvert : un style Controls non embarqué tombe sur Basic.
+- **qtmultimedia patché plutôt qu'écarté** : le greffon `wasm` de Qt ne crée aucun fil, le portail `thread` du
+  `CMakeLists` est une précaution générale. Écarté : construire Qt-WASM avec les fils (`-pthread`, SharedArrayBuffer,
+  COOP/COEP sur GitHub Pages impossible). Niveau de preuve : construit, fumée Node (QAudioFormat, QMediaFormat) ; la
+  lecture audio/vidéo réelle est l'objet de l'essai page ci-dessous.
+- **Charts dépend d'OpenGLWidgets au chargement** (il lie la bibliothèque, pour `QAbstractSeries::useOpenGL`) alors que
+  `QOpenGLWidget` ne marche pas dans une page (section précédente) : le rendu de `QChartView` est raster par défaut, le
+  module OpenGLWidgets est juste chargé (158 Kio). Écarté : reconstruire qtcharts sans OpenGL (`-no-feature-opengl`
+  est global à Qt, pas à qtcharts).
+
+### Mesures (10/10/2026, `-Oz`, octets ; `.so` / `.br`)
+
+Qml 4 930 997 / 1 029 596 ; Quick 6 348 938 / 1 549 903 ; QuickWidgets 211 560 / 48 938 ; QuickControls2 719 705 /
+150 510 ; Multimedia 1 236 582 / 350 115 ; MultimediaWidgets 171 693 / 36 277 ; Charts 1 620 618 / 338 770. Agrégat
+26 071 820 (avant : 25 759 804, +1,2 %) / 6 226 997 : le démarrage d'une page n'a pas bougé. Zip 22 385 362 octets (reconstruit après le correctif Quick ci-dessous).
+Durées : `qthote` + `qt` 871 s ; `pyside` + `pyodide` < 10 min ; `dynamique` 100 à 150 s. Journaux : `qt-suite.log`,
+`pyside-suite-1.log`, `dyn-suite3.log`, `fumee.log` dans `$RACINE/journaux/`.
+
+### Niveau de preuve
+
+- `symboles.py verifier` vert sur les quinze modules et `node wasm/fumee.mjs` vert (QJSEngine 42, QtObject instancié par
+  le moteur QML, formats audio/média, série de points) : testé, journaux ci-dessus.
+- Relu par la session : le diff entier (construire.sh, symboles.py, metatypes, pyodide-qt.mjs, patches, fumée, README),
+  les tailles avant/après, le md5 de `pyodide.asm.wasm`.
+- Non relu : le contenu du zip (liste fixe de `phase_paquet`, les quinze `.so` compris par construction).
+- Navigateur réel : essai page ci-dessous.
+
+### Essai page (Firefox 155 headless du bac à sable, `essais/modules_qt_suite/page.py`, 14 h)
+
+La page importe QtCharts, QtMultimedia puis QtQuick/QtQuickWidgets depuis le script lancé par `lancer`, un contrôle
+par module, et pose `essai_fini` ; la sonde (`essais/modules_demande/sonde_console.py`, console navigateur au journal)
+lit les verdicts. Journal `essais/modules_qt_suite/sonde.log`, capture `capture.png` (relue : la courbe Charts).
+- **Charts : OK**. `QChartView` peint (grab 978×748, 23 couleurs, 21 points), 0,9 s après l'import.
+- **Multimedia : OK** pour ce qu'une page sans geste peut vérifier : `QMediaPlayer` + `QAudioOutput` créés, sortie
+  « WebAssembly audio playback device », état `Stopped` ; le son lui-même n'est PAS vérifié (`NotAllowedError` : le
+  navigateur refuse `play()` sans geste de l'utilisateur, c'est la règle de tous les navigateurs, pas un défaut).
+- **Quick : import et exécution OK après correctif, rendu non vérifiable ici.** Premier essai : `import PySide6.QtQuick`
+  fatal, `SuspendError: No matching WebAssembly.promising`. Cause, lue dans `pyodide.asm.js` : avec `global: false`, les
+  exports d'un module latéral vont dans la portée locale, et le proxy `env` d'un module chargé ensuite ne résout
+  DIRECTEMENT que `wasmImports` ; tout autre symbole reçoit un **stub JavaScript** (`stubs[prop] = (...args) =>
+  resolveSymbol(prop)(...args)`), résolu au premier appel. Or l'init C de QtQuick appelle `Shiboken::Module::import("PySide6.QtOpenGL")`,
+  module pas encore chargé (DEPENDANCES disait `Quick: ["Qml"]`) : le finder lance `run_sync(charge(...))`, et JSPI
+  refuse de suspendre à travers une trame JS (le stub) sur la pile. Deux correctifs, les deux gardés :
+  `Quick: ["Qml", "OpenGL"]` (relevé des `Module::import` de chaque `Qt*_module_wrapper.cpp` généré : Quick importe
+  Core Network Gui OpenGL Qml), et `global: true` dans `charger` : les exports rejoignent `wasmImports`
+  (`mergeLibSymbols`, premier défini gagne, ce qui est l'ordre de `resolveSymbol` de toute façon), un module chargé
+  ensuite résout AU CHARGEMENT, sans stub. Sans `global: true`, tout `run_sync` (QFileDialog web, `monter`) appelé
+  depuis un slot que déclenche un signal émis par un module latéral aurait le même défaut, latent. Vérifié : fumée Node
+  verte avec `global: true` ; dans la page, QtQuick et QtQuickWidgets s'importent (0,14 s), `QQuickWidget` passe à `Ready`
+  sans erreur QML. Le rendu, lui, échoue faute de WebGL dans ce Firefox (« WebGL context creation failed », « QQuickWidget:
+  Failed to get a QRhi ») ; forcer le WebGL logiciel par préférences (`webgl.force-enabled`, `gfx.webrender.software`,
+  `LIBGL_ALWAYS_SOFTWARE=1`) ne change rien, essai fait. Ce verdict-là attend un navigateur hors bac à sable.
+- Le zip `0.29.3.2` a été reconstruit après le correctif (il embarque `pyodide.mjs`) ; sha256 reporté dans
+  `versions.json` et ci-dessus.
+
+Passe de simplification avant commit (sous-agent Sonnet, relu) : enlevés `plus=()` (variable morte de la phase dynamique) et
+le diagnostic `?import_tot` de page.py (plus de scénario) ; `MODULES` dérivé de `MODULES_DEMANDE` (une liste au lieu de
+deux) ; commentaires « huit modules » mis à quinze (construire.sh, metatypes, README) ; dépendances du README renvoyées à
+`DEPENDANCES`. Gardé contre son avis : `Quick: ["Qml", "OpenGL"]`, OpenGL n'étant pas un fournisseur de symboles mais la
+liaison que l'init de QtQuick importe (c'est le défaut corrigé). Restent trois listes à tenir ensemble : `MODULES_DEMANDE`,
+`DEMANDE` du .mjs, les imports de `fumee.mjs` ; le .mjs ne peut pas lire le .sh, non traité.
+
+### Points ouverts (à regarder en premier)
+
+- Rendu de Qt Quick dans un vrai navigateur (WebGL) : non vérifié. Commande hors bac à sable donnée à l'utilisateur.
+- Les jumeaux `.br` des sept nouveaux `.so` : servis par `site/` depuis `dist/` brut, donc non testés dans cette page
+  (ceux de qtbase l'ont été dans l'essai précédent, même mécanisme).
+- Style des Controls (`QQuickStyle`) : rien de réglé, le style Basic est celui que les greffons statiques apportent.
+- `pyodide-qt.mjs` : l'`ImportError` « introuvable » d'un module absent de `DEMANDE` reste bruyante (pile JS entière).
+- `sonde_console.py` n'affiche pas `x.message` d'une exception JS (une copie de travail l'ajoutait) : à intégrer.
+- Une vérification que `DEPENDANCES` couvre les `Module::import` des wrappers Shiboken (sous-commande de `symboles.py`)
+  aurait trouvé le défaut Quick à la construction : non écrite, c'est une fonction non demandée, notée ici.

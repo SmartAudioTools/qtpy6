@@ -6,6 +6,11 @@ chargement). Un seul outil, trois usages :
   symboles.py manquants <principal.wasm> <agrege.so> <module.so>...
        ce que les modules importent et que ni le module principal ni les modules eux-mêmes ne fournissent : la liste
        que l'agrégat doit exporter (lu sur un agrégat lié --export-all, qui exporte tout ce qu'il définit)
+  symboles.py croises <principal.wasm> <agrege_tout.so> <tout/> <module.so>...
+       <module.so>... dans l'ordre de CHARGEMENT ; <tout/> contient, sous le même nom de fichier, le même module lié
+       --export-all. Un module qui porte une bibliothèque Qt (Network, Qml, Quick, Multimedia) doit exporter ce que les
+       modules chargés après lui en importent : ses symboles Qt sont hidden, que SIDE_MODULE n'exporte pas. Écrit
+       « <fichier> <symbole> » : ce que chaque module doit exporter en plus (et que ni le principal ni l'agrégat ne fournit).
   symboles.py verifier <principal.wasm> <agrege.so> <module.so>...
        chaque import de chaque module résolu par le principal, l'agrégat ou un module avant lui (ordre de chargement) ;
        code 1 et la liste des manquants sinon.
@@ -112,16 +117,28 @@ def main(arguments: list[str]) -> int:
     if usage == "exportes":
         print("\n".join(sorted(exportes(fichiers[0]))))
         return 0
+    if usage == "croises":
+        principal, agrege_tout, tout, *modules = fichiers
+        deja = fournis_par_principal(principal) | _PROPRES | exportes(agrege_tout)
+        for i, m in enumerate(modules[:-1]):
+            attendus = set().union(*(besoins(suivant) for suivant in modules[i + 1:])) - deja - exportes(m)
+            if (tout / m.name).exists():
+                for nom in sorted(attendus & exportes(tout / m.name)):
+                    print(m.name, nom)
+        return 0
     principal, agrege, *modules = fichiers
     fournis = fournis_par_principal(principal) | _PROPRES
     if usage == "manquants":
-        attendus = set().union(*(besoins(m) for m in modules)) - fournis - set().union(*(exportes(m) for m in modules))
+        # Tout ce qu'un module importe et que le principal ne fournit pas : l'agrégat l'exporte s'il le définit, que
+        # d'autres modules l'exportent ou non (Qml importe QAbstractItemModel::hasChildren, que Quick exporte aussi : il
+        # n'est servi que par l'agrégat et par ceux chargés AVANT lui, pas par ses suivants).
+        attendus = set().union(*(besoins(m) for m in modules)) - fournis
         # Ce qui n'est ni au principal ni aux modules : l'agrégat, s'il le définit ; sinon un symbole pour lequel
         # Emscripten posera un bouchon — à dire, sans échouer, verifier tranche.
         exports_agrege = exportes(agrege)
         print("\n".join(sorted(attendus & exports_agrege)))
-        for nom in sorted(attendus - exports_agrege):
-            print(f"introuvable : {nom}", file=sys.stderr)
+        for nom in sorted(attendus - exports_agrege - set().union(*(exportes(m) for m in modules))):
+            print(f"introuvable : {nom}", file=sys.stderr)  # (ni agrégat ni module : ce que croises et verifier tranchent)
         return 0
     if usage == "verifier":
         fournis |= exportes(agrege)

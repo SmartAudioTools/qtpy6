@@ -23,10 +23,10 @@ commit() {  # commit <dossier> <dépôt> <commit> : un seul commit, sans histori
   [ -d "$1/.git" ] || { git init -q "$1" && git -C "$1" fetch -q --depth 1 "$2" "$3" && git -C "$1" checkout -q FETCH_HEAD; }
 }
 
-echo "== Qt $QT (qtbase, qtsvg)"
+echo "== Qt $QT (qtbase, qtsvg, et depuis le 10/10/2026 qtshadertools, qtdeclarative, qtmultimedia, qtcharts)"
 B=https://download.qt.io/official_releases/qt/${QT%.*}/$QT/submodules
 prendre "$B/md5sums.txt"
-for m in qtbase qtsvg; do
+for m in qtbase qtsvg qtshadertools qtdeclarative qtmultimedia qtcharts; do
   prendre "$B/$m-everywhere-src-$QT.tar.xz"
   grep " $m-everywhere-src-$QT.tar.xz\$" md5sums.txt | md5sum -c -
 done

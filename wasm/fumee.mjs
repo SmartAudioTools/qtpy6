@@ -1,5 +1,5 @@
 // Test de fumée, sous node : le Pyodide de construire.sh importe PySide6 et fait circuler un signal, sa bibliothèque
-// standard est en .pyc, les huit modules Qt à la demande se chargent au premier import (sqlite, DOM, QTest...), et qtpy6
+// standard est en .pyc, les quinze modules Qt à la demande se chargent au premier import (sqlite, DOM, QTest...), et qtpy6
 // s'y charge en mode paresseux.
 //   node wasm/fumee.mjs [dossier]      (le paquet de phase_paquet dépaqueté ; modèle : scripts/smoke-test.mjs de Pyodide-Qt)
 // QApplication et les widgets veulent un navigateur (DOM) : la sonde de qtpy6.web, pas d'ici.
@@ -11,6 +11,7 @@ const dist = resolve(process.argv[2] || "/DATA/Python/outils_wasm/pyside6/build/
 // L'enveloppe pyodide.mjs (pyodide-qt.mjs) ne charge l'agrégat de Qt que dans une page : on s'en donne l'air, fetch lisant
 // le disque (sans jumeaux compressés ici : elle se rabat sur le fichier lui-même, comme en développement).
 globalThis.document = {};
+globalThis.window = globalThis;  // le répartiteur d'événements de Qt programme ses réveils par window.setTimeout (QQmlEngine en poste)
 globalThis.location = { href: pathToFileURL(dist).href };
 globalThis.fetch = async u => readFile(fileURLToPath(String(u))).then(o => new Response(o), () => new Response(null, { status: 404 }));
 const { loadPyodide } = await import(pathToFileURL(dist + "pyodide.mjs").href);
@@ -52,6 +53,27 @@ f"imprimantes={QtPrintSupport.QPrinterInfo.availablePrinterNames()} concurrent={
 `);
 console.log(demande);
 if (!demande.startsWith("sqlite=42 dom=texte qWait=True hote=127.0.0.1")) { console.error("ÉCHEC modules à la demande"); process.exit(1); }
+
+// Qt Quick, Multimedia, Charts : chacun son .so au premier import, Qml après Network, Quick après Qml (DEPENDANCES de
+// pyodide-qt.mjs). Sans DOM ni QGuiApplication : le moteur QML évalue (QJSEngine, puis un QQmlComponent qui instancie
+// un QtObject), les types des autres existent et les classes sans fenêtre se construisent.
+const quick = await py.runPythonAsync(`
+from PySide6 import QtQml, QtQuick, QtQuickWidgets, QtQuickControls2, QtMultimedia, QtMultimediaWidgets, QtCharts
+js = QtQml.QJSEngine().evaluate("6 * 7").toInt()
+moteur = QtQml.QQmlEngine()
+c = QtQml.QQmlComponent(moteur)
+c.setData(b"import QtQml\\nQtObject { property int x: 6 * 7 }", QtCore.QUrl())
+objet = c.create()
+qml = objet.property("x") if objet else c.errorString()
+audio = QtMultimedia.QAudioFormat(); audio.setSampleRate(44100); audio.setChannelCount(2)
+format = QtMultimedia.QMediaFormat()
+serie = QtCharts.QLineSeries(); serie.append(1.0, 2.0); serie.append(3.0, 4.0)
+f"js={js} qml={qml} audio={audio.sampleRate()}/{audio.channelCount()} fichiers={len(format.supportedFileFormats(QtMultimedia.QMediaFormat.ConversionMode.Decode)) >= 0} serie={serie.count()} " \\
+f"item={hasattr(QtQuick, 'QQuickItem')} widget={hasattr(QtQuickWidgets, 'QQuickWidget')} controles={hasattr(QtQuickControls2, 'QQuickStyle')} " \\
+f"video={hasattr(QtMultimediaWidgets, 'QVideoWidget')}"
+`);
+console.log(quick);
+if (!quick.startsWith("js=42 qml=42 audio=44100/2")) { console.error("ÉCHEC Quick, Multimedia, Charts"); process.exit(1); }
 
 // qtpy6 sur ce build : le mode paresseux de qtpy6._binding (crochet de shiboken). Les doublures du navigateur lisent
 // des noms par ns["…"] à l'import : un nom absent de la liste `needed` de _binding.load fait échouer ce qui suit.

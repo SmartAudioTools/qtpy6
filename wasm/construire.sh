@@ -62,34 +62,61 @@ phase_emsdk() {
   emsdk_env; emcc --version | head -1
 }
 
+qt_hote() {  # qt_hote <module> <témoin> : un module de Qt hôte (outils moc, qsb, qmltyperegistrar...), Release, ni exemples ni tests (qt-configure-module ne connaît pas -nomake : options cmake)
+  [ -e "$QTHOTE/$2" ] && return
+  deballer "$SRC/$1-everywhere-src-$QT.tar.xz" "$RACINE/src/$1"
+  mkdir -p "$RACINE/build/$1-hote" && cd "$RACINE/build/$1-hote"
+  [ -f build.ninja ] || "$QTHOTE/bin/qt-configure-module" "$RACINE/src/$1" -- -DQT_BUILD_EXAMPLES=OFF -DQT_BUILD_TESTS=OFF
+  cmake --build . --parallel
+  cmake --install .
+}
+
 phase_qthote() {
   # Qt hôte : il faut le MÊME 6.10.2 que la cible (le Qt système est en 6.11, refusé par -qt-host-path) pour moc,
-  # rcc, uic, et pour lier le générateur shiboken. qtbase seul, en Release, sans exemples ni tests.
-  [ -f "$QTHOTE/bin/qmake6" ] || [ -f "$QTHOTE/bin/qmake" ] && return
-  deballer "$SRC/qtbase-everywhere-src-$QT.tar.xz" "$RACINE/src/qtbase"
-  mkdir -p "$RACINE/build/qtbase-hote" && cd "$RACINE/build/qtbase-hote"
-  [ -f build.ninja ] || "$RACINE/src/qtbase/configure" -prefix "$QTHOTE" -release -opensource -confirm-license \
-    -nomake examples -nomake tests -no-pch -no-dbus -- -DQT_BUILD_TESTS_BY_DEFAULT=OFF
+  # rcc, uic, et pour lier le générateur shiboken. qtbase en Release, sans exemples ni tests ; puis, pour compiler
+  # qtdeclarative en croisé, les OUTILS hôte de qtshadertools (qsb) et de qtdeclarative (qmltyperegistrar, qmlcachegen,
+  # qmlimportscanner...), que -qt-host-path va chercher ici. Une garde par témoin, pas une garde globale.
+  if ! [ -f "$QTHOTE/bin/qmake6" ] && ! [ -f "$QTHOTE/bin/qmake" ]; then
+    deballer "$SRC/qtbase-everywhere-src-$QT.tar.xz" "$RACINE/src/qtbase"
+    mkdir -p "$RACINE/build/qtbase-hote" && cd "$RACINE/build/qtbase-hote"
+    [ -f build.ninja ] || "$RACINE/src/qtbase/configure" -prefix "$QTHOTE" -release -opensource -confirm-license \
+      -nomake examples -nomake tests -no-pch -no-dbus -- -DQT_BUILD_TESTS_BY_DEFAULT=OFF
+    cmake --build . --parallel
+    cmake --install .
+  fi
+  qt_hote qtshadertools bin/qsb
+  qt_hote qtdeclarative libexec/qmltyperegistrar
+}
+
+qt_wasm() {  # qt_wasm <module> <bibliothèque installée> : un module de Qt-WASM, avec les options de qtbase (statique, sans fils)
+  [ -f "$QTWASM/lib/$2" ] && return
+  deballer "$SRC/$1-everywhere-src-$QT.tar.xz" "$RACINE/src/$1"
+  compgen -G "$DEP/wasm/patches/$1-*.patch" >/dev/null && patcher "$1" "$RACINE/src/$1"  # qtmultimedia : portail « fils » levé pour emscripten
+  mkdir -p "$RACINE/build/$1-wasm" && cd "$RACINE/build/$1-wasm"
+  [ -f build.ninja ] || "$QTWASM/bin/qt-configure-module" "$RACINE/src/$1" -- -DQT_BUILD_EXAMPLES=OFF -DQT_BUILD_TESTS=OFF
   cmake --build . --parallel
   cmake --install .
 }
 
 phase_qt() {
-  # Qt pour WebAssembly : exactement la configuration de Pyodide-Qt (build.sh, build_qt), qtbase puis qtsvg.
-  [ -f "$QTWASM/lib/libQt6Svg.a" ] && return
+  # Qt pour WebAssembly : exactement la configuration de Pyodide-Qt (build.sh, build_qt), qtbase puis qtsvg ; depuis le
+  # 10/10/2026 qtshadertools, qtdeclarative (Qml, Quick, Controls), qtmultimedia et qtcharts, dans l'ordre de leurs
+  # dépendances. Les options de qtbase (-static, sans fils, exceptions wasm) sont héritées par qt-configure-module.
   emsdk_env
-  deballer "$SRC/qtbase-everywhere-src-$QT.tar.xz" "$RACINE/src/qtbase"
-  deballer "$SRC/qtsvg-everywhere-src-$QT.tar.xz" "$RACINE/src/qtsvg"
-  mkdir -p "$RACINE/build/qtbase-wasm" && cd "$RACINE/build/qtbase-wasm"
-  [ -f build.ninja ] || "$RACINE/src/qtbase/configure" -qt-host-path "$QTHOTE" -platform wasm-emscripten -static \
-    -prefix "$QTWASM" -no-feature-thread -feature-wasm-exceptions -opensource -confirm-license \
-    -nomake examples -nomake tests -no-warnings-are-errors
-  cmake --build . --parallel
-  cmake --install .
-  mkdir -p "$RACINE/build/qtsvg-wasm" && cd "$RACINE/build/qtsvg-wasm"
-  [ -f build.ninja ] || "$QTWASM/bin/qt-configure-module" "$RACINE/src/qtsvg"
-  cmake --build . --parallel
-  cmake --install .
+  if ! [ -f "$QTWASM/lib/libQt6Core.a" ]; then
+    deballer "$SRC/qtbase-everywhere-src-$QT.tar.xz" "$RACINE/src/qtbase"
+    mkdir -p "$RACINE/build/qtbase-wasm" && cd "$RACINE/build/qtbase-wasm"
+    [ -f build.ninja ] || "$RACINE/src/qtbase/configure" -qt-host-path "$QTHOTE" -platform wasm-emscripten -static \
+      -prefix "$QTWASM" -no-feature-thread -feature-wasm-exceptions -opensource -confirm-license \
+      -nomake examples -nomake tests -no-warnings-are-errors
+    cmake --build . --parallel
+    cmake --install .
+  fi
+  qt_wasm qtsvg libQt6Svg.a
+  qt_wasm qtshadertools libQt6ShaderTools.a
+  qt_wasm qtdeclarative libQt6Quick.a
+  qt_wasm qtmultimedia libQt6Multimedia.a
+  qt_wasm qtcharts libQt6Charts.a
 }
 
 phase_shiboken() {
@@ -132,10 +159,10 @@ phase_cpython() {
 }
 
 PYCIBLE="$PYODIDE/cpython/installs/python-$PYTHON"  # le CPython de Pyodide : en-têtes et libpython3.13.a
-# Les cinq de Pyodide-Qt, puis les huit autres de qtbase (10/10/2026), chargés à la demande par pyodide-qt.mjs : un
-# module latéral par liaison (phase dynamique). L'ordre est celui des dépendances (PySideHelpers.cmake).
-MODULES="Core;Gui;Widgets;Svg;SvgWidgets;PrintSupport;Network;Sql;Xml;Concurrent;OpenGL;OpenGLWidgets;Test"
-MODULES_DEMANDE="PrintSupport Network Sql Xml Concurrent OpenGL OpenGLWidgets Test"  # ceux qui ont leur propre .so
+# Les cinq de Pyodide-Qt (l'agrégat), puis les quinze à la demande (10/10/2026), chargés par pyodide-qt.mjs : un module
+# latéral par liaison (phase dynamique). L'ordre est celui des dépendances (PySideHelpers.cmake). MODULES en dérive.
+MODULES_DEMANDE="PrintSupport Network Sql Xml Concurrent OpenGL OpenGLWidgets Test Qml Quick QuickWidgets QuickControls2 Multimedia MultimediaWidgets Charts"  # ceux qui ont leur propre .so, dans l'ordre de CHARGEMENT
+MODULES="Core;Gui;Widgets;Svg;SvgWidgets;${MODULES_DEMANDE// /;}"
 
 phase_pyside() {
   # libshiboken, libpyside et les modules, compilés en croisé par le générateur hôte (QFP_SHIBOKEN_HOST_PATH),
@@ -173,7 +200,7 @@ phase_pyodide() {
   local lien="$RACINE/build/pyodide-lien" lib="$PYCIBLE/lib/python${PYTHON%.*}" c m
   local site="$RACINE/pyside-wasm/lib/python${PYTHON%.*}/site-packages"
   dossier "$lien"
-  for c in libshiboken pyside6 shibokenmodule Qt${MODULES//;/ Qt}; do  # Qt<M> pour chaque module
+  for c in libshiboken pyside6 pyside6qml shibokenmodule Qt${MODULES//;/ Qt}; do  # Qt<M> pour chaque module
     rm -f "$lien/$c.a"  # emar qc : ajout sans remplacement par nom de fichier, xargs peut l'appeler plusieurs fois
     find "$RACINE/build/pyside-wasm" -path "*/CMakeFiles/$c.dir/*" -name '*.o' -print0 | xargs -0 emar qc "$lien/$c.a"
     emranlib "$lien/$c.a"
@@ -206,11 +233,12 @@ phase_dynamique() {
   # que phase_paquet empaquette.
   emsdk_env; pyodide_env
   local lien="$RACINE/build/pyodide-lien" dyn="$RACINE/build/dynamique" q="$QTWASM/lib" g="$QTWASM/plugins" f m greffon
+  local FOURNISSEURS="Network OpenGLWidgets Qml Quick Multimedia"  # les modules dont un module chargé après eux importe la bibliothèque Qt
   local options=(-sSIDE_MODULE=1 -Oz -g0 -s WASM_BIGINT -fwasm-exceptions -sSUPPORT_LONGJMP)
   # L'agrégat : archives PySide entières (--whole-archive), rien dans le module principal ne les référence ; Qt au
   # besoin. Pas du port emdawnwebgpu de la recette Pyodide-Qt : aucun symbole wgpu dans Qt (llvm-nm). Chaque bibliothèque
   # Qt vit à UN endroit (son état statique ne se duplique pas) : ici celles dont dépend le port wasm de Qt, libQt6OpenGL
-  # comprise (QOpenGLTextureBlitter) ; les sept autres de MODULES_DEMANDE dans leur module.
+  # comprise (QOpenGLTextureBlitter) ; les autres de MODULES_DEMANDE dans leur module.
   local agrege=(-Wl,--whole-archive "$lien"/{libshiboken,pyside6,shibokenmodule}.a "$lien"/Qt{Core,Gui,Widgets,Svg,SvgWidgets}.a
     "$lien/qt_statique.o" -Wl,--no-whole-archive)
   local qt=("$q"/libQt6{Widgets,Gui,Core,Svg,SvgWidgets,OpenGL}.a "$q"/libQt6Bundled{Harfbuzz,Freetype,Libpng,Libjpeg,Pcre2}.a
@@ -222,25 +250,64 @@ phase_dynamique() {
   # copie des interfaces de métatype des types de base de QtCore (metatypes_qtcore.cpp dit pourquoi).
   em++ -fPIC -std=gnu++17 -DQT_STATIC -Oz -fwasm-exceptions -I"$QTWASM/include" -I"$QTWASM/include/QtCore" \
     -c "$DEP/wasm/metatypes_qtcore.cpp" -o "$dyn/metatypes_qtcore.o"
+  # Chaque archive et chaque objet n'a qu'UN propriétaire (l'état statique de Qt ne se duplique pas) : deja.txt les liste,
+  # amorcé par l'agrégat, complété module après module (dans l'ordre de chargement). Les .prl de Qt disent quels objets de
+  # ressources (qrc_*.o) une bibliothèque ou un greffon QML tire : des objets, pas des archives, donc à lier explicitement.
+  local deja="$dyn/deja.txt" PREFIXE="$QTWASM"
+  printf '%s\n' "${qt[@]}" > "$deja"
+  neuf() { local l; while read -r l; do grep -qxF -- "$l" "$deja" || { echo "$l" >> "$deja"; echo "$l"; }; done; }
+  prl_objets() { sed -n 's/^QMAKE_PRL_LIBS = //p' "$1" | tr ' ' '\n' | grep '\.cpp\.o$' |
+    sed "s#\$\$\[QT_INSTALL_PREFIX\]#$PREFIXE#;s#\$\$\[QT_INSTALL_QML\]#$PREFIXE/qml#;s#\$\$\[QT_INSTALL_LIBS\]#$PREFIXE/lib#"; }
+  qtlib() { local n; for n; do echo "$q/libQt6$n.a"; prl_objets "$q/libQt6$n.prl"; done; }
+  qml_greffon() {  # qml_greffon <dossier de qml/> <greffon> : l'objet qui l'importe (nommé d'après la cible, pas la bibliothèque), l'archive et ses ressources
+    ls "$QTWASM/qml/$1"/objects-Release/*_init/*_init.cpp.o; echo "$QTWASM/qml/$1/lib$2.a"; prl_objets "$QTWASM/qml/$1/lib$2.prl"; }
   for m in $MODULES_DEMANDE; do
-    local libs=() importes=""
+    local libs=() importes="" entier=("$lien/Qt$m.a")
     case $m in
       OpenGL) ;;
       Sql) libs=("$q/libQt6Sql.a" "$g/sqldrivers/libqsqlite.a"); importes="Q_IMPORT_PLUGIN(QSQLiteDriverPlugin)" ;;
       Network) libs=("$q/libQt6Network.a" "$g/tls/libqcertonlybackend.a"); importes="Q_IMPORT_PLUGIN(QTlsBackendCertOnly)" ;;
+      Qml) libs=($({ qtlib Qml QmlMeta QmlModels; qml_greffon QtQml qmlplugin; qml_greffon QtQml/Models modelsplugin; } | neuf))
+           entier+=("$lien/pyside6qml.a" "$q"/libQt6{Qml,QmlMeta,QmlModels}.a) ;;  # entières : Quick en importe des membres que rien ne référence ici
+      Quick) libs=($({ qtlib Quick QuickLayouts QuickTemplates2; qml_greffon QtQuick qtquick2plugin; qml_greffon QtQuick/Window quickwindowplugin
+                       qml_greffon QtQuick/Layouts qquicklayoutsplugin; qml_greffon QtQuick/Templates qtquicktemplates2plugin; } | neuf))
+             entier+=("$q"/libQt6{Quick,QuickLayouts,QuickTemplates2}.a) ;;
+      QuickControls2) libs=($({ qtlib QuickControls2 QuickControls2Impl QuickControls2Basic QuickControls2BasicStyleImpl QuickControls2Fusion QuickControls2FusionStyleImpl
+                                qml_greffon QtQuick/Controls qtquickcontrols2plugin; qml_greffon QtQuick/Controls/impl qtquickcontrols2implplugin
+                                qml_greffon QtQuick/Controls/Basic qtquickcontrols2basicstyleplugin; qml_greffon QtQuick/Controls/Basic/impl qtquickcontrols2basicstyleimplplugin
+                                qml_greffon QtQuick/Controls/Fusion qtquickcontrols2fusionstyleplugin; qml_greffon QtQuick/Controls/Fusion/impl qtquickcontrols2fusionstyleimplplugin; } | neuf)) ;;
+      Multimedia) entier+=("$q/libQt6Multimedia.a")
+                  libs=($({ qtlib Multimedia; echo "$q/libQt6BundledTLSF.a"; echo "$g/multimedia/objects-Release/QWasmMediaPlugin_init/QWasmMediaPlugin_init.cpp.o"
+                            echo "$g/multimedia/libwasmmediaplugin.a"; prl_objets "$g/multimedia/libwasmmediaplugin.prl"; } | neuf)) ;;
       *) libs=("$q/libQt6$m.a") ;;
     esac
+    printf '%s\n' "${libs[@]}" | neuf > /dev/null  # propriétaire des archives des cas simples aussi
     [ -z "$importes" ] || printf '#include <QtPlugin>\n%s\n' "$importes" | em++ -fPIC -std=gnu++17 -DQT_STATIC \
       -I"$QTWASM/include" -I"$QTWASM/include/QtCore" -x c++ -c - -o "$dyn/greffons_$m.o"
-    em++ -o "$dyn/dist/pyside_Qt$m.so" "${options[@]}" -Wl,--whole-archive "$lien/Qt$m.a" "$dyn/metatypes_qtcore.o" \
-      $([ -z "$importes" ] || echo "$dyn/greffons_$m.o") -Wl,--no-whole-archive "${libs[@]}"
+    printf '%s\n' -Wl,--whole-archive "${entier[@]}" "$dyn/metatypes_qtcore.o" $([ -z "$importes" ] || echo "$dyn/greffons_$m.o") \
+      -Wl,--no-whole-archive "${libs[@]}" > "$dyn/lien_$m.rsp"  # relu par le second lien (2 bis)
+    em++ -o "$dyn/dist/pyside_Qt$m.so" "${options[@]}" "@$dyn/lien_$m.rsp"
   done
-  # 2. Ce que ces modules importent, l'agrégat doit l'exporter : ses symboles Qt sont hidden, que --export-dynamic
+  # 2. Ce que ces modules importent, l'agrégat doit l'exporter (lien final après 2 bis) : ses symboles Qt sont hidden, que --export-dynamic
   # (SIDE_MODULE) ignore, et il ne tire d'une archive que ce qu'il référence. Un premier lien --export-all, archives Qt
   # entières, donne tout ce qu'il PEUT définir ; symboles.py en retire ce que le module principal fournit (exports et
   # bibliothèque JavaScript) et ce que les modules se fournissent eux-mêmes ; le lien final n'exporte que cette liste
   # (--export=<sym> tire l'objet qui le définit, comme --undefined) : des exports en plus, pas tout Qt.
   em++ -o "$dyn/agrege_tout.so" "${options[@]}" -Wl,--export-all "${agrege[@]}" -Wl,--whole-archive "${qt[@]}" -Wl,--no-whole-archive
+  # 2 bis. Un module qui porte une bibliothèque Qt l'exporte, lui aussi, à ceux qui la lient et se chargent après lui
+  # (Network pour Qml et Multimedia, Qml pour Quick, Quick pour les Controls, OpenGLWidgets pour Charts...) : ses
+  # symboles Qt sont hidden. Deuxième lien de ces fournisseurs en --export-all (dans tout/), symboles.py croises dit
+  # ce que chacun doit exporter, et le lien final le fait. Les autres modules n'ont pas besoin de second lien.
+  dossier "$dyn/tout"
+  for f in $FOURNISSEURS; do em++ -o "$dyn/tout/pyside_Qt$f.so" "${options[@]}" -Wl,--export-all "@$dyn/lien_$f.rsp"; done
+  "$HOTEPY" "$DEP/wasm/symboles.py" croises "$PYODIDE/dist/pyodide.asm.wasm" "$dyn/agrege_tout.so" "$dyn/tout" \
+    $(for m in $MODULES_DEMANDE; do echo "$dyn/dist/pyside_Qt$m.so"; done) > "$dyn/croises.txt"
+  for f in $FOURNISSEURS; do
+    sed -n "s#^pyside_Qt$f.so #-Wl,--export=#p" "$dyn/croises.txt" > "$dyn/exports_$f.rsp"
+    em++ -o "$dyn/dist/pyside_Qt$f.so" "${options[@]}" "@$dyn/lien_$f.rsp" "@$dyn/exports_$f.rsp"
+  done
+  # L'agrégat en dernier : ce qu'il exporte se lit sur les modules DÉFINITIFS (le second lien d'un fournisseur importe
+  # cinq symboles de plus que le premier : QImage::fill(QColor), QAbstractItemModel::hasChildren... mesuré).
   "$HOTEPY" "$DEP/wasm/symboles.py" manquants "$PYODIDE/dist/pyodide.asm.wasm" "$dyn/agrege_tout.so" \
     "$dyn"/dist/pyside_Qt*.so | sed 's/^/-Wl,--export=/' > "$dyn/exports.rsp"
   em++ -o "$dyn/dist/pyside_agrege.so" "${options[@]}" "@$dyn/exports.rsp" "${agrege[@]}" "${qt[@]}"
@@ -266,7 +333,7 @@ phase_paquet() {
   local pyc="$RACINE/build/paquet"
   dossier "$pyc"; cp "$RACINE/build/dynamique/dist/python_stdlib.zip" "$pyc/"
   /DATA/Python/outils_wasm/venv-pyodide/bin/pyodide py-compile --silent --compression-level 9 "$pyc/python_stdlib.zip"
-  "$HOTEPY" - "$RACINE/build/dynamique/dist" "$pyc/python_stdlib.zip" "$DEP/hebergement/LICENSE-Pyodide-PySide6.txt" "$RACINE/pyodide-pyside6-0.29.3.1.zip" <<'PY'
+  "$HOTEPY" - "$RACINE/build/dynamique/dist" "$pyc/python_stdlib.zip" "$DEP/hebergement/LICENSE-Pyodide-PySide6.txt" "$RACINE/pyodide-pyside6-0.29.3.2.zip" <<'PY'
 import hashlib, sys, zipfile
 from pathlib import Path
 dist, stdlib, licence, sortie = map(Path, sys.argv[1:])

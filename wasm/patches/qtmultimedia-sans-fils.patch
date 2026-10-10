@@ -1,0 +1,25 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -45,7 +45,7 @@
+     return()
+ endif()
+ 
+-if(NOT QT_FEATURE_thread)
++if(NOT QT_FEATURE_thread AND NOT EMSCRIPTEN)
+     message(NOTICE "Skipping the build of QtMultimedia as it is not supported without threads")
+     return()
+ endif()
+diff --git a/src/multimedia/audio/qsamplecache_p.cpp b/src/multimedia/audio/qsamplecache_p.cpp
+index 7db5d1a..15d2da8 100644
+--- a/src/multimedia/audio/qsamplecache_p.cpp
++++ b/src/multimedia/audio/qsamplecache_p.cpp
+@@ -100,7 +100,7 @@ QSampleCache::SampleLoadResult QSampleCache::loadSample(QByteArray data)
+     };
+ }
+ 
+-#if QT_CONFIG(thread) && QT_CONFIG(network)
++#if QT_CONFIG(network)  // sans fils : thread_local est défini vide plus haut
+ 
+ namespace {
+ 
