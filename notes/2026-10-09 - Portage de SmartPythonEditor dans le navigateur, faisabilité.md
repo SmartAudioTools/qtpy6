@@ -377,17 +377,18 @@ taille d'un dossier d'élève au-delà de 77 Ko et le quota IndexedDB ; deux ong
 brutale avant synchronisation ; le dossier autorisé Chromium ; Dropbox. Niveau de preuve : page Firefox, journaux
 `essais/spyder/sonde_jalon5.log` (3 phases 1, 1 phase 2) et `jalon5_bureau.log` (offscreen, 1), captures relues.
 
-### Résultat du jalon 5 bis (10/10/2026, 09 h 34) : le dossier autorisé de Chrome, mesuré dans le Chrome de l'utilisateur
+### Résultat du jalon 5 bis (10/10/2026, 09 h 34, complété 09 h 55) : le dossier autorisé de Chrome, mesuré dans le Chrome de l'utilisateur
 
 Demande de l'utilisateur (09 h 15) : « les postes du lycée sont sous Chrome, mesure l'option dossier autorisé ». Essai
 `essais/spyder/jalon5_dossier.py`, page seule (`index.html?script=jalon5_dossier.py`, servie par `http.server` sur
 127.0.0.1, contexte sûr), lancé par l'utilisateur dans son Chrome 153 — le sélecteur exige un clic réel, et Chromium ne
 démarre pas dans le bac à sable. Deux phases comme au jalon 5, mais le dossier de l'élève est un dossier RÉEL de son disque
 (`essais/spyder/jalon5_dossier/`, choisi dans le sélecteur), monté par `pyodide.mountNativeFS` (NATIVEFS_ASYNC) ; le
-handle est gardé dans IndexedDB et la permission relue après le rechargement. Même fichiers qu'au jalon 5, mêmes appels
+handle est gardé dans IndexedDB et la permission relue après le rechargement ; une troisième phase (demande de 09 h 46 :
+« oui, mesure la permission après fermeture de Chrome ») relance la page après fermeture complète de Chrome. Même fichiers qu'au jalon 5, mêmes appels
 de Spyder (`encoding.write/read`), journal écrit dans le dossier choisi et lu depuis le dépôt.
 
-| Mesure (Chrome 153, 1 passage complet) | Résultat |
+| Mesure (Chrome 153, 2 passages complets, chiffres du premier) | Résultat |
 |---|---|
 | `showDirectoryPicker` : du clic au handle (le temps de l'utilisateur dans le dialogue) | 6,8 s |
 | handle gardé dans IndexedDB | 24 ms |
@@ -399,10 +400,14 @@ de Spyder (`encoding.write/read`), journal écrit dans le dossier choisi et lu d
 | `exercice1.py` et `notes.txt` relus, identiques | 1 ms ; 50 ms (chardet, comme au jalon 5) |
 | posé dans l'éditeur, rendu | 206 ms |
 | script, phase B | 1,1 s ; tas 185 Mio |
+| **Chrome fermé puis relancé** → handle retrouvé, `queryPermission` : **`prompt`** ; `requestPermission` au clic → `granted` | 3,5 s (le clic de l'utilisateur) ; 6,0 s en tout |
+| après ce clic : `mountNativeFS`, 3 fichiers ; `exercice1.py` relu identique | 18 ms ; 2 ms |
 
 **Verdict : ça marche, et c'est bien « comme en local » pour l'élève.** Les fichiers sont sur son disque, lisibles par
 tout autre programme (vérifié : les trois fichiers présents dans le dossier du dépôt, contenu identique), et la permission
-a été MÉMORISÉE par Chrome au rechargement, sans nouveau clic. Le coût d'un `syncfs()` (30–70 ms) est vingt fois celui
+a été MÉMORISÉE par Chrome au rechargement, sans nouveau clic — mais PAS après fermeture de Chrome : à la séance suivante,
+l'élève retrouve son dossier (le handle survit dans IndexedDB) et doit cliquer UNE fois pour le réautoriser ; rien à
+rechoisir, rien de perdu. Le coût d'un `syncfs()` (30–70 ms) est vingt fois celui
 d'IDBFS mais reste invisible s'il est fait après chaque enregistrement, pas à chaque frappe : c'est la cadence que la doublure
 `application(persistant=chemin)` de qtpy6 devra choisir (synchroniser à l'enregistrement, et à la fermeture de la page).
 Pour qtpy6, la doublure a donc trois emplacements du même réglage : disque natif (bureau), IndexedDB (tout navigateur),
@@ -417,14 +422,29 @@ Ce que la mesure dit aussi, et qui compte pour l'usage :
     Windows, qui crée des dossiers. Que l'élève puisse créer son dossier n'a pas été vérifié ici (il a choisi un dossier existant) ;
   - Chrome crée les fichiers en mode 600 sous Linux : un autre compte (ici le mien) ne les lit qu'après `chmod g+rw`. Sans
     objet sous Windows, à savoir si un dossier Dropbox partagé entre comptes Linux est visé ;
-  - la permission mémorisée l'a été dans la même session du navigateur. Après fermeture de Chrome, Chrome (122+) propose de
-    la garder ; non mesuré ici — c'est le cas réel de la séance suivante, à mesurer en premier avant de retenir ce mode.
+  - **la permission ne survit pas à la fermeture de Chrome** (mesuré, phase C, deux passages identiques sur le point :
+    `prompt`, un clic, `granted`). Le mode « garder la permission » de Chrome 122+ ne s'est pas proposé ici — il est lié à
+    l'installation de la page en application (PWA) ou à un usage répété, et ce n'est pas un réglage de la page. Pour qtpy6,
+    la doublure doit donc prévoir, au lancement, un bouton « Réautoriser le dossier » quand `queryPermission` rend `prompt`
+    (c'est ce que fait l'essai), plutôt que de rouvrir le sélecteur : un clic, pas une recherche de dossier.
 
-Corrections du premier jet : aucune dans le script (un passage) ; deux dans le lancement (le bus D-Bus, les droits des
-fichiers). Non mesuré : la fermeture de Chrome entre les deux phases ; un dossier Dropbox ; Edge ; un dossier de plusieurs
+Corrections du premier jet : une dans le script (le chien de garde continuait à écrire « BLOQUÉ » toutes les 5 s dans le
+journal une fois la phase finie, tant que la page restait ouverte : arrêté en fin de phase) ; deux dans le lancement (le
+bus D-Bus, les droits des fichiers). Non mesuré : un dossier Dropbox ; Edge ; un dossier de plusieurs
 Mo ; deux onglets ; la perte de permission en cours de séance (`requestPermission` est codé, branche jamais exécutée).
-Niveau de preuve : un passage dans le Chrome de l'utilisateur, journal `essais/spyder/jalon5_dossier/jalon5_dossier.log`
+Niveau de preuve : deux passages dans le Chrome de l'utilisateur (le second avec la phase C), journal `essais/spyder/jalon5_dossier/jalon5_dossier.log`
 (dossier hors git), fichiers relus par la session.
+
+**Transmis par le Superviseur (09 h 47), non vérifié par cette session — lecture de code, rien de mesuré.** Ce que qtpy6
+double déjà et ce qui manque à Spyder : `fils.doubler_futures` (ThreadPoolExecutor → Workers, `os.cpu_count` →
+`hardwareConcurrency`, `result`/`wait`/`as_completed` suspendent) ; `subprocess.run`/`call` et `QProcess` → `ProcessusWeb`
+(≈ 18 s par Worker) ; `subprocess.Popen` n'est PAS doublé. pylsp, lancé par `QProcess` (`client.py:257, 311`), est couvert ;
+le noyau IPython, lancé par `Popen` (`jupyter_client/launcher.py`) et parlé en ZMQ, ne l'est pas. Plan proposé : une
+doublure du module `zmq` dans qtpy6 sur `postMessage` (Context, Socket DEALER/SUB/REQ, `send`/`recv_multipart`, Poller,
+ZMQStream ; canaux shell/iopub/stdin/control ; reprendre pyodide-kernel de JupyterLite) ; point dur : `QSocketNotifier`
+sur `zmq.FD`. Alternative écartée par lui : une console web maison. Première étape qu'il propose : une journée pour mesurer
+la surface pyzmq réellement utilisée, avec un faux module `zmq` qui journalise. À confronter au verdict du jalon 3 (console
+`ShellBaseWidget` sans noyau) avant de s'y engager.
 
 ## Conclusion en cinq lignes
 
@@ -666,8 +686,8 @@ précédent dont la voie B copierait l'architecture noyau ; Binder : un vrai Spy
   `application(persistant=chemin)`, à écrire dans qtpy6 (montage IndexedDB et synchronisation à chaque écriture, 2–3 ms).
 - Autour du jalon 5, hors qtpy6 : la couche Dropbox de SmartTeacher (dossier par élève en clair, décision de l'utilisateur)
   et son raccordement côté professeur ; le dossier autorisé Chrome (File System Access), mesuré le 10/10 (jalon 5 bis :
-  ça marche, permission mémorisée au rechargement, `syncfs` 30–70 ms) — reste à mesurer la permission après fermeture de
-  Chrome, le cas réel de la séance suivante ; et la phase 2 du jalon 5 sous Blink, non mesurée par la sonde (le jalon 5 bis
+  ça marche, permission mémorisée au rechargement mais pas après fermeture de Chrome : un clic « Réautoriser » par séance,
+  `syncfs` 30–70 ms) ; et la phase 2 du jalon 5 sous Blink, non mesurée par la sonde (le jalon 5 bis
   a fait tourner l'éditeur et les fichiers sous Chrome, pas « Ouvrir »/« Enregistrer sous »).
 - `jalon2.py` à `jalon5.py` recopient les mêmes outils (horloge de silence, gestes de la sonde, captures, chien de
   garde) : le `essais/spyder/commun.py` prévu au jalon 5 n'a pas été fait — le 5 était le dernier essai, personne ne le

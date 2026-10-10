@@ -7,8 +7,10 @@ Page seule, dans le Chrome de l'utilisateur (le sélecteur exige un clic réel, 
 sable) : index.html?script=jalon5_dossier.py. Deux phases, comme jalon5.py. A : bouton « Choisir le dossier », sélecteur,
 montage, les mêmes fichiers que jalon5 écrits par `encoding.write` puis `syncfs`, une retouche puis `syncfs`, le journal
 écrit dans le dossier, rechargement. B : handle retrouvé, permission lue (mémorisée → montage sans clic ; sinon bouton
-« Réautoriser ») ; fichiers retrouvés, relus à l'identique, posé dans le CodeEditor ; journal complet écrit dans
-`jalon5_dossier.log` du dossier choisi — que la session lit depuis le dépôt (essais/spyder/jalon5_dossier/).
+« Réautoriser ») ; fichiers retrouvés, relus à l'identique, posé dans le CodeEditor ; journal écrit dans
+`jalon5_dossier.log` du dossier choisi — que la session lit depuis le dépôt (essais/spyder/jalon5_dossier/). C (demande du
+10/10, 09 h 46 : « mesure la permission après fermeture de Chrome ») : la page demande de fermer Chrome et de relancer la
+même commande ; au retour, permission relue sur le handle gardé — le cas réel de la séance suivante.
 
 Tout ce qui est propre au web ici est l'objet de la mesure (la doublure, un troisième emplacement de
 `application(persistant=chemin)` dans qtpy6, se note, ne se code pas) : `js`, `pyodide_js` et `bloquant._suspendre`
@@ -39,7 +41,7 @@ etape("imports")
 LIGNES = 2000
 DOSSIER = "/home/pyodide/jalon5_dossier"  # le point de montage : doit être vide ou absent (mountNativeFS le crée)
 LOG = "jalon5_dossier.log"  # écrit dans le dossier choisi, lu par la session depuis le dépôt
-TEMOIN = "jalon5_dossier"  # localStorage : la phase A faite, et son journal par-dessus le rechargement
+TEMOIN = "jalon5_dossier"  # localStorage : la phase à faire (B ou C), et le journal par-dessus le rechargement
 RETOUCHE = "# retouche\n"
 JOURNAL = []
 PATIENCE = 180  # s sans événement avant « BLOQUÉ » : le temps de trouver le dossier dans le sélecteur
@@ -171,10 +173,10 @@ def garde(f):
     return g
 
 
-def afficher():
+def afficher(texte=None):
     pre = js.document.createElement("pre")
     pre.style.cssText = "position:fixed;top:0;left:0;right:0;max-height:60%;overflow:auto;z-index:1000;background:#fff;color:#000;padding:8px;font-size:12px"
-    pre.textContent = "\n".join(JOURNAL)
+    pre.textContent = texte or "\n".join(JOURNAL)
     js.document.body.appendChild(pre)
 
 
@@ -188,7 +190,7 @@ def monter(handle):
 chien = QTimer()
 chien.timeout.connect(garde(chien_de_garde))
 chien.start(5000)
-PHASE = "B" if stockage.lire(TEMOIN) else "A"
+PHASE = (stockage.lire(TEMOIN) or "A\n")[0]  # la première ligne du témoin : la phase ; la suite, le journal
 
 
 # --- Phase A : choisir, monter, écrire, pousser, recharger. ---
@@ -214,29 +216,39 @@ def phase_a():
     synchroniser("une retouche")
     dire(f"phase A : {time.monotonic() - T0:.1f} s depuis le chargement{tas()}")
     journaliser()
-    stockage.ecrire(TEMOIN, "\n".join(JOURNAL))
+    stockage.ecrire(TEMOIN, "B\n" + "\n".join(JOURNAL))
     dire("rechargement de la page")
+    chien.stop()
     js.location.reload()
 
 
-# --- Phase B : retrouver, relire, poser dans l'éditeur. ---
-
-@garde
-def phase_b():
-    for ligne in stockage.lire(TEMOIN).splitlines():
-        JOURNAL.append("phase A | " + ligne)
-    stockage.effacer(TEMOIN)
-    vivant("permission (clic si elle n'est pas mémorisée)")
-    t = time.monotonic()
+def reprendre(t):
+    """Phase B ou C : le handle gardé, la permission relue (clic si elle n'est plus accordée), le montage."""
     rep = attendre_js(jd.reprendre())
     vivant("montage")
-    dire(f"après rechargement : handle {rep.nom!r} retrouvé ; permission lue {rep.lue!r}"
+    dire(f"handle {rep.nom!r} retrouvé ; permission lue {rep.lue!r}"
          + (f", redemandée au clic ({rep.clic:.0f} ms) : {rep.etat!r}" if rep.clic else " (mémorisée, sans clic)")
          + f" ; {(time.monotonic() - t) * 1000:.0f} ms en tout")
     if rep.etat != "granted":
         raise Echec(f"permission {rep.etat!r}")
     monter(attendre_js(jd.lire()))
     dire("fichiers retrouvés :", sorted(os.listdir(DOSSIER)))
+
+
+# --- Phase B : retrouver, relire, poser dans l'éditeur. ---
+
+def journal_precedent(phase):
+    for ligne in stockage.lire(TEMOIN).splitlines()[1:]:
+        JOURNAL.append(f"phase {phase} | " + ligne)
+    stockage.effacer(TEMOIN)
+
+
+@garde
+def phase_b():
+    journal_precedent("A")
+    vivant("permission (clic si elle n'est pas mémorisée)")
+    dire("après rechargement :")
+    reprendre(time.monotonic())
     for nom, attendu in ATTENDU.items():
         t = time.monotonic()
         texte, codage = encoding.read(os.path.join(DOSSIER, nom))
@@ -249,11 +261,32 @@ def phase_b():
     t = time.monotonic()
     gc.collect()
     mesure("gc", t)
-    attendre_js(jd.oublier())
-    dire(f"durée totale du script : {time.monotonic() - T0:.1f} s{tas()}")
+    dire(f"phase B : {time.monotonic() - T0:.1f} s{tas()}")
     journaliser()
+    stockage.ecrire(TEMOIN, "C\n" + "\n".join(JOURNAL))
+    afficher("Phase B finie. FERME CHROME complètement (toutes ses fenêtres), puis relance la même commande : la page "
+             "mesurera si la permission a survécu.")
+    chien.stop()  # sinon « BLOQUÉ » toutes les 5 s dans le journal tant que la page reste ouverte
     js.window.etat = "fini"
 
 
-QTimer.singleShot(0, phase_a if PHASE == "A" else phase_b)
+# --- Phase C : après fermeture de Chrome, la permission a-t-elle survécu ? ---
+
+@garde
+def phase_c():
+    journal_precedent("B")
+    vivant("permission après fermeture de Chrome (clic si elle n'est pas mémorisée)")
+    dire("après fermeture de Chrome :")
+    reprendre(time.monotonic())
+    t = time.monotonic()
+    texte, codage = encoding.read(os.path.join(DOSSIER, "exercice1.py"))
+    mesure(f"exercice1.py relu ({codage}), {'ok' if texte == ATTENDU['exercice1.py'] else 'ÉCART'}", t)
+    attendre_js(jd.oublier())
+    dire(f"durée totale du script : {time.monotonic() - T0:.1f} s{tas()}")
+    journaliser()
+    chien.stop()  # sinon « BLOQUÉ » toutes les 5 s dans le journal tant que la page reste ouverte
+    js.window.etat = "fini"
+
+
+QTimer.singleShot(0, {"A": phase_a, "B": phase_b, "C": phase_c}[PHASE])
 sys.exit(app.exec())
