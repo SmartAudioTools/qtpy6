@@ -271,8 +271,16 @@ liaison que l'init de QtQuick importe (c'est le défaut corrigé). Restent trois
   `pyside_QtMultimedia.so.br`, `pyside_QtQml.so.br`, `pyside_QtQuick.so.br`, `pyside_QtQuickWidgets.so.br` : décompressés par
   `DecompressionStream("brotli")`, chargés, sans repli sur le `.so` (les modules de qtbase, sans `.br` dans ce dossier,
   montrent le repli `.br` puis `.so` : c'est le témoin que le repli ne se confond pas avec le succès). Verdicts inchangés
-  (Charts OK, Multimedia OK, Quick Ready sans rendu : Firefox du bac, pas de WebGL). `exemple/pyodide-qt` reste en 0.29.3.1
-  jusqu'à un `hebergement/telecharger.sh` (réseau : curl de la roue sqlite3, hors bac à sable).
+  (Charts OK, Multimedia OK, Quick Ready sans rendu : Firefox du bac, pas de WebGL).
+- `exemple/pyodide-qt` passé en 0.29.3.2 à 15 h 10 (« ok continues avec brotli ») : `hebergement/telecharger.sh pyside6
+  <zip local>` jusqu'au curl de la roue sqlite3 (le bac à sable n'a pas le réseau, `Proxy CONNECT aborted` même en déclarant
+  l'hôte), puis roue recopiée depuis `SmartTeacher/QCM/web/pyqt6/pyodide-qt` (sha256 de versions.json vérifié) et les cinq
+  dernières lignes du script à la main : 63 fichiers, 18 `.br` (15,8 Mo), 18 `.gz`, les quinze `pyside_Qt*.so`. Le dossier
+  est git-ignoré : rien à commiter, c'est ce que `deployer.sh`/l'action Pages publieront.
+- Brotli plutôt que zstd (question de l'utilisateur, 15 h) : la décompression se fait dans la page par `DecompressionStream`,
+  qui ne connaît que gzip, deflate et brotli (Firefox 155 ; pas Chromium 153). Zstd exigerait un décodeur WebAssembly
+  embarqué dans la page, du code et du démarrage en plus pour un gain marginal face à `brotli -q 11`. Écarté sans mesure,
+  par l'API ; l'utilisateur a tranché pour brotli.
 - Style des Controls (`QQuickStyle`) : rien de réglé, le style Basic est celui que les greffons statiques apportent.
 - `pyodide-qt.mjs` : l'`ImportError` « introuvable » d'un module absent de `DEMANDE` reste bruyante (pile JS entière).
 - `sonde_console.py` n'affiche pas `x.message` d'une exception JS (une copie de travail l'ajoutait) : à intégrer.
