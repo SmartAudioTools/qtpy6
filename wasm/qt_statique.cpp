@@ -10,6 +10,12 @@ Q_IMPORT_PLUGIN(QICOPlugin)
 Q_IMPORT_PLUGIN(QJpegPlugin)
 Q_IMPORT_PLUGIN(QSvgPlugin)
 Q_IMPORT_PLUGIN(QSvgIconPlugin)
+// qtimageformats (10/10/2026) : tga, wbmp, tiff, webp, icns ; mng et jp2 demandent libmng et jasper, absents ; dds n'existe plus en 6.10.
+Q_IMPORT_PLUGIN(QTgaPlugin)
+Q_IMPORT_PLUGIN(QWbmpPlugin)
+Q_IMPORT_PLUGIN(QTiffPlugin)
+Q_IMPORT_PLUGIN(QWebpPlugin)
+Q_IMPORT_PLUGIN(QICNSPlugin)
 
 // 2. Des fonctions de fils et d'IndexedDB que Qt référence et que Pyodide (un seul fil, sans ASYNCIFY) ne
 // fournit pas : sans elles, emscripten génère des bouchons qui se rappellent eux-mêmes à l'infini.

@@ -10,6 +10,7 @@ exemple/app.zip
 exemple/*.png
 .mcp.json
 push.log
+release.log
 telecharger.log
 hebergement/*.zip
 site/
@@ -17,3 +18,4 @@ essais/roues/
 essais/**/*.png
 essais/**/*.log
 essais/spyder/jalon5_dossier/
+wasm/telecharger_sources.log

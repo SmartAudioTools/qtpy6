@@ -3,9 +3,13 @@
 aeb78d29291a2b5fd53cb55950f8f5065b4978c25fb1d77f627d695ab9adf21e  ./qtbase-everywhere-src-6.10.2.tar.xz
 405116b4c5eded981484c4c154eb392d44b69b587342f1193181175e309f2c00  ./qtcharts-everywhere-src-6.10.2.tar.xz
 a249914ff66cdcdbf0df8b5ffad997a2ee6dce01cc17d43c6cc56fdc1d0f4b0f  ./qtdeclarative-everywhere-src-6.10.2.tar.xz
+f690fc6aa567d89a6e76ce370d684beb243dc0c2ed1187dd305433e278dd7aaf  ./qtgraphs-everywhere-src-6.10.2.tar.xz
+8b8f9c718638081e7b3c000e7f31910140b1202a98e98df5d1b496fe6f639d67  ./qtimageformats-everywhere-src-6.10.2.tar.xz
 93f7ef0106fbd731165a2723f3e436c911fc5e6880f5bc987b55516c20833e2b  ./qtmultimedia-everywhere-src-6.10.2.tar.xz
+b95439f31d1e580c379e9828b48b03b932b0bdade4ff09f4dd639eff9da2cd75  ./qtquick3d-everywhere-src-6.10.2.tar.xz
 18d9dbbc4f7e6e96e6ed89a9965dc032e2b58158b65156c035537826216716c9  ./qtshadertools-everywhere-src-6.10.2.tar.xz
 f07ff80f38caf235187200345392ca7479445ddf49a36c3694cd52a735dad6e1  ./qtsvg-everywhere-src-6.10.2.tar.xz
+eccc751bea509ef656d20029693987a0fc03c58e21c38f1351480f3c8eb42ebd  ./qtwebsockets-everywhere-src-6.10.2.tar.xz
 b8d79530e3b7c96a5cb2d40d431ddb512af4a563e863728d8713039aa50203f9  pyodide/cpython/downloads/Python-3.13.2.tgz
 git 72e3c78d53a32a76e0aca7443ad24e5cae1042d3  pyodide
 git 0eb494ffb3536971da3309d98ac56f6515f985a4  pyodide/pyodide-build

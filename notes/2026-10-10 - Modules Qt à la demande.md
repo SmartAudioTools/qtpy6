@@ -286,3 +286,96 @@ liaison que l'init de QtQuick importe (c'est le défaut corrigé). Restent trois
 - `sonde_console.py` n'affiche pas `x.message` d'une exception JS (une copie de travail l'ajoutait) : à intégrer.
 - Une vérification que `DEPENDANCES` couvre les `Module::import` des wrappers Shiboken (sous-commande de `symboles.py`)
   aurait trouvé le défaut Quick à la construction : non écrite, c'est une fonction non demandée, notée ici.
+
+## Suite (15 h 20 →) : WebSockets, Quick3D, Graphs et les greffons d'images, les quatre derniers modules de Qt-WASM
+
+### La demande, citée
+
+« tout ce qui peu être compilé de qt a été compilé en WASM ? » (15 h 15) — réponse : non, manquaient WebSockets, Graphs,
+Quick3D, ImageFormats et Qt5Compat parmi les modules que Qt déclare pris en charge en WebAssembly ; WebEngine, Pdf, DBus,
+Positioning… n'existent pas sur cette plateforme. Puis : « compile aussi WebSockets, Graphs, Quick3D et ImageFormats »
+(15 h 18). Qt5Compat, non demandé, n'est pas construit.
+
+### Ce qui a été livré
+
+- `wasm/telecharger_sources.sh` : les quatre archives `*-everywhere-src-6.10.2.tar.xz` de plus (md5 vérifiés par le
+  `md5sums.txt` de Qt, déjà présent) ; `wasm/versions.txt` les inscrit. Téléchargement tapé par l'utilisateur (le bac à
+  sable n'a pas le réseau), journal `wasm/telecharger_sources.log` (git-ignoré) lu à mon réveil : « == Terminé », 1,9 Go.
+- `wasm/construire.sh` : `qt_hote qtquick3d bin/balsam` (les outils hôte Quick3D que la configuration croisée de qtquick3d
+  et qtgraphs réclame par `-qt-host-path`, comme qsb et qmltyperegistrar) ; `qt_wasm` prend un témoin relatif à
+  `$QTWASM` et non plus sous `lib/`, parce que qtimageformats n'installe que des greffons ; `phase_qt` += qtwebsockets,
+  qtimageformats, qtquick3d, qtgraphs. `MODULES_DEMANDE` += WebSockets Quick3D Graphs GraphsWidgets (dix-neuf) ;
+  `FOURNISSEURS` += Quick3D Graphs ; l'agrégat prend les greffons `libq{tga,wbmp,tiff,webp,icns}.a` ; cas Quick3D
+  (Quick3D et Quick3DUtils entières, RuntimeRender, ShaderTools, glslang et SPIRV-Cross, greffon QML `qquick3dplugin`)
+  et Graphs (Graphs entière, QuickShapes, greffon QML `graphsplugin`) ; WebSockets et GraphsWidgets par le cas général.
+  Trois défauts trouvés par `symboles.py verifier` au premier passage (15 h 34), corrigés dans la recette :
+    - WebSockets importe douze membres de `QHttpHeaderParser`, classe privée de QtNetwork dont l'objet
+      (`qhttpheaderparser.cpp.o`) n'est référencé par rien dans Network : jamais tiré, donc jamais exporté. Variable `tire`
+      du cas Network, `-Wl,--undefined=` sur son constructeur, qui force le membre (écarté : Network entière, 2 Mo de plus
+      sur un module de 1 Mo ; extraire l'objet de l'archive dans WebSockets, une classe privée liée deux fois) ;
+    - GraphsWidgets importe `QQuickWidget::setContent`, `setResizeMode` et `engine` : QuickWidgets n'était pas dans
+      `FOURNISSEURS`, ses symboles Qt restaient hidden. Ajouté ;
+    - Graphs, relié une seconde fois avec ses exports pour GraphsWidgets, importe alors `QQuickItemGrabResult::image`
+      de Quick (un export tire son objet, qui importe à son tour), mais Quick avait déjà été relié sur les imports du
+      premier lien. La passe croises → relien des fournisseurs est répétée (trois au plus, arrêt dès que croises ne rend
+      plus rien) ; seuls les fournisseurs qui gagnent des exports sont reliés. Le même effet était déjà traité pour
+      l'agrégat (lié en dernier), pas entre fournisseurs.
+  Paquet `pyodide-pyside6-0.29.3.3.zip`.
+- `wasm/qt_statique.cpp` : `Q_IMPORT_PLUGIN` des cinq greffons d'images (QTgaPlugin, QWbmpPlugin, QTiffPlugin,
+  QWebpPlugin, QICNSPlugin). mng et jp2 demandent libmng et jasper, absents ; dds n'existe plus dans qtimageformats 6.10.
+- `wasm/patches/pyodide-pyside6.patch` : `-lwebsocket.js` sur le lien du module principal (`llvm-nm` : libQt6WebSockets.a
+  importe dix `emscripten_websocket_*`, qui ne viennent que de cette bibliothèque JavaScript d'Emscripten) ; même ligne
+  ajoutée à la main au `Makefile.envs` déjà patché (le patch se reconnaît à son inverse), ancien `pyodide.asm.{js,wasm}` à
+  la corbeille pour forcer le relien.
+- `wasm/pyodide-qt.mjs` : `DEPENDANCES` += `WebSockets:[Network], Quick3D:[Quick], Graphs:[Quick3D],
+  GraphsWidgets:[Graphs, QuickWidgets]` (les `load-typesystem` des quatre typesystems PySide6 et les `.prl`) ; `DEMANDE` += les quatre.
+- `wasm/fumee.mjs` : import des quatre, un `QWebSocket` construit, `QImageReader.supportedImageFormats()` doit contenir
+  tga, wbmp, tiff, webp, icns. `wasm/README.md` à jour (phases, 24 liaisons, greffons, 0.29.3.3).
+
+### Les choix, avec l'alternative écartée
+
+- Greffons d'images dans l'agrégat et non dans un module à la demande : `QImageReader` cherche ses greffons au premier
+  usage dans QtGui, qui est dans l'agrégat ; un module « ImageFormats » séparé n'aurait pas d'import Python qui le
+  déclenche (PySide6 n'a pas de liaison ImageFormats). Coût : la taille de l'agrégat au démarrage, à mesurer ci-dessous.
+- libtiff et libwebp ne sont pas des bibliothèques `Bundled*` séparées : les `.prl` des greffons ne citent que Gui, Core
+  et les bundled de qtbase ; elles sont compilées dans l'archive du greffon (vérifié par lecture des `.prl`).
+- Quick3D entière seulement pour Quick3D et Quick3DUtils, pas RuntimeRender (3,5 Mo) ni glslang/SPIRV-Cross (9 Mo
+  d'archives) : Graphs importe l'API publique de Quick3D ; si `symboles.py verifier` manque des membres de RuntimeRender,
+  l'ajouter à `entier`. ShaderTools, glslang et SPIRV-Cross restent nécessaires : Quick3D compile ses shaders à l'exécution.
+- Greffons QML de Quick3D : le seul `qquick3dplugin` (`import QtQuick3D`) ; Helpers, Effects, Particles3D, AssetUtils
+  ne sont pas liés (non demandés, ~2 Mo d'archives). Les composants QML de Graphs importent QtQuick, QtQuick3D, Layouts
+  et Window (tous présents) ; `QtQuick.Controls` n'apparaît que dans ses fichiers `designer/`, hors exécution.
+- Le script de construction a été modifié PENDANT que `qthote qt` tournait (faute : règle « ne jamais éditer un script
+  shell qui tourne ») : bash a relu le fichier décalé et s'est arrêté sur une « erreur de syntaxe ligne 355 » — APRÈS
+  la fin de `phase_qt` (les quatre modules installés, SBOM de qtgraphs finalisé), au moment de reprendre la boucle des
+  phases. Sans conséquence ici, vérifié par la présence des bibliothèques et des `.prl` ; les phases suivantes sont
+  lancées sans retoucher le script.
+
+### Mesures (10/10/2026, `-Oz`, octets ; `.so` / `.br`)
+
+Quick3D 6 511 042 / 1 818 825 ; Graphs 2 446 365 / 572 182 ; GraphsWidgets 232 925 / 47 770 ; WebSockets 270 346 /
+66 107. Reliés avec des exports de plus : Network 1 004 979 / 244 008, Quick 6 403 718 / 1 561 452 (était 6 348 938).
+Agrégat 26 846 656 (avant : 26 071 820, +3 %, les cinq greffons d'images) / 6 418 766. Zip 25 913 614 octets, sha256
+`34562ae3…7394` (`qtpy6/web/versions.json`). Seconde passe des exports croisés : seul `croises_Quick.rsp` non vide
+(`QQuickItemGrabResult::image`), la troisième vide. Journaux : `pyside.log`, `pyodide.log`, `4modules-dyn2.out`,
+`paquet.log` dans `$RACINE/journaux/`. `exemple/pyodide-qt` régénéré depuis le zip : 20 `.so`, 22 jumeaux `.br` et `.gz`,
+roue sqlite3 vérifiée par sha256.
+
+### Niveau de preuve
+
+- `symboles.py verifier` vert sur les dix-neuf modules et `node wasm/fumee.mjs` vert (`ws=1024 q3d=True graphs=True
+  gw=True images=True`) : testé. Ce que la fumée prouve : les quatre liaisons s'importent et se chargent dans l'ordre de
+  `DEPENDANCES`, un `QWebSocket` se construit, `QImageReader` liste les cinq formats.
+- NON testé : un rendu Quick3D ou Graphs (il faut un navigateur avec WebGL, hors bac à sable comme pour Quick) ; une
+  connexion WebSocket réelle (le bac à sable n'a pas le réseau) ; la lecture effective d'une image webp ou tiff.
+- Relu par la session : le diff entier des onze fichiers ; les tailles ; le journal de l'exemple.
+
+### Points ouverts (à regarder en premier)
+
+- Sonde page (Firefox) non faite pour ces quatre : à importer depuis un slot comme les sept précédents (essai
+  `essais/modules_qt_suite/page.py`, à étendre), et le rendu 3D hors bac à sable.
+- Quick3D : seuls `QtQuick3D` (qquick3dplugin) est lié ; `QtQuick3D.Helpers`, `.Effects`, `.Particles3D`, `.AssetUtils`
+  manquent à un QML qui les importe (erreur de module QML à l'exécution, pas de lien).
+- Greffons d'images : mng et jp2 absents (libmng, jasper non fournis par Qt).
+- La boucle des exports croisés est plafonnée à trois passes sans échec explicite si la troisième en laisse : c'est
+  `symboles.py verifier`, juste après, qui arrêterait la phase.

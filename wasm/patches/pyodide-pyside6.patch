@@ -1,4 +1,5 @@
-Le module principal de Pyodide-Qt : le Pyodide amont plus embind, OpenAL (le greffon wasm de QtMultimedia) et l'API fetch d'Emscripten
+Le module principal de Pyodide-Qt : le Pyodide amont plus embind, OpenAL (le greffon wasm de QtMultimedia), l'API fetch d'Emscripten
+et sa bibliothèque WebSocket (QtWebSockets, 10/10/2026 : emscripten_websocket_* ne vient que de -lwebsocket.js)
 (QNetworkAccessManager de Qt-WASM repose sur emscripten_fetch), dont les modules latéraux de Qt (pyside_agrege.so et pyside_Qt<M>.so,
 construire.sh, phase dynamique) appellent les fonctions JavaScript, que seul le module principal peut fournir.
 
@@ -6,7 +7,7 @@ diff --git a/Makefile.envs b/Makefile.envs
 index d0b5c79..050335d 100644
 --- a/Makefile.envs
 +++ b/Makefile.envs
-@@ -197,7 +197,10 @@ export MAIN_MODULE_LDFLAGS= $(LDFLAGS_BASE) \
+@@ -197,7 +197,11 @@ export MAIN_MODULE_LDFLAGS= $(LDFLAGS_BASE) \
  	-lhtml5_webgl.js \
  	-lsdl.js \
  	-sMAX_WEBGL_VERSION=2  \
@@ -14,7 +15,8 @@ index d0b5c79..050335d 100644
 +	-sGL_WORKAROUND_SAFARI_GETCONTEXT_BUG=0 \
 +	-lembind \
 +	-lopenal \
-+	-sFETCH
++	-sFETCH \
++	-lwebsocket.js
  
  EXPORTS=_main \
     ,_free \

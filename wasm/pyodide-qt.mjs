@@ -16,9 +16,11 @@ const MODULES = ["shiboken6.Shiboken", "PySide6.QtCore", "PySide6.QtGui", "PySid
 // l'exporte à ceux qui la LIENT, et wasm résout ses imports AU CHARGEMENT, pas à l'appel : un module se charge donc après
 // ceux dont il importe les symboles. DEPENDANCES le dit (construire.sh, phase dynamique : symboles.py croises).
 const DEPENDANCES = { Qml: ["Network"], Quick: ["Qml", "OpenGL"], QuickWidgets: ["Quick"], QuickControls2: ["Quick"],
-                      Multimedia: ["Network"], MultimediaWidgets: ["Multimedia"], Charts: ["OpenGLWidgets"] };
+                      Multimedia: ["Network"], MultimediaWidgets: ["Multimedia"], Charts: ["OpenGLWidgets"],
+                      WebSockets: ["Network"], Quick3D: ["Quick"], Graphs: ["Quick3D"], GraphsWidgets: ["Graphs", "QuickWidgets"] };
 const DEMANDE = Object.fromEntries(["PrintSupport", "Network", "Sql", "Xml", "Concurrent", "OpenGL", "OpenGLWidgets", "Test",
-                                    "Qml", "Quick", "QuickWidgets", "QuickControls2", "Multimedia", "MultimediaWidgets", "Charts"]
+                                    "Qml", "Quick", "QuickWidgets", "QuickControls2", "Multimedia", "MultimediaWidgets", "Charts",
+                                    "WebSockets", "Quick3D", "Graphs", "GraphsWidgets"]
                                    .map(m => [`PySide6.Qt${m}`, `/lib/pyside_Qt${m}.so`]));
 // Les jumeaux compressés de l'hébergement (NOM.br, NOM.gz : hebergement/telecharger.sh), comme en_jumeau de qtpy6web.js :
 // le meilleur que le navigateur décompresse, le fichier lui-même à défaut (en développement). Une réponse marquée

@@ -1,5 +1,5 @@
 // Test de fumée, sous node : le Pyodide de construire.sh importe PySide6 et fait circuler un signal, sa bibliothèque
-// standard est en .pyc, les quinze modules Qt à la demande se chargent au premier import (sqlite, DOM, QTest...), et qtpy6
+// standard est en .pyc, les dix-neuf modules Qt à la demande se chargent au premier import (sqlite, DOM, QTest...), et qtpy6
 // s'y charge en mode paresseux.
 //   node wasm/fumee.mjs [dossier]      (le paquet de phase_paquet dépaqueté ; modèle : scripts/smoke-test.mjs de Pyodide-Qt)
 // QApplication et les widgets veulent un navigateur (DOM) : la sonde de qtpy6.web, pas d'ici.
@@ -74,6 +74,18 @@ f"video={hasattr(QtMultimediaWidgets, 'QVideoWidget')}"
 `);
 console.log(quick);
 if (!quick.startsWith("js=42 qml=42 audio=44100/2")) { console.error("ÉCHEC Quick, Multimedia, Charts"); process.exit(1); }
+
+// WebSockets, Quick3D, Graphs, GraphsWidgets (10/10/2026) et les greffons d'images de qtimageformats dans l'agrégat :
+// un QWebSocket se construit sans réseau, les types existent, et QImageReader connaît les nouveaux formats.
+const quatre = await py.runPythonAsync(`
+from PySide6 import QtWebSockets, QtQuick3D, QtGraphs, QtGraphsWidgets
+ws = QtWebSockets.QWebSocket(); ws.setMaxAllowedIncomingFrameSize(1024)
+formats = sorted(bytes(f).decode() for f in QtGui.QImageReader.supportedImageFormats())
+f"ws={ws.maxAllowedIncomingFrameSize()} q3d={hasattr(QtQuick3D, 'QQuick3DGeometry')} graphs={hasattr(QtGraphs, 'QLineSeries')} " \\
+f"gw={hasattr(QtGraphsWidgets, 'Q3DBarsWidgetItem')} images={all(x in formats for x in ('tga', 'wbmp', 'tiff', 'webp', 'icns'))}"
+`);
+console.log(quatre);
+if (quatre !== "ws=1024 q3d=True graphs=True gw=True images=True") { console.error("ÉCHEC WebSockets, Quick3D, Graphs, images"); process.exit(1); }
 
 // qtpy6 sur ce build : le mode paresseux de qtpy6._binding (crochet de shiboken). Les doublures du navigateur lisent
 // des noms par ns["…"] à l'import : un nom absent de la liste `needed` de _binding.load fait échouer ce qui suit.

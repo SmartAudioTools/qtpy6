@@ -31,27 +31,27 @@ Le récit, les choix argumentés et les niveaux de preuve sont dans
 | Phase | Ce qu'elle fait |
 |---|---|
 | `emsdk` | Copie privée d'emscripten 4.0.9, corrigée comme Pyodide l'attend |
-| `qthote` | Qt 6.10.2 natif : moc, rcc, uic et QtCore pour le générateur ; qsb (qtshadertools) et qmltyperegistrar, qmlcachegen... (qtdeclarative), que la compilation croisée de Qt Quick demande par `-qt-host-path` |
-| `qt` | qtbase, qtsvg, qtshadertools, qtdeclarative (Qml, Quick, Controls), qtmultimedia et qtcharts statiques pour WebAssembly, sans fils, exceptions wasm |
+| `qthote` | Qt 6.10.2 natif : moc, rcc, uic et QtCore pour le générateur ; qsb (qtshadertools), qmltyperegistrar, qmlcachegen... (qtdeclarative) et balsam, shadergen (qtquick3d), que la compilation croisée de Qt Quick, Quick3D et Graphs demande par `-qt-host-path` |
+| `qt` | qtbase, qtsvg, qtshadertools, qtdeclarative (Qml, Quick, Controls), qtmultimedia, qtcharts, qtwebsockets, qtimageformats (greffons tga, wbmp, tiff, webp, icns, dans l'agrégat), qtquick3d et qtgraphs statiques pour WebAssembly, sans fils, exceptions wasm |
 | `shiboken` | Le générateur shiboken6 natif, corrigé pour le lien statique (`patches/shiboken-*`) |
 | `cpython` | Le CPython de Pyodide : en-têtes et `libpython3.13.a` |
-| `pyside` | libshiboken, libpyside et les 20 liaisons (QtCore, QtGui, QtWidgets, QtSvg, QtSvgWidgets, puis PrintSupport, Network, Sql, Xml, Concurrent, OpenGL, OpenGLWidgets, Test, Qml, Quick, QuickWidgets, QuickControls2, Multimedia, MultimediaWidgets, Charts), compilées en croisé |
+| `pyside` | libshiboken, libpyside et les 24 liaisons (QtCore, QtGui, QtWidgets, QtSvg, QtSvgWidgets, puis PrintSupport, Network, Sql, Xml, Concurrent, OpenGL, OpenGLWidgets, Test, Qml, Quick, QuickWidgets, QuickControls2, Multimedia, MultimediaWidgets, Charts, WebSockets, Quick3D, Graphs, GraphsWidgets), compilées en croisé |
 | `pyodide` | Archive les objets PySide, compile `qt_statique.cpp`, corrige et relie Pyodide (`patches/pyodide-*`, avec `-sFETCH` pour QNetworkAccessManager), écrit un `pyodide-lock.json` vide |
 | `dynamique` | `pyside_agrege.so` (les cinq liaisons de base et Qt, chargé au démarrage) et un `pyside_Qt<M>.so` par module à la demande (liaison, `libQt6<M>.a`, greffons) ; `symboles.py --verifier` échoue si un import d'un `.so` n'est fourni ni par l'agrégat, ni par le module principal, ni par un `.so` chargé avant |
-| `paquet` | `$RACINE/pyodide-pyside6-0.29.3.2.zip` : les fichiers de `dist/` qu'une page charge, sous `pyodide-qt/`, avec la licence (`hebergement/LICENSE-Pyodide-PySide6.txt`, nommée `LICENSE.txt`), à dates fixes ; son sha256 va dans `qtpy6/web/versions.json` (`pyodide_pyside6`), et le zip dans la release du même nom, que télécharge `hebergement/telecharger.sh` |
+| `paquet` | `$RACINE/pyodide-pyside6-0.29.3.3.zip` : les fichiers de `dist/` qu'une page charge, sous `pyodide-qt/`, avec la licence (`hebergement/LICENSE-Pyodide-PySide6.txt`, nommée `LICENSE.txt`), à dates fixes ; son sha256 va dans `qtpy6/web/versions.json` (`pyodide_pyside6`), et le zip dans la release du même nom, que télécharge `hebergement/telecharger.sh` |
 
 ## Les fichiers
 
 - `patches/` : les correctifs, appliqués par `git apply` une seule fois (un patch déjà appliqué est reconnu à son
   inverse). Le préfixe dit l'arbre visé : `pyside-` et `shiboken-` pour pyside-setup, `pyodide-` pour Pyodide.
-- `qt_statique.cpp` : l'import des greffons Qt statiques, et les bouchons de fils et d'IndexedDB. Il est repris de la
+- `qt_statique.cpp` : l'import des greffons Qt statiques (plateforme wasm, images gif, ico, jpeg, svg, tga, wbmp, tiff, webp, icns), et les bouchons de fils et d'IndexedDB. Il est repris de la
   recette de Pyodide-Qt (JarrettSJohnson/pyodide-with-pyqt6, sous licence MIT).
 - `metatypes_qtcore.cpp` : les `QMetaTypeInterfaceWrapper<T>::metaType` de QtCore qu'un objet compilé en visibilité
   cachée référence par relocation directe, donc à instancier dans chaque module (le commentaire du fichier détaille).
 - `symboles.py` : les sections import/export des `.so`, la liste des exports à forcer sur l'agrégat, la vérification.
 - `pyodide-qt.mjs` : le `pyodide.mjs` du paquet ; charge l'agrégat au démarrage et, au PREMIER `import PySide6.QtXxx`
   (finder Python, `run_sync` sur JSPI : depuis le script lancé par `qtpy6.web.lancer` ou un slot), le `.so` du module.
-- `fumee.mjs` : le test de fumée, les quinze modules à la demande compris.
+- `fumee.mjs` : le test de fumée, les dix-neuf modules à la demande compris.
 - `versions.txt` : les empreintes des sources.
 
 ## Limites connues
