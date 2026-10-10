@@ -1,0 +1,47 @@
+diff --git a/src/plugins/multimedia/wasm/common/qwasmaudiooutput.cpp b/src/plugins/multimedia/wasm/common/qwasmaudiooutput.cpp
+index 030c865..7482e85 100644
+--- a/src/plugins/multimedia/wasm/common/qwasmaudiooutput.cpp
++++ b/src/plugins/multimedia/wasm/common/qwasmaudiooutput.cpp
+@@ -136,7 +136,21 @@ void QWasmAudioOutput::setSource(const QUrl &url)
+         QFileInfo info(m_source);
+         QMimeType mimeType = db.mimeTypeForFile(info);
+ 
+-        audioSourceElement.set("type", mimeType.name().toStdString());
++        // The type guessed from the file NAME may be unknown to the browser (a .ogg is "audio/vorbis" here, for which
++        // Firefox and Chrome answer canPlayType "" : they expect audio/ogg) ; the <source> would then be skipped. Only
++        // set a type the browser can play, otherwise let it sniff the content.
++        const std::string type = mimeType.name().toStdString();
++        if (!m_audio.call<std::string>("canPlayType", type).empty())
++            audioSourceElement.set("type", type);
++
++        // A skipped <source> fires "error" on itself, never on the <audio> element, whose error callback would never
++        // run : forward it, or the player waits forever for an end that cannot come. Only until "loadeddata" : the
++        // source was readable then (a play() refused later by the browser also fires it, after a reset of the element).
++        m_sourceErrorEvent.reset(new qstdweb::EventCallback(audioSourceElement, "error", [this](emscripten::val) {
++            qCDebug(qWasmMediaAudioOutput) << "source error";
++            emit errorOccured(3, // QWasmMediaPlayer::NetworkNoSource
++                              QStringLiteral("The browser cannot play this media"));
++        }));
+         m_audio.call<void>("appendChild", audioSourceElement);
+ 
+         m_audio.call<void>("setAttribute", emscripten::val("srcObject"), contentUrl);
+@@ -267,6 +281,7 @@ void QWasmAudioOutput::doElementCallbacks()
+     auto loadedDataCallback = [&](emscripten::val event) {
+         Q_UNUSED(event)
+         qCDebug(qWasmMediaAudioOutput) << "loaded data";
++        m_sourceErrorEvent.reset();
+         qstdweb::window()["URL"].call<emscripten::val>("revokeObjectURL", m_audio["src"]);
+     };
+     m_loadedDataEvent.reset(new qstdweb::EventCallback(m_audio, "loadeddata", loadedDataCallback));
+diff --git a/src/plugins/multimedia/wasm/common/qwasmaudiooutput_p.h b/src/plugins/multimedia/wasm/common/qwasmaudiooutput_p.h
+index 9ae5016..2f8a544 100644
+--- a/src/plugins/multimedia/wasm/common/qwasmaudiooutput_p.h
++++ b/src/plugins/multimedia/wasm/common/qwasmaudiooutput_p.h
+@@ -84,6 +84,7 @@ private:
+     QScopedPointer<qstdweb::EventCallback> m_pauseChangeEvent;
+     QScopedPointer<qstdweb::EventCallback> m_timeUpdateEvent;
+     QScopedPointer<qstdweb::EventCallback> m_loadedDataEvent;
++    QScopedPointer<qstdweb::EventCallback> m_sourceErrorEvent;
+ 
+     QString m_source;
+     QIODevice *m_audioIODevice = nullptr;

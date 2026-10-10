@@ -379,3 +379,46 @@ roue sqlite3 vérifiée par sha256.
 - Greffons d'images : mng et jp2 absents (libmng, jasper non fournis par Qt).
 - La boucle des exports croisés est plafonnée à trois passes sans échec explicite si la troisième en laisse : c'est
   `symboles.py verifier`, juste après, qui arrêterait la phase.
+
+## Le son d'un .ogg dans le navigateur : greffon audio de QtMultimedia corrigé (0.29.3.4, 10/10/2026)
+
+Demandes de l'utilisateur, à l'essai du son dans le lecteur SmartTeacher : « je n'entend aucun son et la touche reste
+grisé une fois cliquée », puis, après une cale JavaScript (`905cc1f`) : « c'est qt qui est bugé ?? » et « peux tu plutot
+reparer qt ? ».
+
+**Cause (mesurée, sonde Firefox du scratchpad de la session SmartTeacher)** : `qwasmaudiooutput.cpp`, `setSource` d'un
+fichier local, pose sur le `<source>` le type tiré du NOM du fichier par `QMimeDatabase` : `audio/vorbis` pour un `.ogg`
+en wasm. Firefox et Chrome répondent `canPlayType("audio/vorbis") == ""` : le `<source>` est écarté, son `error` part
+sur lui, et le greffon, qui n'écoute que l'`<audio>`, ne l'apprend jamais. Résultat : ni son, ni `errorOccurred`, ni
+`EndOfMedia`. En natif, le backend FFmpeg ignore ce type, d'où le bon fonctionnement sur le bureau.
+
+**Fait** : `wasm/patches/qtmultimedia-type-de-source.patch`, appliqué par `patcher qtmultimedia` comme
+`qtmultimedia-sans-fils.patch` :
+  - le type n'est posé que si `canPlayType` le connaît ; sinon le navigateur reconnaît le fichier par son contenu ;
+  - l'`error` du `<source>` est relayé en `errorOccured(3 = NetworkNoSource)`, donc en `QMediaPlayer::ResourceError`,
+    jusqu'au premier `loadeddata`. Le relais est débranché à `loadeddata` : un `play()` refusé par le navigateur
+    (geste absent) remet l'élément à zéro et relance cette erreur sur une source pourtant lisible (mesuré : `rs=0 ns=3
+    err=null` après « can play »). Un premier jet gardé par `readyState == 0` relayait ce cas à tort.
+
+`qtpy6web.js` : la cale `types_media()` de `905cc1f` est RETIRÉE. Le correctif est maintenant dans Qt, et la cale ne
+corrigeait que le type, pas le silence sur un fichier illisible.
+
+Archive `pyodide-pyside6-0.29.3.4.zip`, 25 913 626 octets, sha256 `0d8f5a7a…1544` (`versions.json`). Seul
+`pyside_QtMultimedia.so` change d'origine ; `construire.sh dynamique paquet` relie le reste à l'identique.
+
+**Alternatives écartées** :
+  - garder la cale JS : l'utilisateur a demandé « plutôt » Qt. La cale masquait le défaut pour une page qtpy6 seulement,
+    et ne disait rien d'un fichier réellement illisible ;
+  - corriger `QMimeDatabase` (audio/ogg pour .ogg) : touche toutes les applications et tous les types, alors que le
+    défaut est de faire confiance à un type deviné ;
+  - relayer en `ResourceError` seulement sous `readyState == 0` : faux positif mesuré (voir ci-dessus).
+
+**Niveau de preuve** :
+  - Testé dans le Firefox de la sonde, sans la cale JS :
+    - `la_440.ogg` atteint « loaded data » et « can play » (avant le correctif : aucun des deux) ;
+    - un faux `.ogg` (texte) rend `ResourceError "The browser cannot play this media"` (avant : rien, par lecture du
+      code ; non rejoué sans le correctif) ;
+    - un `play()` refusé ne produit plus d'erreur.
+  - NON testé : le son entendu et la fin de lecture (`EndOfMedia`). Le Firefox du bac à sable n'a pas d'horloge audio :
+    c'est l'essai de l'utilisateur dans son navigateur, après publication.
+  - Chrome non essayé.
