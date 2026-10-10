@@ -132,7 +132,10 @@ phase_cpython() {
 }
 
 PYCIBLE="$PYODIDE/cpython/installs/python-$PYTHON"  # le CPython de Pyodide : en-têtes et libpython3.13.a
-MODULES="Core;Gui;Widgets;Svg;SvgWidgets"
+# Les cinq de Pyodide-Qt, puis les huit autres de qtbase (10/10/2026), chargés à la demande par pyodide-qt.mjs : un
+# module latéral par liaison (phase dynamique). L'ordre est celui des dépendances (PySideHelpers.cmake).
+MODULES="Core;Gui;Widgets;Svg;SvgWidgets;PrintSupport;Network;Sql;Xml;Concurrent;OpenGL;OpenGLWidgets;Test"
+MODULES_DEMANDE="PrintSupport Network Sql Xml Concurrent OpenGL OpenGLWidgets Test"  # ceux qui ont leur propre .so
 
 phase_pyside() {
   # libshiboken, libpyside et les modules, compilés en croisé par le générateur hôte (QFP_SHIBOKEN_HOST_PATH),
@@ -145,7 +148,8 @@ phase_pyside() {
   emsdk_env
   patcher pyside
   dossier "$RACINE/build/pyside-wasm"
-  [ -f "$RACINE/build/pyside-wasm/build.ninja" ] || "$QTWASM/bin/qt-cmake" -S "$RACINE/src/pyside-setup" \
+  # Reconfiguré si la liste des modules a changé (le cache garde l'ancienne) ; les cibles déjà construites restent.
+  grep -qs "^MODULES:[A-Z]*=$MODULES$" "$RACINE/build/pyside-wasm/CMakeCache.txt" || "$QTWASM/bin/qt-cmake" -S "$RACINE/src/pyside-setup" \
     -B "$RACINE/build/pyside-wasm" -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX="$RACINE/pyside-wasm" \
     -DCMAKE_C_FLAGS="-fPIC" -DCMAKE_CXX_FLAGS="-fPIC" \
@@ -169,7 +173,7 @@ phase_pyodide() {
   local lien="$RACINE/build/pyodide-lien" lib="$PYCIBLE/lib/python${PYTHON%.*}" c m
   local site="$RACINE/pyside-wasm/lib/python${PYTHON%.*}/site-packages"
   dossier "$lien"
-  for c in libshiboken pyside6 shibokenmodule QtCore QtGui QtWidgets QtSvg QtSvgWidgets; do
+  for c in libshiboken pyside6 shibokenmodule Qt${MODULES//;/ Qt}; do  # Qt<M> pour chaque module
     rm -f "$lien/$c.a"  # emar qc : ajout sans remplacement par nom de fichier, xargs peut l'appeler plusieurs fois
     find "$RACINE/build/pyside-wasm" -path "*/CMakeFiles/$c.dir/*" -name '*.o' -print0 | xargs -0 emar qc "$lien/$c.a"
     emranlib "$lien/$c.a"
@@ -194,21 +198,56 @@ json.dump({"info": {"arch": "wasm32", "platform": "emscripten_4_0_9", "version":
 }
 
 phase_dynamique() {
-  # Étape 5 : Qt et PySide6 dans un module latéral (pyside_agrege.so) que pyodide-qt.mjs charge en parallèle de Python,
-  # dans une page seulement. Mesuré sous Firefox le 05/10/2026 contre l'ancien tout-statique (Qt lié dans le module
-  # principal) : Pyodide-Qt chargé 0,45 s au lieu de 0,53, worker prêt 0,97 s au lieu de 1,16 (il ne compile plus Qt),
-  # mémoire du processus −100 à −140 Mo. Sortie dans $RACINE/build/dynamique/dist, que phase_paquet empaquette.
+  # Étape 5 : Qt et PySide6 en modules latéraux que pyodide-qt.mjs charge dans une page seulement : pyside_agrege.so
+  # (les cinq modules du départ, en parallèle de Python) et, depuis le 10/10/2026, un pyside_Qt<M>.so par module de
+  # MODULES_DEMANDE, téléchargé et chargé au premier import. Mesuré sous Firefox le 05/10/2026 contre l'ancien
+  # tout-statique (Qt lié dans le module principal) : Pyodide-Qt chargé 0,45 s au lieu de 0,53, worker prêt 0,97 s au
+  # lieu de 1,16 (il ne compile plus Qt), mémoire du processus −100 à −140 Mo. Sortie dans $RACINE/build/dynamique/dist,
+  # que phase_paquet empaquette.
   emsdk_env; pyodide_env
-  local lien="$RACINE/build/pyodide-lien" dyn="$RACINE/build/dynamique" q="$QTWASM/lib" g="$QTWASM/plugins" f
+  local lien="$RACINE/build/pyodide-lien" dyn="$RACINE/build/dynamique" q="$QTWASM/lib" g="$QTWASM/plugins" f m greffon
+  local options=(-sSIDE_MODULE=1 -Oz -g0 -s WASM_BIGINT -fwasm-exceptions -sSUPPORT_LONGJMP)
+  # L'agrégat : archives PySide entières (--whole-archive), rien dans le module principal ne les référence ; Qt au
+  # besoin. Pas du port emdawnwebgpu de la recette Pyodide-Qt : aucun symbole wgpu dans Qt (llvm-nm). Chaque bibliothèque
+  # Qt vit à UN endroit (son état statique ne se duplique pas) : ici celles dont dépend le port wasm de Qt, libQt6OpenGL
+  # comprise (QOpenGLTextureBlitter) ; les sept autres de MODULES_DEMANDE dans leur module.
+  local agrege=(-Wl,--whole-archive "$lien"/{libshiboken,pyside6,shibokenmodule}.a "$lien"/Qt{Core,Gui,Widgets,Svg,SvgWidgets}.a
+    "$lien/qt_statique.o" -Wl,--no-whole-archive)
+  local qt=("$q"/libQt6{Widgets,Gui,Core,Svg,SvgWidgets,OpenGL}.a "$q"/libQt6Bundled{Harfbuzz,Freetype,Libpng,Libjpeg,Pcre2}.a
+    "$g"/platforms/libqwasm.a "$g"/iconengines/libqsvgicon.a "$g"/imageformats/libq{gif,ico,jpeg,svg}.a
+    "$q"/objects-Release/{Gui,Widgets,QWasmIntegrationPlugin}_resources_*/.qt/rcc/*.o)
   dossier "$dyn/dist"
-  # Archives PySide entières (--whole-archive) : rien dans le module principal ne les référence. Qt au besoin.
-  # Pas de QtXml ni du port emdawnwebgpu de la recette Pyodide-Qt : aucun symbole wgpu dans Qt (llvm-nm), QtXml non construit.
-  em++ -o "$dyn/dist/pyside_agrege.so" -sSIDE_MODULE=1 -Oz -g0 -s WASM_BIGINT -fwasm-exceptions -sSUPPORT_LONGJMP \
-    -Wl,--whole-archive "$lien"/{libshiboken,pyside6,shibokenmodule}.a "$lien"/Qt{Core,Gui,Widgets,Svg,SvgWidgets}.a \
-    "$lien/qt_statique.o" -Wl,--no-whole-archive \
-    "$q"/libQt6{Widgets,Gui,Core,Svg,SvgWidgets,OpenGL}.a "$q"/libQt6Bundled{Harfbuzz,Freetype,Libpng,Libjpeg,Pcre2}.a \
-    "$g"/platforms/libqwasm.a "$g"/iconengines/libqsvgicon.a "$g"/imageformats/libq{gif,ico,jpeg,svg}.a \
-    "$q"/objects-Release/{Gui,Widgets,QWasmIntegrationPlugin}_resources_*/.qt/rcc/*.o
+  # 1. Les modules à la demande : la liaison PySide entière, sa bibliothèque Qt (sauf OpenGL, dans l'agrégat), ses
+  # greffons (sqlite embarqué pour Sql, lecture des certificats pour Network), importés par un Q_IMPORT_PLUGIN, et une
+  # copie des interfaces de métatype des types de base de QtCore (metatypes_qtcore.cpp dit pourquoi).
+  em++ -fPIC -std=gnu++17 -DQT_STATIC -Oz -fwasm-exceptions -I"$QTWASM/include" -I"$QTWASM/include/QtCore" \
+    -c "$DEP/wasm/metatypes_qtcore.cpp" -o "$dyn/metatypes_qtcore.o"
+  for m in $MODULES_DEMANDE; do
+    local libs=() importes=""
+    case $m in
+      OpenGL) ;;
+      Sql) libs=("$q/libQt6Sql.a" "$g/sqldrivers/libqsqlite.a"); importes="Q_IMPORT_PLUGIN(QSQLiteDriverPlugin)" ;;
+      Network) libs=("$q/libQt6Network.a" "$g/tls/libqcertonlybackend.a"); importes="Q_IMPORT_PLUGIN(QTlsBackendCertOnly)" ;;
+      *) libs=("$q/libQt6$m.a") ;;
+    esac
+    [ -z "$importes" ] || printf '#include <QtPlugin>\n%s\n' "$importes" | em++ -fPIC -std=gnu++17 -DQT_STATIC \
+      -I"$QTWASM/include" -I"$QTWASM/include/QtCore" -x c++ -c - -o "$dyn/greffons_$m.o"
+    em++ -o "$dyn/dist/pyside_Qt$m.so" "${options[@]}" -Wl,--whole-archive "$lien/Qt$m.a" "$dyn/metatypes_qtcore.o" \
+      $([ -z "$importes" ] || echo "$dyn/greffons_$m.o") -Wl,--no-whole-archive "${libs[@]}"
+  done
+  # 2. Ce que ces modules importent, l'agrégat doit l'exporter : ses symboles Qt sont hidden, que --export-dynamic
+  # (SIDE_MODULE) ignore, et il ne tire d'une archive que ce qu'il référence. Un premier lien --export-all, archives Qt
+  # entières, donne tout ce qu'il PEUT définir ; symboles.py en retire ce que le module principal fournit (exports et
+  # bibliothèque JavaScript) et ce que les modules se fournissent eux-mêmes ; le lien final n'exporte que cette liste
+  # (--export=<sym> tire l'objet qui le définit, comme --undefined) : des exports en plus, pas tout Qt.
+  em++ -o "$dyn/agrege_tout.so" "${options[@]}" -Wl,--export-all "${agrege[@]}" -Wl,--whole-archive "${qt[@]}" -Wl,--no-whole-archive
+  "$HOTEPY" "$DEP/wasm/symboles.py" manquants "$PYODIDE/dist/pyodide.asm.wasm" "$dyn/agrege_tout.so" \
+    "$dyn"/dist/pyside_Qt*.so | sed 's/^/-Wl,--export=/' > "$dyn/exports.rsp"
+  em++ -o "$dyn/dist/pyside_agrege.so" "${options[@]}" "@$dyn/exports.rsp" "${agrege[@]}" "${qt[@]}"
+  # 3. Chaque import de chaque module résolu (principal, agrégat, module chargé avant lui) : sinon Emscripten pose un
+  # bouchon qui échoue au premier appel, sans rien dire au chargement (Pyodide est sans ASSERTIONS).
+  "$HOTEPY" "$DEP/wasm/symboles.py" verifier "$PYODIDE/dist/pyodide.asm.wasm" "$dyn/dist/pyside_agrege.so" \
+    $(for m in $MODULES_DEMANDE; do echo "$dyn/dist/pyside_Qt$m.so"; done) || { echo "phase dynamique : imports non résolus" >&2; return 1; }
   for f in package.json pyodide.asm.js pyodide.asm.wasm pyodide.js pyodide-lock.json python_stdlib.zip test.html; do
     cp "$PYODIDE/dist/$f" "$dyn/dist/"
   done
@@ -227,13 +266,12 @@ phase_paquet() {
   local pyc="$RACINE/build/paquet"
   dossier "$pyc"; cp "$RACINE/build/dynamique/dist/python_stdlib.zip" "$pyc/"
   /DATA/Python/outils_wasm/venv-pyodide/bin/pyodide py-compile --silent --compression-level 9 "$pyc/python_stdlib.zip"
-  "$HOTEPY" - "$RACINE/build/dynamique/dist" "$pyc/python_stdlib.zip" "$DEP/hebergement/LICENSE-Pyodide-PySide6.txt" "$RACINE/pyodide-pyside6-0.29.3.0.zip" <<'PY'
+  "$HOTEPY" - "$RACINE/build/dynamique/dist" "$pyc/python_stdlib.zip" "$DEP/hebergement/LICENSE-Pyodide-PySide6.txt" "$RACINE/pyodide-pyside6-0.29.3.1.zip" <<'PY'
 import hashlib, sys, zipfile
 from pathlib import Path
 dist, stdlib, licence, sortie = map(Path, sys.argv[1:])
 fichiers = [dist / n for n in ("package.json", "pyodide.asm.js", "pyodide.asm.wasm", "pyodide.js", "pyodide-lock.json",
-                               "pyodide-base.mjs", "pyside_agrege.so",
-                               "pyodide.mjs", "test.html")] + [stdlib, licence]
+                               "pyodide-base.mjs", "pyodide.mjs", "test.html")] + sorted(dist.glob("pyside_*.so")) + [stdlib, licence]
 with zipfile.ZipFile(sortie, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
     for f in fichiers:
         z.write(f, f"pyodide-qt/{'LICENSE.txt' if f == licence else f.name}")

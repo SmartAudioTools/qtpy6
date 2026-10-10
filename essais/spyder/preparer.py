@@ -62,17 +62,7 @@ for _nom, _attrs in (("zmq.asyncio", dict(Context=_Classe, Socket=_Classe, Polle
     if "zmq" in sys.modules and not getattr(sys.modules["zmq"], "__file__", None):  # la doublure, pas le vrai
         doublure(_nom, **_attrs)
         setattr(sys.modules[_nom.rpartition(".")[0]], _nom.rpartition(".")[2], sys.modules[_nom])
-# QtPrintSupport (non lié dans Pyodide-Qt, obstacle 3 de la note) : les quatre classes que Spyder importe, et ce qu'il en lit à
-# l'import (printer.py : `mode=QPrinter.PrinterMode.ScreenResolution` en valeur par défaut). Imprimer n'a pas de sens dans la page.
-_QPrinter = type("QPrinter", (), {
-    "PrinterMode": type("PrinterMode", (), {"ScreenResolution": 0, "PrinterResolution": 1, "HighResolution": 2}),
-    "ColorMode": type("ColorMode", (), {"GrayScale": 0, "Color": 1}),
-    "PageOrder": type("PageOrder", (), {"FirstPageFirst": 0, "LastPageFirst": 1}),
-    "HighResolution": 2, "__init__": lambda self, *a, **k: None})
-doublure("PySide6.QtPrintSupport", QPrinter=_QPrinter, QPrintDialog=type("QPrintDialog", (), {"Accepted": 1}),
-         QPrintPreviewDialog=type("QPrintPreviewDialog", (), {}), QPageSetupDialog=type("QPageSetupDialog", (), {}),  # qtpy l'aliasse
-         QAbstractPrintDialog=type("QAbstractPrintDialog", (), {
-             "PrintDialogOption": type("PrintDialogOption", (), {"PrintSelection": 2})}))
+# PySide6.QtPrintSupport : plus de doublure depuis le 10/10/2026, le module est chargé à la demande (wasm/pyodide-qt.mjs).
 doublure("inflection",                                       # pour qstylizer ; les deux seules fonctions qu'il appelle
          underscore=lambda m: re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", m)).lower(),
          camelize=lambda m, maj=True: "".join(x.title() if i or maj else x for i, x in enumerate(m.split("_"))))

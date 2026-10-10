@@ -1,5 +1,6 @@
 // Test de fumée, sous node : le Pyodide de construire.sh importe PySide6 et fait circuler un signal, sa bibliothèque
-// standard est en .pyc, et qtpy6 s'y charge en mode paresseux.
+// standard est en .pyc, les huit modules Qt à la demande se chargent au premier import (sqlite, DOM, QTest...), et qtpy6
+// s'y charge en mode paresseux.
 //   node wasm/fumee.mjs [dossier]      (le paquet de phase_paquet dépaqueté ; modèle : scripts/smoke-test.mjs de Pyodide-Qt)
 // QApplication et les widgets veulent un navigateur (DOM) : la sonde de qtpy6.web, pas d'ici.
 import { readFile } from "node:fs/promises";
@@ -33,6 +34,24 @@ f"PySide6 {PySide6.__version__} Qt {QtCore.qVersion()} signal={recu} valide={shi
 console.log(sortie);
 if (!sortie.includes("signal=[42] valide=True")) { console.error("ÉCHEC"); process.exit(1); }
 if (!sortie.endsWith("pyc=True")) console.error("ATTENTION : bibliothèque standard en sources .py (pas le paquet de phase_paquet)");
+
+// Les modules à la demande : chacun téléchargé et chargé au premier import, depuis un contexte suspendable (run_sync,
+// JSPI : node l'a depuis la version 24 ; runPythonAsync entre par callPromising, runPython non et le finder lève alors
+// ImportError). QtOpenGLWidgets tire QtOpenGL. Sans QGuiApplication ici (pas de DOM) : QPrinter, QOpenGLWidget et le GET
+// de QNetworkAccessManager sont pour la sonde de qtpy6.web.
+const demande = await py.runPythonAsync(`
+from PySide6 import QtPrintSupport, QtNetwork, QtSql, QtXml, QtConcurrent, QtOpenGLWidgets, QtOpenGL, QtTest
+base = QtSql.QSqlDatabase.addDatabase("QSQLITE"); base.setDatabaseName(":memory:"); base.open()
+r = QtSql.QSqlQuery(base); r.exec("create table t (n int)"); r.exec("insert into t values (42)"); r.exec("select n from t"); r.next()
+sql = r.value(0)
+d = QtXml.QDomDocument(); d.setContent("<a><b>texte</b></a>")
+xml = d.documentElement().firstChildElement("b").text()
+t = QtCore.QElapsedTimer(); t.start(); QtTest.QTest.qWait(20)
+f"sqlite={sql} dom={xml} qWait={t.elapsed() >= 20} hote={QtNetwork.QHostAddress('127.0.0.1').toString()} " \
+f"imprimantes={QtPrintSupport.QPrinterInfo.availablePrinterNames()} concurrent={len([n for n in dir(QtConcurrent) if not n.startswith('_')])}"
+`);
+console.log(demande);
+if (!demande.startsWith("sqlite=42 dom=texte qWait=True hote=127.0.0.1")) { console.error("ÉCHEC modules à la demande"); process.exit(1); }
 
 // qtpy6 sur ce build : le mode paresseux de qtpy6._binding (crochet de shiboken). Les doublures du navigateur lisent
 // des noms par ns["…"] à l'import : un nom absent de la liste `needed` de _binding.load fait échouer ce qui suit.

@@ -1,12 +1,18 @@
-// Pyodide-Qt, Qt en module dynamique (qtpy6/wasm/construire.sh, phase dynamique) : le Pyodide amont est pyodide-base.mjs ;
-// cette enveloppe, dans une PAGE seulement, charge pyside_agrege.so (Qt + PySide6) par le chargeur JS d'emscripten, en
-// asynchrone, puis retire le fichier du FS : le dlopen C de Python n'y trouve rien à recopier dans le tas (+25 Mo sinon,
-// dynlink.c ne libère jamais file_data) et retrouve la bibliothèque déjà chargée par son nom. Un worker (pas de document)
-// n'en charge rien : les modules qui y tournent n'importent pas Qt.
+// Pyodide-Qt, Qt en modules dynamiques (qtpy6/wasm/construire.sh, phase dynamique) : le Pyodide amont est pyodide-base.mjs ;
+// cette enveloppe, dans une PAGE seulement, charge pyside_agrege.so (Qt + PySide6 : Core, Gui, Widgets, Svg, SvgWidgets)
+// par le chargeur JS d'emscripten, en asynchrone, puis retire le fichier du FS : le dlopen C de Python n'y trouve rien à
+// recopier dans le tas (+25 Mo sinon, dynlink.c ne libère jamais file_data) et retrouve la bibliothèque déjà chargée par
+// son nom. Les autres modules de qtbase (pyside_Qt<M>.so, un par module) ne sont téléchargés et chargés qu'au PREMIER
+// import, de la même façon, depuis un contexte suspendable (le script lancé par qtpy6.web.lancer, un slot) : le
+// chargement est asynchrone, Chrome interdit de compiler du wasm en synchrone sur le fil principal. Tous partagent une
+// même portée de symboles (portee) : un module y résout ce que l'agrégat exporte. Un worker (pas de document) n'en
+// charge rien : les modules qui y tournent n'importent pas Qt.
 import { loadPyodide as base, version } from "./pyodide-base.mjs";
 export { version };
 const SO = "/lib/pyside_agrege.so";
 const MODULES = ["shiboken6.Shiboken", "PySide6.QtCore", "PySide6.QtGui", "PySide6.QtWidgets", "PySide6.QtSvg", "PySide6.QtSvgWidgets"];
+const DEMANDE = Object.fromEntries(["PrintSupport", "Network", "Sql", "Xml", "Concurrent", "OpenGL", "OpenGLWidgets", "Test"]
+                                   .map(m => [`PySide6.Qt${m}`, `/lib/pyside_Qt${m}.so`]));
 // Les jumeaux compressés de l'hébergement (NOM.br, NOM.gz : hebergement/telecharger.sh), comme en_jumeau de qtpy6web.js :
 // le meilleur que le navigateur décompresse, le fichier lui-même à défaut (en développement). Une réponse marquée
 // X-Qtpy6-Decompresse vient du service worker d'une page, qui la range décompressée.
@@ -24,21 +30,46 @@ async function octets(url) {
 }
 export async function loadPyodide(options = {}) {
   if (typeof document === "undefined") return base(options);
-  const url = new URL("pyside_agrege.so", options.indexURL ? new URL(options.indexURL, location.href) : import.meta.url);
-  const recus = octets(url);
+  const dossier = options.indexURL ? new URL(options.indexURL, location.href) : import.meta.url;
+  const portee = {};
+  async function charger(py, chemin, recus = octets(new URL(chemin.slice("/lib/".length), dossier))) {
+    py.FS.writeFile(chemin, new Uint8Array(await recus));
+    await py._module.loadDynamicLibrary(chemin, { loadAsync: true, global: false, nodelete: true }, portee);
+    py.FS.unlink(chemin);
+  }
+  const recus = octets(new URL("pyside_agrege.so", dossier));
   recus.catch(() => {});  // rejet relevé par l'await plus bas, pas en « non géré » pendant loadPyodide
   const py = await base(options);
-  py.FS.writeFile(SO, new Uint8Array(await recus));
-  await py._module.loadDynamicLibrary(SO, { loadAsync: true, global: false, nodelete: true }, {});
-  py.FS.unlink(SO);
+  await charger(py, SO, recus);
+  // Un seul chargement par module ; un échec (réseau) laisse la place à un nouvel essai. Une page peut charger d'avance
+  // (await charger(chemin) du module Python _pyodide_qt) ; un module chargé ne suspend plus rien à l'import.
+  const charges = new Map(), faits = new Set();
+  py.registerJsModule("_pyodide_qt", { deja: chemin => faits.has(chemin), charger: chemin => {
+    if (!charges.has(chemin)) charges.set(chemin, charger(py, chemin).then(() => faits.add(chemin),
+                                                                             e => { charges.delete(chemin); throw e; }));
+    return charges.get(chemin); } });
   py.runPython(`def _poser():
     import sys, importlib.machinery as m
-    class QtAgrege:  # les six modules de l'agrégat, tous servis par le même fichier
+    class QtAgrege:  # les six modules de l'agrégat, servis par le même fichier ; les autres chargés au premier import
         NOMS = frozenset(${JSON.stringify(MODULES)})
+        DEMANDE = ${JSON.stringify(DEMANDE)}
         @classmethod
         def find_spec(cls, nom, chemin=None, cible=None):
             if nom in cls.NOMS:
-                return m.ModuleSpec(nom, m.ExtensionFileLoader(nom, "${SO}"), origin="${SO}")
+                so = "${SO}"
+            elif nom in cls.DEMANDE:
+                so = cls.DEMANDE[nom]
+                from _pyodide_qt import charger, deja
+                if not deja(so):
+                    from pyodide.ffi import run_sync
+                    try:
+                        run_sync(charger(so))
+                    except RuntimeError as e:  # pas de suspension possible ici
+                        raise ImportError(f"{nom} se charge au premier import, depuis le script lancé par "
+                                          f"qtpy6.web.lancer ou un slot ({e})", name=nom) from None
+            else:
+                return None
+            return m.ModuleSpec(nom, m.ExtensionFileLoader(nom, so), origin=so)
     sys.meta_path.insert(0, QtAgrege)
 _poser()
 del _poser`);

@@ -42,9 +42,9 @@ for r in json.load(open('qtpy6/web/versions.json'))['$CLE'].get('roues', {}).val
   curl -fL -o "$F" "$RURL"
   echo "$RSHA  $F" | sha256sum -c -
 done
-brotli -q 11 -f exemple/pyodide-qt/pyodide.asm.wasm & MOTEUR=$!  # en parallèle (une minute et demie pour le moteur)
-brotli -q 11 -f exemple/pyodide-qt/pyside_agrege.so & AGREGAT=$!
+brotli -q 11 -f exemple/pyodide-qt/pyodide.asm.wasm &  # en parallèle (une minute et demie pour le moteur)
+for F in exemple/pyodide-qt/pyside_*.so; do brotli -q 11 -f "$F" & done  # l'agrégat et les modules Qt à la demande
 brotli -q 11 -f exemple/pyodide-qt/python_stdlib.zip
-gzip -9 -k -f -n exemple/pyodide-qt/pyodide.asm.wasm exemple/pyodide-qt/python_stdlib.zip exemple/pyodide-qt/pyside_agrege.so
-wait $MOTEUR $AGREGAT
+gzip -9 -k -f -n exemple/pyodide-qt/pyodide.asm.wasm exemple/pyodide-qt/python_stdlib.zip exemple/pyodide-qt/pyside_*.so
+wait
 ls -l exemple/pyodide-qt

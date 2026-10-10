@@ -531,7 +531,9 @@ rien dans qtpy6) :
   doublure permet l'import, pas une connexion ;
 - une doublure `PySide6.QtPrintSupport` (non lié dans Pyodide-Qt, obstacle 3) : quatre classes, plus `QPageSetupDialog` que
   qtpy aliasse, et les trois énumérations que `printer.py` lit en valeur par défaut d'argument. Sans elle, quatre plugins
-  tombent (`editor`, `ipythonconsole`, `debugger`, `profiler`) ;
+  tombent (`editor`, `ipythonconsole`, `debugger`, `profiler`)  — **levée le 10/10/2026** : `PySide6.QtPrintSupport` est maintenant une liaison réelle, chargée à
+  la demande au premier import (`notes/2026-10-10 - Modules Qt à la demande.md`) ; jalon 6 rejoué sans la doublure, mêmes
+  33 plugins, même seul échec (`pylint`, métadonnées absentes), 0,8 s et 60 Mio ;
 - `numpy`, `rtree`, `orjson`, `mako` absents : Spyder s'en passe seul à l'import (relevé sur le bureau en les rendant
   inimportables : aucun échec de plus). `watchdog` s'importe (polling pur) ; `msgpack` retombe sur son python pur.
 

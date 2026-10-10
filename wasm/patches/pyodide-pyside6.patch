@@ -1,17 +1,19 @@
-Le module principal de Pyodide-Qt : le Pyodide amont plus embind, dont le module latéral de Qt (pyside_agrege.so,
-construire.sh, phase dynamique) appelle les fonctions JavaScript, que seul le module principal peut fournir.
+Le module principal de Pyodide-Qt : le Pyodide amont plus embind et l'API fetch d'Emscripten (QNetworkAccessManager de
+Qt-WASM repose sur emscripten_fetch), dont les modules latéraux de Qt (pyside_agrege.so et pyside_Qt<M>.so,
+construire.sh, phase dynamique) appellent les fonctions JavaScript, que seul le module principal peut fournir.
 
 diff --git a/Makefile.envs b/Makefile.envs
 index d0b5c79..050335d 100644
 --- a/Makefile.envs
 +++ b/Makefile.envs
-@@ -197,7 +197,8 @@ export MAIN_MODULE_LDFLAGS= $(LDFLAGS_BASE) \
+@@ -197,7 +197,9 @@ export MAIN_MODULE_LDFLAGS= $(LDFLAGS_BASE) \
  	-lhtml5_webgl.js \
  	-lsdl.js \
  	-sMAX_WEBGL_VERSION=2  \
 -	-sGL_WORKAROUND_SAFARI_GETCONTEXT_BUG=0
 +	-sGL_WORKAROUND_SAFARI_GETCONTEXT_BUG=0 \
-+	-lembind
++	-lembind \
++	-sFETCH
  
  EXPORTS=_main \
     ,_free \
