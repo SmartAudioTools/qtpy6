@@ -2,6 +2,19 @@
 
 ## Non publié
 
+- Un alias snake_case de méthode cède la place à l'application. Un nom défini par une classe Python de la MRO, ou rendu
+  par un `__getattr__` Python, passe avant la méthode Qt. Avant, l'alias posé sur la classe Qt masquait le
+  `move_cursor` du mixin de Spyder (`TypeError` sur `moveCursor(int)`, puis une récursion sans fin de la console interne
+  dans le navigateur). Il masquait aussi le `set_font` que le `FrameWebView` de Spyder délègue à sa vue. Un cache par
+  classe garde l'accès à 0,45 µs (0,15 µs pour le nom camelCase, 1,9 µs sans cache).
+- Dans le navigateur, nouvelles doublures pour le client LSP de Spyder :
+  - `ProcessusWeb` (le `QProcess` doublé) gagne `processEnvironment`, `setStandardOutputFile`/`ErrorFile`,
+    `errorOccurred`, `close` et `waitForFinished` ;
+  - le `Socket` zmq doublé gagne `set_hwm`/`get_hwm` ;
+  - `subprocess.Popen[bytes]` est accepté dans une annotation (IPython).
+- Un `QThread` doublé détruit sur `finished` avant que `started` ne parte n'émet plus rien. Avant, il levait
+  « Signal source has been deleted » dans `sys.excepthook`.
+
 - `application(persistant=chemin)` : le dossier des fichiers de l'utilisateur, qui survit d'un lancement à l'autre. En
   natif un dossier du disque, créé au besoin ; dans le navigateur le même chemin rangé dans IndexedDB, d'où reviennent
   les fichiers de la visite précédente et où le navigateur recopie seul chaque écriture (`autoPersist` d'IDBFS :

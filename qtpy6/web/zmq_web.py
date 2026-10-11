@@ -444,6 +444,18 @@ class Socket:
     def setsockopt_string(self, option: int, valeur: str, encoding: str = "utf-8") -> None:
         self.setsockopt(option, valeur.encode(encoding))
 
+    get_string, set_string = getsockopt_string, setsockopt_string
+
+    def get_hwm(self) -> int:
+        return self.getsockopt(SocketOption.SNDHWM)
+
+    def set_hwm(self, valeur: int) -> None:
+        """Comme pyzmq : fixe les deux seuils (le client LSP de Spyder fait ``set_hwm(0)``) ; sans effet ici."""
+        self.setsockopt(SocketOption.SNDHWM, valeur)
+        self.setsockopt(SocketOption.RCVHWM, valeur)
+
+    hwm = property(get_hwm, set_hwm)
+
     def subscribe(self, topic: bytes | str) -> None:
         topic = topic.encode() if isinstance(topic, str) else bytes(topic)
         self._abonnements.add(topic)

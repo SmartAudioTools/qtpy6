@@ -1143,6 +1143,34 @@ def test_lanceur_zip_de_paquet(tmp_path):
 
 
 @greenlet_seul
+def test_fil_detruit_avant_started():
+    """Un fil détruit sur ``finished`` (Spyder : ``deleteLater``) avant que ``started``, émis à la tâche suivante, ne
+    parte : rien n'est émis, rien ne lève (« Signal source has been deleted » dans Spyder, 12/10/2026)."""
+    sortie = simule("""
+        import sys
+        import shiboken6
+        from qtpy6.QtCore import QObject, Signal
+        from qtpy6.web import fils
+        ns = {"QObject": QObject, "Signal": Signal}
+        fils.doubler(ns)
+        sys.excepthook = lambda *exc: print("excepthook", exc[1])
+
+        class Rapide(ns["QThread"]):
+            def run(self):
+                pass
+
+        def main():
+            fil = Rapide()
+            fil.finished.connect(lambda: shiboken6.delete(fil))
+            fil.start()
+            ns["QThread"].msleep(30)
+        principal(main)
+        print("fin")
+    """)
+    assert sortie.splitlines() == ["fin"]
+
+
+@greenlet_seul
 def test_fils_cooperatifs():
     sortie = simule("""
         from qtpy6.QtCore import QObject, Signal

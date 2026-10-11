@@ -94,6 +94,38 @@ def finish(namespace):
 
 
 _prepared = set()
+_BINDING = {API_NAME, 'shiboken6', 'Shiboken', 'builtins'}
+
+
+class _Alias:
+    """A snake_case alias that gives way to the application: the name defined
+    by a Python class of the instance's MRO placed after the Qt class (a mixin
+    listed after its Qt base: Spyder's BaseEditMixin.move_cursor), then what a
+    Python ``__getattr__`` gives (a delegating proxy: Spyder's FrameWebView ->
+    its WebView's set_font) - what the name would be without qtpy6 - and only
+    else the Qt method. A plain class attribute would mask both."""
+    __slots__ = ('qt', 'name', 'plain')
+
+    def __init__(self, qt, name):
+        self.qt, self.name, self.plain = qt, name, set()  # plain: the classes where only Qt has the name
+
+    def __get__(self, obj, owner=None):
+        owner = type(obj) if owner is None else owner
+        if owner not in self.plain:
+            python = [c for c in owner.__mro__ if c.__module__.partition('.')[0] not in _BINDING]
+            for c in python:
+                found = vars(c).get(self.name, self)
+                if not isinstance(found, _Alias):  # a doublure (Python class) carries aliases too: skipped
+                    return found.__get__(obj, owner) if hasattr(found, '__get__') else found
+            if any('__getattr__' in vars(c) for c in python):
+                if obj is not None:
+                    try:
+                        return owner.__getattr__(obj, self.name)
+                    except AttributeError:
+                        pass
+            else:
+                self.plain.add(owner)  # measured: 1.9 µs per access without it, 0.15 for the camelCase name
+        return self.qt.__get__(obj, owner) if hasattr(self.qt, '__get__') else self.qt
 
 
 def _pyside6_class(cls):
@@ -119,7 +151,8 @@ def _pyside6_class(cls):
         elif name[0].islower() and '_' not in name:
             snake = snake_case(name)
             if snake != name and snake not in members:
-                setattr(cls, snake, attr)
+                signal = type(attr).__name__ in ('Signal', 'pyqtSignal')  # connected by its object: kept as is
+                setattr(cls, snake, attr if signal else _Alias(attr, snake))
 
 
 class _Finder(importlib.abc.MetaPathFinder, importlib.abc.Loader):

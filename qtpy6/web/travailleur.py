@@ -218,6 +218,7 @@ class ProcessusWeb(QObject):
     readyReadStandardOutput = Signal()
     readyReadStandardError = Signal()
     finished = Signal(int)
+    errorOccurred = Signal(object)
 
     # Les énumérations de Qt, valeurs comprises, et leurs membres aussi à plat sur la classe comme PySide6 les sert
     # (``QProcess.MergedChannels``) : Spyder les lit dès la définition de ses classes (``@Slot(QProcess.ProcessError)``).
@@ -248,6 +249,19 @@ class ProcessusWeb(QObject):
         if not isinstance(env, dict):
             env = dict(ligne.split("=", 1) for ligne in env.toStringList())
         self.environnement = env
+
+    def processEnvironment(self) -> "QProcessEnvironment":
+        """Comme ``QProcess`` : vide tant que ``setProcessEnvironment`` n'a rien posé (client LSP de Spyder)."""
+        from qtpy6.QtCore import QProcessEnvironment
+        env = QProcessEnvironment()
+        for nom, valeur in self.environnement.items():
+            env.insert(nom, valeur)
+        return env
+
+    def setStandardOutputFile(self, _fichier: str, *_mode) -> None:
+        """Accepté et sans effet : le worker n'écrit pas dans les fichiers du parent (journaux du client LSP)."""
+
+    setStandardErrorFile = setStandardOutputFile
 
     def start(self, programme="", arguments=(), *_):
         global _RESERVE
@@ -312,6 +326,13 @@ class ProcessusWeb(QObject):
             return
         self._mourir()
         QTimer.singleShot(0, lambda: self.finished.emit(0))  # comme QProcess : ``finished`` après le retour de ``kill``
+
+    close = kill  # ``QProcess.close`` tue le processus (client LSP de Spyder : ``transport.close()``)
+
+    def waitForFinished(self, _msecs: int = 30000) -> bool:
+        """Vrai une fois tué (``close``/``kill`` puis ``waitForFinished(1000)`` : arrêt du client LSP de Spyder) ; un
+        Worker qui tourne encore ne s'attend pas ici, faux tout de suite, comme un délai dépassé."""
+        return self.worker is None
 
     def _mourir(self) -> None:
         self.worker.terminate()

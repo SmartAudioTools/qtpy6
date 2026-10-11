@@ -34,8 +34,33 @@ def test_methods_signals_statics(app):
 
 
 def test_alias_follows_override():
-    assert vars(QtWidgets.QWidget)['set_parent'] is vars(QtWidgets.QWidget)['setParent']
+    assert vars(QtWidgets.QWidget)['set_parent'].qt is vars(QtWidgets.QWidget)['setParent']
     assert QtWidgets.QWidget.find_children == QtWidgets.QWidget.findChildren
+
+
+def test_alias_gives_way_to_the_application(app):
+    """A mixin after the Qt base, or a delegating __getattr__, keeps its name
+    (Spyder: BaseEditMixin.move_cursor, FrameWebView -> WebView.set_font)."""
+    class Mixin:
+        def move_cursor(self, chars=0):
+            return ('mixin', chars)
+
+    class Editor(QtWidgets.QPlainTextEdit, Mixin):
+        pass
+
+    class Target:
+        def set_font(self, font, size=None):
+            return ('target', size)
+
+    class Proxy(QtWidgets.QFrame):
+        def __getattr__(self, name):
+            return getattr(Target(), name)
+
+    assert Editor().move_cursor(3) == ('mixin', 3)
+    assert Proxy().set_font(None, size=9) == ('target', 9)
+    plain = QtWidgets.QPlainTextEdit()
+    plain.move_cursor(QtGui.QTextCursor.MoveOperation.End)  # still the Qt method elsewhere
+    assert Proxy().set_window_title('t') is None and Proxy().window_title() == ''  # __getattr__ without it: Qt's
 
 
 @pytest.mark.parametrize('module', [QtCore, QtGui, QtWidgets])

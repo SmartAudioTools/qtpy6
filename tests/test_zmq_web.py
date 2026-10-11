@@ -99,6 +99,14 @@ def test_identite_posee_ou_aleatoire():
     assert len(identite) == 5 and identite.startswith(b"\x00")
 
 
+def test_hwm():
+    """Le client LSP de Spyder fait ``set_hwm(0)`` (jalon 7 dans le navigateur, 12/10/2026)."""
+    _contexte, routeur, _dealer = paire()
+    assert routeur.hwm == 1000
+    routeur.set_hwm(0)
+    assert routeur.get_hwm() == routeur.getsockopt(zmq_web.RCVHWM) == 0
+
+
 def test_recv_sans_message():
     contexte, routeur, dealer = paire()
     with pytest.raises(zmq_web.Again) as exc:

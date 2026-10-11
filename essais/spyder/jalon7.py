@@ -64,6 +64,15 @@ try:
             return inspect.Signature()
 
     inspect.signature = signature_
+    # Contournement d'ESSAI : le renommage des trois slots homonymes d'un signal (fork, commit 591fdf005 du 09/10/2026)
+    # a été perdu à la reconstruction du fork du 11/10 (SmartPythonEditor_generator ne le reprend pas) ; sans lui, la
+    # méthode `cursor_position_changed` de Spyder se résout en signal (alias qtpy6) et `setPlainText` boucle sans fin.
+    from qtpy6.QtWidgets import QPlainTextEdit, QTableWidget, QTreeWidget
+    for classe, alias in ((QPlainTextEdit, "cursor_position_changed"), (QTableWidget, "cell_changed"),
+                          (QTreeWidget, "item_expanded")):
+        for c in classe.__mro__:
+            if alias in vars(c):
+                delattr(c, alias)
     # Help et OnlineHelp : QtWebEngine sur le bureau, la doublure QWebEngineView de qtpy6 dans la page (preparer.py).
     # --new-instance : contournement d'ESSAI. Le serveur d'instance unique (post_visible_setup) écoute un socket dans un
     # threading.Thread, que la page ne sait pas démarrer (RuntimeError) ; sa doublure est un point ouvert de la note.
@@ -115,6 +124,8 @@ try:
         etape("show")
         post_visible_setup(self)
         etape("post_visible_setup")
+        if os.environ.get("JALON7_ERREUR"):  # erreur7.py : une exception dans un slot
+            QTimer.singleShot(1000, lambda: 1 / 0)
 
     MainWindow.post_visible_setup = post_visible_setup_
 

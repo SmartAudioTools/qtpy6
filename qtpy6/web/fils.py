@@ -77,11 +77,17 @@ def doubler(ns):
 
         def _executer(self):
             try:
-                bloquant._plus_tard(self.started.emit)  # comme les slots d'un autre fil en Qt : à la tâche suivante, une
+                bloquant._plus_tard(self._demarre)  # comme les slots d'un autre fil en Qt : à la tâche suivante, une
                 self.run()  # fois ``exec()`` entré, sans quoi le ``quit()`` d'un travailleur rapide le précéderait
             finally:
                 self._etat = "fini"
                 self.finished.emit()
+
+        def _demarre(self) -> None:
+            """``started``, sauf si le fil a été détruit entre-temps (``deleteLater`` sur ``finished`` : Spyder)."""
+            from shiboken6 import isValid
+            if isValid(self):
+                self.started.emit()
 
         def run(self):
             self.exec()

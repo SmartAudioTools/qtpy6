@@ -19,6 +19,7 @@ import itertools
 import os
 import subprocess
 import sys
+import types
 
 _PYTHONS = ("python", "python3", f"python3.{sys.version_info.minor}")
 _fabrique = None  # () -> ProcessusWeb : les tests de Popen y mettent un faux processus
@@ -137,6 +138,8 @@ class _Entree:
 class Popen:
     """``subprocess.Popen`` d'un programme Python, dans un worker (``ProcessusWeb``). Tout autre programme :
     ``FileNotFoundError``. ``start_new_session``, ``preexec_fn``, ``shell``… sont sans objet et ignorés."""
+
+    __class_getitem__ = classmethod(types.GenericAlias)  # « subprocess.Popen[bytes] » dans une annotation (IPython)
 
     def __init__(self, args, bufsize=-1, executable=None, stdin=None, stdout=None, stderr=None,  # noqa: ARG002
                  *_, cwd=None, env=None, **__) -> None:

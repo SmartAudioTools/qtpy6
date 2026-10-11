@@ -80,6 +80,11 @@ Trois passes sur chaque module du binding, dans `qtpy6/_binding.py` :
   bibliothèques tierces (pyqtgraph, matplotlib…) continuent de les appeler par
   leurs noms d'origine. Un alias posé sur une classe suit sa redéfinition
   (`QWidget.set_parent` est bien le `setParent` de QWidget, pas de QObject).
+  Un alias de méthode **cède la place à l'application** : un nom défini par une
+  classe Python de la MRO (un mixin placé après sa base Qt, comme
+  `BaseEditMixin.move_cursor` de Spyder), puis ce que rend un `__getattr__`
+  Python (un mandataire qui délègue), passent avant la méthode Qt — ce que le nom
+  vaudrait sans qtpy6. Les alias de signaux restent de simples attributs.
 
 Les modules sans fichier propre (`qtpy6.QtNetwork`, `qtpy6.QtTest`,
 `qtpy6.QtMultimedia`…) sont servis par un **finder** (`sys.meta_path`) qui

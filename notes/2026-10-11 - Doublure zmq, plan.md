@@ -237,3 +237,51 @@ l'interruption ou pendant un lancement, quand le client parlait à un Worker mor
 redémarrage avec un pid différent. Suite qtpy6 : 226 passent, 3 ignorés, 1 échec, `test_service_worker[chromium]`. Il
 échoue aussi lancé seul : le cache v=1 de `sw.js` survit sous Chromium. C'est un fichier que ce travail ne touche pas, et
 le défaut reste ouvert hors de ce jalon. Chrome n'a pas été essayé pour 8b.
+
+## Jalon 7 rejoué avec le noyau dans la page (12/10/2026, 0 h 15 → 1 h) : 33/0, plus de récursion
+
+Après le jalon 8b, `jalon7.py` (la vraie MainWindow) a été relancé dans Firefox. La console IPython y démarre désormais
+son noyau. Ce relancement a révélé quatre manques, tous corrigés dans qtpy6. Ni l'application ni le fork n'ont été
+touchés (demande de l'utilisateur : « je voulais le code source de SmartPythonEditor agnostique »).
+
+1. **Le client LSP de Spyder** lance son serveur par `QProcess`. Il lui manquait :
+   - `processEnvironment`, `setStandardOutputFile`/`ErrorFile`, `errorOccurred`, `close` et `waitForFinished` sur
+     `ProcessusWeb` ;
+   - `set_hwm` sur le `Socket` zmq ;
+   - `Popen[bytes]` (une annotation d'IPython).
+
+   Le serveur pylsp ne tourne pas encore dans un Worker : c'est le jalon 8d. `waitForFinished` rend faux tout de suite
+   tant qu'un Worker tourne, sans attendre. Écarté : une attente suspendue par JSPI, alors que le seul appelant mesuré
+   (l'arrêt du client) appelle `close()` juste avant.
+2. **La cascade de `RecursionError` de la page.** Sa racine était un alias snake_case de qtpy6 : `move_cursor`, posé
+   sur `QPlainTextEdit`, masquait le `BaseEditMixin.move_cursor` de Spyder, parce que le mixin est placé après la base Qt
+   dans la MRO. La boîte d'erreur de Spyder levait donc, et la console interne réécrivait l'erreur, qui relevait, sans
+   fin.
+   - Correctif : l'alias de méthode est un descripteur `_Alias` (`qtpy6/_binding.py`). Il cède la place à un nom défini
+     par une classe Python de la MRO, puis à un `__getattr__` Python, et ne rend la méthode Qt qu'à défaut.
+   - Le même correctif règle le `FrameWebView.set_font` délégué. Le contournement (b) de `jalon7.py` est donc retiré.
+   - Écarté : garder un attribut simple. Il masque les deux cas, et aucune liste d'exceptions ne peut prévoir les
+     mixins d'une application.
+   - Un cache par classe ramène l'accès à 0,45 µs, contre 1,9 µs sans cache et 0,15 µs pour le nom camelCase (mesuré,
+     `timeit`, bureau). Limite : un nom ajouté à une classe Python de base APRÈS le premier accès par une sous-classe
+     n'est pas vu.
+   - Défaut du premier jet, trouvé par `test_web` : une doublure (classe Python, `ProcessusWeb`) porte elle aussi des
+     `_Alias`, et l'alias s'y trouvait lui-même, d'où une récursion. Les `_Alias` sont désormais sautés dans la
+     recherche.
+3. **« Signal source has been deleted »** dans `bloquant.tache`. `QThread.started` est émis à la tâche suivante. Spyder
+   détruit le fil sur `finished`, et un fil rapide finit avant cette tâche. `started` n'est plus émis si le fil a été
+   détruit (`fils.py`, `_demarre`). Test `test_fil_detruit_avant_started`, qui échoue sans le correctif (vérifié dans une
+   copie à part).
+4. **Essai `essais/spyder/erreur7.py`.** Il rejoue jalon7 avec un `1/0` dans un slot une seconde après l'affichage, et
+   trace chaque appel de `ConsoleWidget.handle_exception`. Au bureau comme dans Firefox, `ZeroDivisionError` arrive à la
+   console interne et y est « traitée sans exception ».
+
+**Toujours ouvert.** Le renommage des trois slots homonymes d'un signal, dans le fork (commit 591fdf005 du 09/10), a été
+perdu à la reconstruction du fork du 11/10 : le générateur ne le reprend pas. Le contournement (a) de `jalon7.py` reste
+donc nécessaire. C'est à corriger dans le générateur, par l'utilisateur ou la session du fork, pas ici.
+
+**Vérifié.**
+- Bureau PySide6 : jalon7 et erreur7, 33 passe, 0 casse, MainWindow visible à 8 s, code 0.
+- Firefox 155, par la sonde : jalon7, 33/0, MainWindow visible, fin propre ; erreur7, la `ZeroDivisionError` est traitée.
+- Suite qtpy6 : 193 passent, 3 ignorés ; `test_qtpy6` 39/39 sous pyside6 et sous pyqt6.
+- Pas essayé : Chrome.

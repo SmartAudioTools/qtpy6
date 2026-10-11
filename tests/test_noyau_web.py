@@ -110,6 +110,23 @@ def test_set_process_environment_accepte_un_qprocessenvironment(faux_js):
     assert faux_js.postes[0]["lancer"]["env"] == {"A": "1=2"}
 
 
+def test_surface_du_client_lsp(faux_js):
+    """Le client LSP de Spyder lit ``processEnvironment()``, le complète et le rend (jalon 7 dans le navigateur)."""
+    p = travailleur.ProcessusWeb()
+    env = p.processEnvironment()
+    assert env.keys() == []
+    env.insert("B", "2")
+    p.setProcessEnvironment(env)
+    p.errorOccurred.connect(lambda _erreur: None)
+    p.setStandardOutputFile("/nulle/part.log")
+    p.start(sys.executable, ["x.py"])
+    assert faux_js.postes[0]["lancer"]["env"] == {"B": "2"}
+    assert p.processEnvironment().value("B") == "2"
+    p.close()  # ``transport.close()`` à l'arrêt de Spyder
+    assert p.state() == p.ProcessState.NotRunning
+    assert p.waitForFinished(1000)
+
+
 # --- 3. subprocess.Popen doublé ---------------------------------------------------------------------------------------
 
 class FauxProcessus(travailleur.ProcessusWeb):
@@ -149,6 +166,11 @@ def popen(monkeypatch):
 
 
 CMD = [sys.executable, "-Xfrozen_modules=off", "-m", "spyder_kernels.console", "-f", "c.json"]
+
+
+def test_popen_indexable(popen):
+    """IPython annote ``subprocess.Popen[bytes]`` à l'import (jalon 7 cassé par la doublure, 12/10/2026)."""
+    assert popen[bytes].__origin__ is popen
 
 
 def test_popen_programme_autre_que_python(popen):
