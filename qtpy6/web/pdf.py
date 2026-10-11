@@ -17,8 +17,9 @@ ordinateur. Le chargement est asynchrone : ``load`` rend ``Error.None_`` avec ``
 import enum
 import importlib.resources
 
-from qtpy6.QtCore import QMargins, QObject, QPoint, QRectF, QTimer, Signal
-from qtpy6.QtWidgets import QApplication, QWidget
+from qtpy6.QtCore import QMargins, QObject, QRectF, Signal
+
+from .calque import Calque
 
 _JS = None
 
@@ -112,7 +113,7 @@ class QPdfDocument(QObject):
             self.statusChanged.emit(statut)
 
 
-class QPdfView(QWidget):
+class QPdfView(Calque):
     class PageMode(enum.Enum):
         SinglePage, MultiPage = range(2)
 
@@ -125,13 +126,10 @@ class QPdfView(QWidget):
         super().__init__(parent)
         self._document, self._mode_page, self._mode_zoom = None, self.PageMode.SinglePage, self.ZoomMode.Custom
         self._vue = vue = _js().vue()
-        self._place, self._limite, self._masques = None, None, {}
+        self._limite, self._masques = None, {}
         self._zones_copie = self._filtre = None  # setCopyZones, setCopyFilter
         self._marges, self._ecart = QMargins(6, 6, 6, 6), 3  # les défauts de QPdfView
         self.destroyed.connect(lambda *_: vue.detruire())
-        # Le filet : ce qu'aucun événement du widget ne signale (un ancêtre qui bouge, une boîte modale, un menu)
-        self._minuterie = QTimer(self, interval=100, timeout=self._synchroniser)
-        self._minuterie.start()
 
     def document(self):
         return self._document
@@ -215,31 +213,5 @@ class QPdfView(QWidget):
     def setZoomMode(self, mode):
         self._mode_zoom = mode
 
-    def _synchroniser(self):
-        import js  # noqa: PLC0415
-
-        modale = QApplication.activeModalWidget()
-        visible = (self.isVisible() and self.isEnabled() and QApplication.activePopupWidget() is None
-                   and modale in (None, self.window()))
-        coin = self.mapToGlobal(QPoint(0, 0)) - self.screen().geometry().topLeft()
-        boite = js.window.qtpy6Conteneur.getBoundingClientRect()
-        place = (coin.x() + boite.left, coin.y() + boite.top, self.width(), self.height(), visible)
-        if place != self._place:
-            self._place = place
-            self._vue.placer(*place)
-
-    def showEvent(self, evenement):
-        super().showEvent(evenement)
-        self._synchroniser()
-
-    def hideEvent(self, evenement):
-        super().hideEvent(evenement)
-        self._synchroniser()
-
-    def resizeEvent(self, evenement):
-        super().resizeEvent(evenement)
-        self._synchroniser()
-
-    def changeEvent(self, evenement):
-        super().changeEvent(evenement)
-        self._synchroniser()
+    def _placer(self, *place):
+        self._vue.placer(*place)

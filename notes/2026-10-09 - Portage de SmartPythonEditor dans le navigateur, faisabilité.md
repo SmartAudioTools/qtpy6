@@ -873,3 +873,67 @@ MESURÉ dans la page (sonde Firefox, 11/10/2026, PySide6 6.10.2) :
 
 RESTE : rapport final de la page (après la correction du fork) ; doublure de `threading.Thread`, à trancher ; doublures
 zmq et `QWebEngineView`.
+
+## Doublure `QWebEngineView` (11/10/2026, 18 h 10 → 19 h)
+
+Demande de l'utilisateur : « je t'ai dis que je voulais le code source de SmartPythonEditor agnostique et permetre à
+qtpy6 de l'executer aussi bien en natif que sur le web ». Help et OnlineHelp sont bâtis sur `QWebEngineView`, absent de
+Qt-WASM : c'est un manque de qtpy6, comblé par une doublure, sans toucher au fork.
+
+FAIT (non commité) :
+- `qtpy6/web/calque.py` (nouveau) : `Calque(QWidget)`, la synchronisation extraite de `QPdfView`. Un élément HTML en
+  `position:fixed` suit le widget (minuterie de 100 ms, plus showEvent, hideEvent, resizeEvent et changeEvent) ; il est
+  caché si le widget est invisible, désactivé, ou recouvert par un menu ou une modale d'une autre fenêtre. `__init__`
+  accepte `**kwargs` : le `WebView` de Spyder hérite aussi de `SpyderWidgetMixin` et passe `class_parent=` au `super()`.
+- `qtpy6/web/pdf.py` : `QPdfView` hérite de `Calque` (plus de doublon).
+- `qtpy6/web/moteur_web.py` (nouveau) :
+  - `QWebEngineView(Calque)` et `QWebEnginePage` sur une `<iframe>` ; `QWebEngineSettings` (polices, tailles, attributs) ;
+    `QWebEngineProfile` ; `QWebEngineScript` ;
+  - `setHtml` passe par `srcdoc`, donc par la même origine : texte, sélection et clic restent lisibles. Les ressources
+    locales (MEMFS) deviennent des URL `blob:`, y compris les `url()` des CSS ;
+  - le clic sur un lien passe par `acceptNavigationRequest` (Spyder s'en sert pour ouvrir ses liens) ; `findText`,
+    `SelectAll`/`Copy`, `toPlainText`/`toHtml` et `runJavaScript` sont synchrones ;
+  - historique : `setHtml` et `load` y entrent tous les deux, comme dans Qt (défaut trouvé par l'essai : `back()` après
+    un clic ne revenait pas à la page posée par `setHtml`).
+- `qtpy6/QtWebEngineWidgets.py`, `qtpy6/QtWebEngineCore.py` (nouveaux) : la doublure dans la page, le binding en natif.
+- `tests/test_web.py` : `test_moteur_web_doublé_dans_le_navigateur`.
+- `essais/spyder/preparer.py` : `PySide6.QtWebEngineCore` et `PySide6.QtWebEngineWidgets` pointent vers les classes de
+  qtpy6, puisque le qtpy du fork importe PySide6 directement. `jalon7.py` : `--no-web-widgets` retiré.
+  `construire_site.py` : jinja2 et markupsafe embarqués, car la page d'accueil de Help passe par un gabarit jinja2.
+- `essais/moteur_web/page.py`, `essais/pdf_calque/page.py` (nouveaux) : un essai de page pour chaque doublure.
+
+POURQUOI CES CHOIX :
+- Une `<iframe>` plutôt qu'un `QTextBrowser` déguisé : le HTML de Help (CSS de Sphinx, images, ancres) n'est rendu
+  fidèlement que par le navigateur, et `QTextBrowser` ne gère qu'un sous-ensemble du HTML 4.
+- `srcdoc` (même origine) plutôt que `src` vers une URL : sans la même origine, le texte, la sélection et les liens sont
+  illisibles depuis Python.
+- `Calque` commun plutôt qu'une copie du code de `QPdfView` : un seul endroit pour les règles de visibilité.
+
+LIMITES (dans la docstring) : une page `http(s)` chargée par `load` est d'une autre origine, donc `toPlainText` rend
+"" et `runJavaScript` rend None. Le clavier et la souris dans l'iframe vont au navigateur, pas à Qt. MathJax (chargé
+dynamiquement par Help) n'est pas servi.
+
+VÉRIFIÉ :
+- Page, Firefox 155 : `essais/moteur_web` donne `VERDICT moteur_web : OK`. Il échouait sur `back()` avant le correctif
+  de l'historique. Capture lue : iframe à la bonne place, zoom 1,5.
+- Page, Firefox 155 : `essais/pdf_calque` donne `VERDICT pdf_calque : OK` (PDF de `QPdfWriter` : Ready, 1 page ; place
+  = taille du widget ; élément caché quand la vue est désactivée, revu à la réactivation). Capture lue.
+- Page, jalon 7 : **33 passe, 0 casse, 0 non mesuré** (Help et OnlineHelp compris). Avant jinja2 : Help cassait sur
+  `ModuleNotFoundError: jinja2`. Puis deux défauts déjà connus : le plantage `setPlainText` du fork, et le serveur pydoc
+  d'OnlineHelp qui lance un `threading.Thread` (`can't start new thread`), un cas de plus pour la doublure Thread non
+  tranchée.
+- Bureau PyQt6 sans `--no-web-widgets` : 31/0/2 (PyQt6-WebEngine absent de SmartPython, Help et OnlineHelp sautés par
+  Spyder). Import natif : `qtpy6.QtWebEngineWidgets.QWebEngineView` est bien celui de PySide6.
+- NON VÉRIFIÉ : Chrome ; Help sur le bureau PySide6 (défaut `setFont` du fork) ; rendu d'une vraie page d'aide de
+  Spyder (seule la construction des plugins est mesurée).
+
+POINTS OUVERTS :
+- `tests/test_web.py` : tout test qui passe par `en_navigateur` (PDF, moteur web) échoue sur `No module named 'js'`. Ce
+  n'est pas un défaut de cette étape : `doubler_futures()` (`qtpy6/web/fils.py`, commit 1475f75 d'une autre session) lit
+  `js.navigator` dès l'import de `QtCore`. **`test_moteur_web_doublé_dans_le_navigateur` ÉCHOUE donc dans la suite
+  telle qu'elle est**, comme tous les tests `en_navigateur` (mesuré par le Superviseur : `pytest -k navigateur`, 5 failed
+  / 4 passed, dont quatre sur « No module named 'js' ») ; il n'a été vu vert qu'avec un faux `js`. Pas de correctif de
+  `fils.py` ici : signalé à l'utilisateur par le Superviseur, qui l'attribue.
+- La correspondance `PySide6.QtWebEngine*` vers qtpy6 vit dans `preparer.py`, c'est-à-dire dans l'essai. Si une
+  application importe PySide6 directement (via qtpy), c'est à qtpy6 de poser ces noms, comme pour les autres modules
+  absents de WASM. À trancher avec la question du qtpy du fork.

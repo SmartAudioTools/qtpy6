@@ -94,3 +94,12 @@ if sys.platform == "emscripten":
     for n in poses:
         setattr(QtCore, n, getattr(qtpy6.QtCore, n))
     print(f"PySide6.QtCore complété par qtpy6 : {' '.join(poses)}")  # QtGui et QtWidgets : rien n'y manque (vérifié)
+    # QtWebEngine (absent de Qt-WASM) : les doublures de qtpy6 (une <iframe> calée sur le widget), sous les noms de PySide6
+    # que lit qtpy ; Spyder instancie alors Help et OnlineHelp comme sur le bureau.
+    import qtpy6.QtWebEngineCore
+    import qtpy6.QtWebEngineWidgets
+    for _nom, _source in (("QtWebEngineCore", qtpy6.QtWebEngineCore), ("QtWebEngineWidgets", qtpy6.QtWebEngineWidgets)):
+        _m = types.ModuleType(f"PySide6.{_nom}")
+        _m.__dict__.update((n, v) for n, v in vars(_source).items() if n.startswith("QWebEngine"))
+        sys.modules[_m.__name__] = _m
+    print("doublure : PySide6.QtWebEngineCore, PySide6.QtWebEngineWidgets (qtpy6)")

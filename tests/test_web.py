@@ -371,6 +371,16 @@ def test_pdf_doublé_dans_le_navigateur():
     assert sortie == "qtpy6.web.pdf qtpy6.web.pdf True False"  # js n'est chargé qu'à la première vue
 
 
+def test_moteur_web_doublé_dans_le_navigateur():
+    sortie = en_navigateur("""
+        from qtpy6.QtWebEngineWidgets import QWebEngineView
+        from qtpy6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
+        print(QWebEngineView.__module__, QWebEnginePage.__module__, QWebEnginePage.FindBackward is
+              QWebEnginePage.FindFlag.FindBackward, QWebEngineSettings.FontFamily.FixedFont.name, "js" in sys.modules)
+    """)
+    assert sortie == "qtpy6.web.moteur_web qtpy6.web.moteur_web True FixedFont False"  # js : à la première page
+
+
 def test_pdf_selection_en_natif(app, tmp_path):
     """Le QPdfView de qtpy6 sélectionne au glisser et copie par Ctrl+C, même en partant de la marge (le point est
     accroché à la ligne la plus proche : QPdfDocument.getSelection ne sélectionne rien entre deux points hors texte)."""

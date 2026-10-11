@@ -1,8 +1,8 @@
 """Jalon 7 du portage de SmartPythonEditor dans le navigateur (notes/2026-10-09 - Portage de SmartPythonEditor…) : la
 vraie MainWindow de Spyder, instanciée comme `spyder.app.mainwindow.main` le fait (create_application, puis
-create_window), et un verdict par plugin — passe, casse (avec la cause), non mesuré (sauté par Spyder lui-même : Help et
-OnlineHelp sans QtWebEngine, ou désactivé). Le même script sur le bureau (offscreen) et dans la page (construire_site.py,
-sonde) ; seule l'instrumentation (témoin d'état de la page, mémoire) sait où elle tourne. Configuration de Spyder dans un
+create_window), et un verdict par plugin — passe, casse (avec la cause), non mesuré (sauté par Spyder lui-même :
+désactivé, ou Help et OnlineHelp sans QtWebEngine, cas du bureau PyQt6 sans PyQt6-WebEngine). Le même script sur le
+bureau (offscreen) et dans la page (construire_site.py, sonde) ; seule l'instrumentation (témoin d'état de la page, mémoire) sait où elle tourne. Configuration de Spyder dans un
 dossier jetable (SPYDER_CONFDIR) : jamais la réelle. État de la page : « jalon7 » pendant le travail, « fini » à la fin,
 « erreur » sinon."""
 
@@ -64,11 +64,10 @@ try:
             return inspect.Signature()
 
     inspect.signature = signature_
-    # --no-web-widgets : sur le bureau, Help et OnlineHelp seraient instanciés (QtWebEngine y est) et casseraient l'égalité
-    # avec la page, où Spyder les saute de lui-même ; leur doublure QWebEngineView est une étape à part.
+    # Help et OnlineHelp : QtWebEngine sur le bureau, la doublure QWebEngineView de qtpy6 dans la page (preparer.py).
     # --new-instance : contournement d'ESSAI. Le serveur d'instance unique (post_visible_setup) écoute un socket dans un
     # threading.Thread, que la page ne sait pas démarrer (RuntimeError) ; sa doublure est un point ouvert de la note.
-    options, _ = get_options(["--no-web-widgets", "--new-instance"])
+    options, _ = get_options(["--new-instance"])
     app = create_application()  # avant l'énumération des plugins, qui les importe (qtawesome veut l'application)
     application(polices=os.path.join(ICI, "polices"), defaut=("DejaVu Sans", 10))  # polices de la page ; sur le bureau,
     etape(f"{type(app).__name__}")  # ne fait que garder l'application
