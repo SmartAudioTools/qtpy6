@@ -34,6 +34,7 @@ archives sont rendues absolues ici, un worker né d'un blob n'ayant pas d'adress
 import enum
 import importlib.resources
 import io
+import importlib.util
 import itertools
 import json
 import os
@@ -41,9 +42,11 @@ import tempfile
 import zipfile
 
 from qtpy6.QtCore import QObject, QTimer, Signal  # QtCore en cours de chargement : il importe ce module pour QProcess
+from qtpy6.web.preambule import _vers_python
 
 REGLAGES = {}  # configurer() : indexURL, roues, filtre
 _URL_WORKER = None
+_FICHIERS_WORKER = ("preambule.py", "zmq_web.py", "threading_web.py", "psutil_web.py")  # de qtpy6/web, ce que le préambule du worker importe
 _RESERVE = None  # prechauffer() : (worker, indexURL) — un worker neuf dont le Pyodide charge, consommé par le prochain start()
 
 
@@ -230,7 +233,7 @@ class ProcessusWeb(QObject):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.worker, self.dossier_travail = None, None
+        self.worker, self.dossier_travail, self.environnement = None, None, {}
         self.tampons, self.fusion = {"sortie": b"", "sortie_erreur": b""}, False
 
     def setProcessChannelMode(self, mode):
@@ -239,6 +242,12 @@ class ProcessusWeb(QObject):
     def setWorkingDirectory(self, dossier):
         self.dossier_travail = dossier
 
+    def setProcessEnvironment(self, env: "dict[str, str] | QProcessEnvironment") -> None:
+        """L'environnement du programme dans le worker (``os.environ``) : un dict, ou un ``QProcessEnvironment``."""
+        if not isinstance(env, dict):
+            env = dict(ligne.split("=", 1) for ligne in env.toStringList())
+        self.environnement = env
+
     def start(self, programme="", arguments=(), *_):
         global _RESERVE
         import js  # noqa: PLC0415
@@ -246,7 +255,10 @@ class ProcessusWeb(QObject):
 
         cible, argv = _commande(arguments)
         cwd = os.path.abspath(self.dossier_travail or os.getcwd())
-        dossier = os.path.dirname(os.path.abspath(cible)) if argv[0] != "-m" else cwd
+        dossier = a_zipper = os.path.dirname(os.path.abspath(cible))
+        if argv[0] == "-m":
+            dossier = a_zipper = _source_module(cible, cwd)
+        web = os.path.dirname(os.path.abspath(__file__))
         indexURL = _index_url()
         if _RESERVE is not None and _RESERVE[1] == indexURL:  # le worker préchauffé : son Pyodide charge depuis prechauffer()
             self.worker, _RESERVE = _RESERVE[0], None
@@ -254,15 +266,21 @@ class ProcessusWeb(QObject):
             self.worker = js.Worker.new(_url_worker(), type="module")
         self._recepteur = create_proxy(self._recevoir)
         self.worker.onmessage = self._recepteur
-        zip_ = to_js(_zipper([dossier, cwd, tempfile.gettempdir()], REGLAGES.get("filtre")))
+        zip_ = to_js(_zipper([a_zipper, cwd, tempfile.gettempdir()], REGLAGES.get("filtre"),
+                             [os.path.join(web, f) for f in _FICHIERS_WORKER]))
         self.worker.postMessage(_objet({"lancer": {
-            "indexURL": indexURL, "zip": zip_, "roues": _roues(),
+            "indexURL": indexURL, "zip": zip_, "roues": _roues(), "env": self.environnement, "web": web,
             "dossier": dossier, "argv": argv, "cwd": cwd}}), [zip_.buffer])
 
     def write(self, octets):
         if self.worker is not None:
             self.worker.postMessage(_objet({"entree": bytes(octets).decode("utf-8")}))
         return len(octets)
+
+    def _poster_zmq(self, message: dict) -> None:
+        """Un message de ``zmq_web`` pour le noyau qui tourne dans ce worker."""
+        if self.worker is not None:
+            self.worker.postMessage(_objet({"zmq": message}))
 
     def closeWriteChannel(self):
         if self.worker is not None:
@@ -290,6 +308,11 @@ class ProcessusWeb(QObject):
 
     def _recevoir(self, evenement):
         m = evenement.data.to_py()
+        if "zmq" in m:  # le noyau parle à la page : ``recevoir`` apprend d'où (ce processus) à qui répondre
+            from . import zmq_web  # noqa: PLC0415
+
+            zmq_web.recevoir(self, _vers_python(m["zmq"]))
+            return
         for canal in ("sortie", "sortie_erreur"):
             if m.get(canal):  # le décodeur au fil de l'eau rend "" sur un caractère coupé
                 self._arrive(canal, m[canal])
@@ -311,14 +334,16 @@ class ProcessusWeb(QObject):
         self.kill()  # le worker ne servira plus : le prochain ``start`` en relance un
 
 
-def _commande(arguments):
+def _commande(arguments) -> "tuple[str, list[str]]":
     """``(chemin du script ou nom du module, argv)`` d'une ligne de commande Python : les options d'une lettre sans
-    argument (``-u``, ``-B``…) sont sans objet dans le worker ; ``-m module`` donne ``argv[0] == "-m"``."""
+    argument (``-u``, ``-B``…) et ``-X``/``-W`` (avec leur valeur) sont sans objet dans le worker ; ``-m module`` donne ``argv[0] == "-m"``."""
     args = list(arguments)
     while args and args[0].startswith("-") and args[0] != "-m":
-        if args[0] in ("-c", "-X", "-W"):
+        if args[0] == "-c":
             raise ValueError(f"ProcessusWeb : l'option {args[0]} n'est pas prise en charge")
-        args.pop(0)
+        option = args.pop(0)
+        if option in ("-X", "-W") and args:  # ``-X utf8``, ``-W error`` : l'argument est le suivant (``-Xutf8`` : collé)
+            args.pop(0)
     if not args:
         raise ValueError("ProcessusWeb : ni script ni -m module à lancer")
     if args[0] == "-m":
@@ -326,11 +351,27 @@ def _commande(arguments):
     return args[0], [os.path.abspath(args[0]), *args[1:]]
 
 
-def _zipper(dossiers, filtre=None):
+def _source_module(nom: str, cwd: str) -> str:
+    """L'entrée du ``sys.path`` de la page d'où ``-m nom`` s'importe (``find_spec``) : zippée entière (``configurer(filtre=…)``
+    l'allège) et mise dans le ``sys.path`` du worker, comme un sous-processus du bureau voit tout son ``site-packages`` — le
+    paquet seul ne suffit pas, un noyau importe ses voisins (ipykernel, IPython…). Introuvable : le dossier de travail,
+    comme un ``-m`` d'un module local."""
+    try:
+        spec = importlib.util.find_spec(nom.partition(".")[0])
+    except (ImportError, ValueError):
+        spec = None
+    if spec is not None and spec.submodule_search_locations:
+        return os.path.dirname(list(spec.submodule_search_locations)[0])
+    if spec is not None and spec.origin and os.path.isfile(spec.origin):
+        return os.path.dirname(spec.origin)
+    return cwd
+
+
+def _zipper(dossiers, filtre=None, isoles=()) -> bytes:
     """Les ``dossiers``, zippés sans compression avec leurs chemins depuis la racine (le worker les dépaquette au même
     endroit) ; un fichier de deux dossiers imbriqués n'y est qu'une fois. Les dossiers aussi ont leur entrée : un dossier
     vide que le parent a créé pour l'enfant (``tempfile.mkdtemp``) doit exister de l'autre côté. ``filtre`` ne s'applique
-    qu'aux fichiers : il écarte ceux pour lesquels il rend faux."""
+    qu'aux fichiers : il écarte ceux pour lesquels il rend faux. ``isoles`` : des fichiers isolés, ajoutés tels quels."""
     tampon, vus = io.BytesIO(), set()
     with zipfile.ZipFile(tampon, "w", zipfile.ZIP_STORED) as z:
         for dossier in dossiers:
@@ -341,6 +382,10 @@ def _zipper(dossiers, filtre=None):
                     if chemin not in vus:
                         vus.add(chemin)
                         z.write(chemin, os.path.relpath(chemin, "/"))
+        for chemin in map(os.fspath, isoles):
+            if chemin not in vus:
+                vus.add(chemin)
+                z.write(chemin, os.path.relpath(chemin, "/"))
     return tampon.getvalue()
 
 

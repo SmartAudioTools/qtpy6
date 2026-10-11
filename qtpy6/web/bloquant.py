@@ -121,7 +121,19 @@ _pompe_tourne = False  # la pompe est dans processEvents (et Qt y a peut-être s
 
 
 def _peut_suspendre():
-    return _pyodide_peut() and (_actif or (_suspendus == 0 and not _pompe_tourne))
+    return _pyodide_peut() and (_actif or (_suspendus == 0 and not _pompe_tourne) or _en_tache())
+
+
+def _en_tache():
+    """Le code en cours est le pas d'une tâche asyncio : une entrée promettante de la WebLoop, même si une autre pile
+    attend (Pyodide sort de la tâche suspendue et y rentre à la reprise, ``stack_switching/pystate.c`` : un slot appelé
+    par Qt pendant une suspension n'y voit donc aucune tâche)."""
+    import asyncio  # noqa: PLC0415
+
+    try:
+        return asyncio.current_task() is not None
+    except RuntimeError:  # pas de boucle
+        return False
 
 
 def _suspendre(brancher):

@@ -1,7 +1,8 @@
 """La page dans Firefox (ou Chromium) sans interface, pour vérifier une application sans écran ni clic : sert un dossier en local,
 ouvre la page, attend qu'elle pose ``window.etat`` (l'état attendu, ou "erreur"), imprime son ``window.journal``, capture
 l'écran, puis écrit chaque image de ``window.captures`` (``{suffixe: png_en_base64}`` : le ``grab()`` d'une fenêtre
-Qt, par exemple) en ``<capture>_<suffixe>.png``. Le code de retour dit si l'état attendu a été atteint.
+Qt, par exemple) en ``<capture>_<suffixe>.png``. Le code de retour dit si l'état attendu a été atteint. La console de la
+page s'écrit au fil de l'eau dans ``<capture>.console.log`` : le seul relevé d'une page qui gèle.
 
     python -m qtpy6.web.sonde page.html?param=x capture.png [--racine DIR] [--delai 120] [--etat fini]
                              [--taille 1000x900] [--zoom 2] [--tactile] [--visible] [--chromium]
@@ -208,8 +209,12 @@ def repeint(navigateur):
 
 def firefox(o, largeur, hauteur, url):
     from selenium import webdriver  # noqa: PLC0415 - la dépendance optionnelle [sonde]
+    from selenium.webdriver.firefox.service import Service  # noqa: PLC0415
 
     options = webdriver.FirefoxOptions()
+    # la console aussi dans <capture>.console.log, au fil de l'eau : le seul relevé d'une page qui gèle (le journal ne se
+    # lit qu'à la fin, par execute_script, qu'une page gelée ne sert plus)
+    options.set_preference("devtools.console.stdout.content", True)
     if not o.visible:
         options.add_argument("--headless")
     options.add_argument(f"--width={largeur}")
@@ -220,7 +225,7 @@ def firefox(o, largeur, hauteur, url):
         for pref in ("ui.primaryPointerCapabilities", "ui.allPointerCapabilities"):
             options.set_preference(pref, 1)  # 1 = coarse, sans hover : ce que répondent les media queries pointer/any-pointer
         options.set_preference("dom.w3c_touch_events.enabled", 1)
-    navigateur = webdriver.Firefox(options=options)
+    navigateur = webdriver.Firefox(options=options, service=Service(log_output=os.path.splitext(o.capture)[0] + ".console.log"))
     navigateur.get(url)
     return navigateur
 

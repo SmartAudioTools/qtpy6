@@ -3,6 +3,7 @@ feuille tactile ne remplace rien, les dispositions se replient. Les doublures du
 ``sys.platform`` dans un interpréteur neuf ; ce que le navigateur fait vraiment se mesure avec ``python -m qtpy6.web.sonde``
 sur ``exemple/`` (web.md)."""
 
+import asyncio
 import io
 import json
 import os
@@ -1438,3 +1439,22 @@ def test_appui_long(app):
     assert len(prises) == 2  # sans ACTIF (natif), le doigt est une souris
 
 
+
+
+def test_tache_asyncio_peut_suspendre_pendant_une_autre_attente():
+    """Une tâche de la boucle asyncio est une entrée promettante, même pendant qu'une autre pile est suspendue (Pyodide
+    sort de la tâche suspendue et y rentre à la reprise : ``asyncio.current_task()`` n'y vaut que pendant le pas d'une
+    tâche réelle). jupyter_client (``wait_for_ready`` par ``run_sync`` de jupyter_core) y fait des ``poll`` zmq
+    bloquants pendant que le script attend son résultat : refusés, ils tournaient à vide et gelaient la page (jalon 8a).
+    Hors tâche, la règle est inchangée : un slot appelé par Qt pendant une suspension ne peut pas suspendre."""
+    from qtpy6.web import bloquant
+    peut, suspendus = bloquant._pyodide_peut, bloquant._suspendus
+    bloquant._pyodide_peut, bloquant._suspendus = (lambda: True), 1
+    try:
+        assert not bloquant._peut_suspendre()
+
+        async def tache():
+            return bloquant._peut_suspendre()
+        assert asyncio.run(tache())
+    finally:
+        bloquant._pyodide_peut, bloquant._suspendus = peut, suspendus

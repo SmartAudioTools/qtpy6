@@ -4,9 +4,12 @@
 //   reçus : {init: {indexURL, archives: [{url, dossier}], module, cwd}}, {appel: {id, fonction, args}}
 //   émis :  {pret}, {id, sortie} (ce que l'appel imprime, au fil de l'eau), {id, retour}, {id, erreur}, {erreur} (init)
 // Ou bien un processus (ProcessusWeb) : un script lancé en __main__, qui lit son stdin comme sur le bureau.
-//   reçus : {prechauffer: {indexURL, roues}} (charger Pyodide dès maintenant, sans script : le {lancer} qui suivra
+//   reçus : {zmq: message} (zmq_web : un noyau Jupyter dans ce worker parle à la page ; gardé jusqu'à ce que le préambule
+//           ait appelé zmq_pret), émis : {zmq: message} de même,
+//           {prechauffer: {indexURL, roues}} (charger Pyodide dès maintenant, sans script : le {lancer} qui suivra
 //           l'épargne ; roues : [url de .whl] installées ensuite, que le {lancer} ne chargera plus ; répétable),
-//           {lancer: {indexURL, zip, dossier, argv, cwd, roues}}, {entree: texte} (stdin), {entree: null} (fin de fichier) ;
+//           {lancer: {indexURL, zip, dossier, argv, cwd, roues, env, web}} (env : os.environ du programme ; web : le dossier
+//           qtpy6/web dépaqueté, d'où le préambule), {entree: texte} (stdin), {entree: null} (fin de fichier) ;
 //           le zip porte ses chemins depuis la racine du système de fichiers, où il est dépaqueté ; roues :
 //           {module: url de .whl}, chacune chargée au premier import de son module (rien sinon : ni octets ni délai)
 //   émis :  {sortie} (stdout), {sortie_erreur} (stderr), {fin: code}, {erreur} (Pyodide injoignable, JSPI absent)
@@ -14,6 +17,8 @@ let py, module, appeler, courant = 0, file = Promise.resolve();  // courant : le
 let prechauffe = null;  // {indexURL, py: Promise, roues: Set} : le Pyodide lancé par {prechauffer}, qu'un {lancer} du même
                         // indexURL reprend, et les URL des roues qui y sont installées
 const decodeur = new TextDecoder();
+const zmq_tampon = [];  // {zmq} reçus avant que le préambule ait installé zmq_web
+self.zmq_pret = f => { self.recevoir_page = f; zmq_tampon.splice(0).forEach(f); };
 
 function telecharger(url) {
   return fetch(url).then(r => { if (!r.ok) throw new Error(`${url} : ${r.status}`); return r.arrayBuffer(); });
@@ -57,7 +62,7 @@ function charger(indexURL) {
   return import(indexURL + "pyodide.mjs").then(({ loadPyodide }) => loadPyodide({ indexURL }));
 }
 
-async function lancer({ indexURL, zip, dossier, argv, cwd, roues }) {
+async function lancer({ indexURL, zip, dossier, argv, cwd, roues, env, web }) {
   const reserve = prechauffe?.indexURL === indexURL ? prechauffe : null;
   py = await (reserve ? reserve.py : charger(indexURL));  // un échec du préchauffage ressort ici, en {erreur}
   prechauffe = null;
@@ -66,9 +71,9 @@ async function lancer({ indexURL, zip, dossier, argv, cwd, roues }) {
   py.setStdout(canal("sortie")); py.setStderr(canal("sortie_erreur"));
   py.unpackArchive(zip, "zip", { extractDir: "/" });
   self.chargerRoue = url => py.loadPackage(url, { messageCallback: () => {} });  // sans « Loading… » dans le stdout capturé
-  py.globals.set("_lancement", py.toPy({ argv, cwd, dossier, roues: roues || {} }));
+  py.globals.set("_lancement", py.toPy({ argv, cwd, dossier, roues: roues || {}, env: env || {}, web }));
   const code = await py.runPythonAsync(`
-import importlib, io, js, os, runpy, sys, traceback
+import atexit, importlib, importlib.util, io, js, os, runpy, sys, traceback
 from pyodide.ffi import can_run_sync, run_sync
 
 class _Entree(io.RawIOBase):  # stdin : chaque lecture attend la prochaine écriture de la page (JSPI)
@@ -96,7 +101,7 @@ class _Roues:  # une roue chargée au premier import de son module : find_spec t
             importlib.invalidate_caches()
         return None  # PathFinder trouve alors le module installé par la roue
 
-def _executer(argv, cwd, dossier, roues):
+def _executer(argv, cwd, dossier, roues, env, web):
     if not can_run_sync():
         raise RuntimeError("ce navigateur ne sait pas suspendre Python (JSPI) : pas de sous-processus")
     if roues:
@@ -105,10 +110,15 @@ def _executer(argv, cwd, dossier, roues):
     # voir l'ancien objet ramassé, ce qui fermerait le tampon partagé (console_enfant.py de SmartTeacher)
     sys.stdin = sys.__stdin__ = io.TextIOWrapper(io.BufferedReader(_Entree()), encoding="utf-8")
     sys.stdout.reconfigure(line_buffering=True); sys.stderr.reconfigure(line_buffering=True)
+    os.environ.update(env)
     os.makedirs(cwd, exist_ok=True); os.chdir(cwd)
     try:
+        # zmq et threading de qtpy6 (un noyau Jupyter y parle à la page), sans le qtpy6 complet : voir preambule.py
+        spec = importlib.util.spec_from_file_location("_qtpy6_preambule", web + "/preambule.py")
+        preambule = importlib.util.module_from_spec(spec); spec.loader.exec_module(preambule)
+        preambule.installer(web)
         if argv[0] == "-m":
-            sys.path.insert(0, cwd); sys.argv = argv[1:]
+            sys.path[:0] = [cwd, dossier]; sys.argv = argv[1:]
             runpy.run_module(argv[1], run_name="__main__", alter_sys=True)
         else:
             sys.path.insert(0, dossier); sys.argv = argv
@@ -121,6 +131,7 @@ def _executer(argv, cwd, dossier, roues):
             print(e.code, file=sys.stderr); code = 1
     except BaseException:
         traceback.print_exc(); code = 1
+    atexit._run_exitfuncs()  # la fermeture des sockets du noyau : un interpréteur qui finit les lance, Pyodide non
     sys.stdout.flush(); sys.stderr.flush()
     return code
 
@@ -131,6 +142,7 @@ _executer(**_lancement)
 
 onmessage = e => {
   const m = e.data;
+  if (m.zmq) { self.recevoir_page ? self.recevoir_page(m.zmq) : zmq_tampon.push(m.zmq); return; }
   if (m.prechauffer) {  // le rejet est gardé pour le {lancer} qui consommera (le catch vide évite l'« unhandled rejection »)
     const { indexURL, roues = [] } = m.prechauffer;
     if (!prechauffe) prechauffe = { indexURL, py: charger(indexURL), roues: new Set() };

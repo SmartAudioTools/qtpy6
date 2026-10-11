@@ -8,14 +8,21 @@ programme lève ``FileNotFoundError``, comme sur un bureau où il n'est pas inst
 ``stdout``/``stderr`` (``PIPE``, ``DEVNULL``, ``STDOUT``, un fichier ouvert), ``text``/``encoding``, ``timeout``,
 ``check`` et ``cwd`` sont tenus ; ``shell``, ``env`` et les autres sont ignorés.
 
+``Popen`` aussi, pour un programme qui parle à son enfant par ses tubes (jupyter_client lance ainsi le noyau de Spyder) :
+``stdin``, ``stdout``, ``stderr``, ``poll``, ``wait``, ``kill``… sur le même worker. Son ``pid`` est factice, déclaré
+vivant à ``psutil_web`` (ipykernel teste que son parent existe).
+
 Comme ``exec()``, l'attente n'est possible que dans une entrée suspendable (le script principal, un slot) : ailleurs
 (méthode virtuelle appelée par Qt), ``RuntimeError``."""
 
+import itertools
 import os
 import subprocess
 import sys
 
 _PYTHONS = ("python", "python3", f"python3.{sys.version_info.minor}")
+_fabrique = None  # () -> ProcessusWeb : les tests de Popen y mettent un faux processus
+_pids = itertools.count(40000)  # les pid factices de Popen
 
 
 def run(args, *, input=None, capture_output=False, stdout=None, stderr=None, timeout=None, check=False,  # noqa: A002
@@ -75,5 +82,170 @@ def call(*args, **kwargs):
     return run(*args, **kwargs).returncode
 
 
+class _Flux:
+    """``stdout`` ou ``stderr`` d'un ``Popen`` : ce que le worker a imprimé, lu comme un fichier binaire. Une lecture
+    suspend (JSPI) tant qu'il n'y a rien et que le processus n'est pas fini."""
+
+    def __init__(self) -> None:
+        self.tampon, self.fini, self.closed = bytearray(), False, False
+
+    def _prendre(self, n: int) -> bytes:
+        n = len(self.tampon) if n is None or n < 0 else n
+        octets, self.tampon = bytes(self.tampon[:n]), self.tampon[n:]
+        return octets
+
+    def read1(self, n: int = -1) -> bytes:
+        from . import fils  # noqa: PLC0415
+
+        fils._attendre(lambda: self.tampon or self.fini)
+        return self._prendre(n)
+
+    def read(self, n: int = -1) -> bytes:
+        from . import fils  # noqa: PLC0415
+
+        fils._attendre(lambda: self.fini or 0 <= n <= len(self.tampon))
+        return self._prendre(n)
+
+    def readline(self) -> bytes:
+        from . import fils  # noqa: PLC0415
+
+        fils._attendre(lambda: self.fini or b"\n" in self.tampon)
+        return self._prendre(self.tampon.find(b"\n") + 1 or None)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _Entree:
+    """``stdin`` d'un ``Popen`` : l'entrée standard du worker."""
+
+    def __init__(self, processus) -> None:
+        self._p, self.closed = processus, False
+
+    def write(self, octets: bytes) -> int:
+        return self._p.write(octets)
+
+    def flush(self) -> None:
+        pass
+
+    def close(self) -> None:
+        if not self.closed:
+            self.closed = True
+            self._p.closeWriteChannel()
+
+
+class Popen:
+    """``subprocess.Popen`` d'un programme Python, dans un worker (``ProcessusWeb``). Tout autre programme :
+    ``FileNotFoundError``. ``start_new_session``, ``preexec_fn``, ``shell``… sont sans objet et ignorés."""
+
+    def __init__(self, args, bufsize=-1, executable=None, stdin=None, stdout=None, stderr=None,  # noqa: ARG002
+                 *_, cwd=None, env=None, **__) -> None:
+        from .travailleur import ProcessusWeb  # noqa: PLC0415
+
+        commande = [os.fspath(a) for a in ([args] if isinstance(args, (str, bytes, os.PathLike)) else args)]
+        if commande[0] != sys.executable and os.path.basename(commande[0]) not in _PYTHONS:
+            raise FileNotFoundError(2, "dans le navigateur, seul Python se lance", commande[0])
+        self.args, self.returncode, self._signale = args, None, None
+        self.pid = next(_pids)
+        try:
+            from . import psutil_web  # noqa: PLC0415
+        except ImportError:
+            psutil_web = None
+        self._psutil = psutil_web
+        if psutil_web is not None:
+            psutil_web.inscrire(self.pid)
+        self._sorties = (stdout, stderr)
+        self.stdout = _Flux() if stdout == subprocess.PIPE else None
+        self.stderr = _Flux() if stderr == subprocess.PIPE else None
+        self._p = p = (_fabrique or ProcessusWeb)()
+        if stderr == subprocess.STDOUT:
+            p.setProcessChannelMode(ProcessusWeb.ProcessChannelMode.MergedChannels)
+        if cwd is not None:
+            p.setWorkingDirectory(os.fspath(cwd))
+        if env is not None:
+            p.setProcessEnvironment(env)
+        p.readyReadStandardOutput.connect(lambda: self._arrive(p.readAllStandardOutput(), self.stdout, stdout))
+        p.readyReadStandardError.connect(lambda: self._arrive(p.readAllStandardError(), self.stderr, stderr))
+        p.finished.connect(self._fini)
+        p.start(commande[0], commande[1:])
+        self.stdin = _Entree(p) if stdin == subprocess.PIPE else None
+
+    def _arrive(self, octets: bytes, flux: "_Flux | None", voulu) -> None:
+        if flux is not None:
+            flux.tampon += octets
+        elif hasattr(voulu, "write"):  # un fichier : sa part ; sinon (DEVNULL, hérité) la sortie est jetée
+            voulu.write(octets)
+
+    def _fini(self, code: int) -> None:
+        self._arrive(self._p.readAllStandardOutput(), self.stdout, self._sorties[0])
+        self._arrive(self._p.readAllStandardError(), self.stderr, self._sorties[1])
+        self.returncode = code if self._signale is None else -self._signale
+        for flux in (self.stdout, self.stderr):
+            if flux is not None:
+                flux.fini = True
+        if self._psutil is not None:
+            self._psutil.retirer(self.pid)
+
+    def poll(self) -> "int | None":
+        return self.returncode
+
+    def wait(self, timeout: "float | None" = None) -> int:
+        from . import fils  # noqa: PLC0415
+
+        if not fils._attendre(lambda: self.returncode is not None, -1 if timeout is None else int(timeout * 1000)):
+            raise subprocess.TimeoutExpired(self.args, timeout)
+        return self.returncode
+
+    def send_signal(self, sig: int) -> None:
+        if sig and self.returncode is None:  # le signal 0 ne fait que tester l'existence
+            self._signale = int(sig)
+            self._p.kill()
+
+    def terminate(self) -> None:
+        self.send_signal(15)
+
+    def kill(self) -> None:
+        self.send_signal(9)
+
+    def __enter__(self) -> "Popen":
+        return self
+
+    def __exit__(self, *_) -> None:
+        from . import fils  # noqa: PLC0415
+
+        for flux in (self.stdout, self.stderr, self.stdin):
+            if flux is not None:
+                flux.close()
+        fils._attendre(lambda: self.returncode is not None)
+
+
 def doubler():
-    subprocess.run, subprocess.call = run, call
+    subprocess.run, subprocess.call, subprocess.Popen = run, call, Popen
+
+
+def doubler_zmq() -> None:
+    """Le canal entre la page et le noyau d'un worker : ``zmq`` et ``threading`` de qtpy6 (crochets de la page : attente
+    suspendue par JSPI, tâche suivante de ``bloquant``, message au worker destinataire), ``psutil`` et ``socket`` (choix d'un port libre)."""
+    import asyncio  # noqa: PLC0415
+
+    from . import bloquant, fils, socket_web, threading_web, zmq_web  # noqa: PLC0415
+
+    def plus_tard(fonction, delai_ms=0) -> None:
+        if delai_ms:
+            asyncio.get_event_loop().call_later(delai_ms / 1000, bloquant._plus_tard, fonction)
+        else:
+            bloquant._plus_tard(fonction)
+
+    def poster(destination, message) -> None:
+        if destination is not None:  # None : la page elle-même
+            destination._poster_zmq(message)
+
+    threading_web.installer(fils._attendre, plus_tard)  # _attendre(condition, None) attend sans échéance
+    threading_web.partager_boucle(asyncio.get_event_loop())  # les boucles que jupyter_client crée par fil
+    zmq_web.installer(fils._attendre, plus_tard, poster)
+    socket_web.installer()  # le port libre que jupyter_client choisit pour chaque canal
+    try:
+        from . import psutil_web  # noqa: PLC0415
+    except ImportError:
+        return
+    psutil_web.installer()

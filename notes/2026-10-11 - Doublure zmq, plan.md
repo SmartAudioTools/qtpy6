@@ -1,0 +1,186 @@
+# Doublure `zmq` : plan (11/10/2026, jalon 8a atteint le soir même)
+
+Demande de l'utilisateur : « je voulais le code source de SmartPythonEditor agnostique et permetre à qtpy6 de l'executer
+aussi bien en natif que sur le web » ; puis « oui, passe sur Fable pour zmq ». Plan conçu par un agent Fable (lecture
+seule, 58 relevés dans jupyter_client 8.9.1, ipykernel 6.31.0, qtconsole 5.7.2, spyder_kernels, Spyder). Niveau de
+preuve : **lu dans les sources, rien mesuré**. Suite de `2026-10-09 - Portage de SmartPythonEditor…`, jalon 7.
+
+## Recommandation
+
+Le vrai noyau (`spyder_kernels.console`, ipykernel entier) dans un **Web Worker** derrière `ProcessusWeb`, lancé par une
+doublure de **`subprocess.Popen`** ; côté page ET côté Worker, le **même module doublure `zmq`** (API pyzmq, transport
+`postMessage` par numéro de port) ; en dessous, une doublure coopérative de **`threading.Thread`** (obligatoire : c'est
+le point ouvert du jalon 7). jupyter_client, qtconsole, spyder_kernels, Spyder : zéro ligne touchée.
+
+## Q1. Où tourne le noyau : Worker ; InProcessKernel écarté
+
+- Spyder suppose un processus à tuer et relancer (`utils/manager.py:90-123`), un battement de cœur (`kernel_handler.py`
+  `hb_channel`, `time_to_dead=25`), l'interruption par message comm sur control (`widgets/shell.py:557`), un noyau par
+  console, stdout/stderr lus par deux `StdThread(QThread)` (`kernel_handler.py:92-117,323-333`).
+- Worker : isolement (une boucle infinie ne gèle pas l'interface, jalon 3), `kill()` = `worker.terminate()`, relance =
+  nouveau Worker (0,25-0,5 s à froid, 20 ms préchauffé). Coût : un second Pyodide (~100 Mio supposé) et les roues
+  ipykernel/IPython/tornado/spyder_kernels/jupyter_client à charger dans le Worker.
+- **Écarté, InProcessKernel** : pas d'isolement (boucle infinie = page morte), un seul noyau, `restart`/`kill` vides
+  (`inprocess/manager.py:44-82`), et il ne passe pas par `SpyderKernelManager`/`QtKernelClient` : il faudrait substituer
+  des classes de Spyder, contraire à la règle.
+- **Interruption** : sans `SharedArrayBuffer` (`setInterruptBuffer`), le Worker occupé ne lit pas le message. Donc
+  interrompre = tuer + relancer (perte de l'espace de noms), ce que Spyder sait faire quand le cœur s'arrête. Supposé,
+  à vérifier au jalon 8b ; limite à documenter.
+
+## Q2. Niveau : le module `zmq` (API pyzmq)
+
+- **Écarté, plus haut** (doubler QtKernelClient/QtKernelManager) : pas des API natives, Spyder les sous-classe et les
+  étend ; on perdrait restarter, heartbeat, comms. **Écartée, la console web maison** : perd l'explorateur de variables.
+- Surface pyzmq exercée (relevé) : types REQ/DEALER/SUB/ROUTER/PUB/STREAM/PULL/PUSH ; `socket`, `linger`, `identity`,
+  `connect`/`bind`, `bind_to_random_port`, `getsockopt(LAST_ENDPOINT)`, `setsockopt(SUBSCRIBE)`, `send_multipart`/
+  `recv_multipart(NOBLOCK, copy=)`, `ZMQError(EAGAIN)`, `MessageTracker`, `Poller`, `poll`, `select`, `device(QUEUE)`,
+  `ZMQStream(socket, ioloop).on_recv(cb, copy=False)`/`flush`/`close`, `zmq.Message` (`.bytes`, `.buffer`),
+  `zmq.asyncio` (classes vides suffisent), `zmq.has`, `curve_keypair`, `zmq.error.ContextTerminated`,
+  `zmq.utils.garbage.gc`. qtconsole et Spyder : aucun zmq direct.
+- Conception : `bind` inscrit le port dans un registre de l'interpréteur ; `connect` livre localement si le port est lié
+  ici (boucle locale de spyder_kernels, pipes IOPub), sinon par `postMessage` vers le Worker qui le détient. Files par
+  socket ; `recv` bloquant et `poll` → `_attendre` (JSPI). `ZMQStream.on_recv` appelle le rappel via `_plus_tard`, sans
+  `io_loop.add_handler` (WebLoop lève sur `add_reader`). Heartbeat : la page peut répondre elle-même tant que le Worker
+  vit (fidèle : le vrai bat dans un fil séparé).
+
+## Q3. Lancement : doublure `subprocess.Popen` → `ProcessusWeb`
+
+- Chemin : `kernel_handler.py:413` → `manager.py` (`run_sync`) → `local_provisioner.py:249` → `launcher.py:158`
+  `Popen(cmd, **kwargs)`. QProcess n'est pas sur ce chemin.
+- `Popen` : pid factice, `stdout/stderr` dont `read1()` suspend jusqu'au prochain `readyRead…` et rend `b""` à `finished`,
+  `poll/wait/returncode/send_signal/terminate/kill`. `ProcessusWeb` doit tolérer `-Xfrozen_modules=off`. Fichier de
+  connexion : `JUPYTER_RUNTIME_DIR` = dossier temporaire de la page (déjà zippé vers le Worker) ; Popen lit ses 5 ports et
+  les inscrit dans le registre. La doublure psutil de `essais/spyder/preparer.py` doit lever `NoSuchProcess`.
+- Préambule du Worker (`js/travailleur.js`) : poser les doublures zmq et threading, et rester vivant tant que des
+  sockets sont liés (`IOLoop.start()` est un no-op sur WebLoop).
+
+## Q4. Les fils : `threading.Thread` coopératif, obligatoire
+
+- Côté page, `run_sync` de jupyter_core part dans `_TaskRunner` → `threading.Thread` (la WebLoop tourne dès
+  `__init__`) ; `IOLoopThread`, `HBChannel`, `Lock`. Côté Worker : `Heartbeat`, `IOPubThread`, `ControlThread`,
+  `SpyderParentPoller`.
+- `fils.doubler_threading()` : `start()` → `run()` à la tâche suivante, `join`/`Event.wait`/`Condition.wait` →
+  `_attendre`. Un `run()` qui boucle sans attente gèle la page (`zmq.device` est traité par la doublure zmq ; le serveur
+  d'instance unique reste hors champ, `--new-instance`).
+- Incertain : second WebLoop par `asyncio.new_event_loop()`, `run_until_complete` non suspendant sans
+  `enableRunUntilComplete`. À mesurer au 8b.
+
+## Fichiers
+
+À créer : `qtpy6/web/zmq_web.py` (module zmq complet + registre, posé par un finder quand pyzmq manque). À modifier :
+`travailleur.py`, `js/travailleur.js`, `sous_processus.py`, `fils.py`, `__init__.py` (`application`) ; essais :
+`essais/spyder/preparer.py` (retirer le faux zmq, corriger psutil), `essais/spyder/jalon8*.py`.
+
+## Jalons (même script bureau/page, verdict imprimé, page sondée)
+
+1. **8a, preuve de voie** : `SpyderKernelManager.start_kernel`, `client.execute("1+1")` → `execute_result` `'2'`,
+   `kernel_info_reply`, un `stream` stdout ; temps au premier message, tas page et Worker ; `shutdown_kernel`.
+2. **8b, ce que Spyder suppose** : heartbeat pendant `while True: pass`, interruption (tuer + relancer), `input()`,
+   deux noyaux, `KernelComm.open_comm`.
+3. **8c, la console** : la sonde tape `1+1`, `Out[1]: 2`, `a = 3` visible dans l'explorateur, redémarrage du noyau.
+
+## Risques
+
+Mémoire et chargement du Worker (IPython + ipykernel + tornado + spyder_kernels, psutil à doubler aussi) ; `copy=False`
+(`Message.bytes`) ; `TTYOutStream` de spyder_kernels non lu ; WebLoop à deux instances ; interruption = redémarrage.
+
+## Compléments du Superviseur (11/10/2026, 19 h 10), avant tout code
+
+- **Un zmq direct dans Spyder** : `plugins/completion/providers/languageserver/client.py` (fournisseur LSP) crée un
+  `zmq.Context`, des sockets `PAIR` (`bind_to_random_port`) et lit `zmq.FD` dans un `QSocketNotifier` (vérifié par
+  lecture dans le fork, l. 25-235). À trancher avant le jalon 8a : soit le fournisseur LSP reste hors champ dans la page
+  (le noter, et vérifier que le jalon 7 tourne sans lui), soit la doublure expose un FD factice et un notifieur.
+- **Ordre** : le correctif de `fils.py` (`import js` inconditionnel, défaut de 1475f75) passe d'abord, dans un commit à
+  part, puisque le plan touche `fils.py`. Ensuite, la première étape commitable est le jalon 8a seul (preuve de voie),
+  pas les trois jalons d'un coup.
+- La décision de lancer revient à l'utilisateur (quota semaine 65 % pour 42 % de semaine écoulée).
+- **Tranché par l'utilisateur, 19 h 14** : « je souhaite le couvrir ». Le fournisseur LSP est donc dans le champ :
+  `zmq.FD` factice et doublure de `QSocketNotifier` déclenchée à l'arrivée d'un message, serveur pylsp dans un Worker
+  comme le noyau. Écarté : le désactiver dans la page (fonction perdue). Il vient après la console (jalon 8d, à définir).
+
+## Jalon 8a, réalisation (11/10/2026, soir ; en cours)
+
+Demandes : « oui, vas-y, essaye d'aller le plus loin possible, tu peux utilise jusque 80% » ; « essaye de déléguer au
+maximum à des models moins gourmands en token » (pièces écrites par des sous-agents Sonnet sur brief, relues ici).
+
+- **`qtpy6/web/zmq_web.py`** (+ `tests/test_zmq_web.py`, 31 verts, 1 sauté) : l'API pyzmq relevée, transport par messages
+  `{"op": …}`. Défauts trouvés à la relecture et corrigés test d'abord (rouges vus) : `Poller` de `zmq.asyncio`,
+  `Socket.underlying`/`shadow`, `_socket_class`, `zmq.log.handlers` (importé par ipykernel). Limite connue : un `shadow`
+  d'une autre classe partage le `__dict__`, une attente asyncio sur l'ombre n'est pas réveillée (non exercé par
+  ipykernel 6.31).
+- **`qtpy6/web/threading_web.py`** : `threading` coopératif (Thread, Timer, verrous, Event, Condition, sémaphores,
+  Barrier, local) sur deux crochets `attendre`/`plus_tard` ; `installer()` remplace les noms dans le vrai module.
+- **`qtpy6/web/psutil_web.py`** (+ `tests/test_psutil_web.py`, 12 verts, rouges vus) : registre de pids vivants (le pid
+  courant, ceux qu'un Popen doublé inscrit, `JPY_PARENT_PID`), car `SpyderParentPoller` arrête le noyau si
+  `pid_exists(parent)` est faux. Surface tirée d'un relevé (ipykernel, spyder_kernels, jupyter_client, fork). Écartée :
+  l'ancienne doublure de `essais/spyder/preparer.py` (`pid_exists` toujours faux : le noyau se serait arrêté seul).
+- **Paquets du noyau** (relevé de `sys.modules` au démarrage de `spyder_kernels.console` sur le bureau) : manquaient au
+  site `ipykernel`, `comm`, `cloudpickle`, `matplotlib_inline` ; pyzmq et psutil sont doublés ; debugpy, orjson,
+  nest_asyncio optionnels (try/except), laissés dehors.
+- **`essais/spyder/jalon8a.py`** : chemin de Spyder lui-même (`KernelHandler.new_from_spec(SpyderKernelSpec())`), puis le
+  client bloquant du gestionnaire. **Bureau, mesuré : 6/6** — lancement 0,05 s, premier message 2 s après
+  `start_channels`, `kernel_info_reply` ok, stream `'bonjour\n'`, `execute_result` `'2'`, arrêt code 0 en 0,4 s.
+  Écarté : un `BlockingKernelClient` autonome sur le fichier de connexion — il juge la vie du noyau au battement de cœur,
+  dont le premier relevé précède le premier battement (« Kernel died before replying », mesuré) ; celui du gestionnaire
+  la juge sur `poll()`. `JUPYTER_RUNTIME_DIR` jetable, comme `SPYDER_CONFDIR`.
+- `preparer.py` : fausses doublures zmq et psutil retirées (elles auraient masqué celles de qtpy6, posées plus tard).
+
+## État au 11/10/2026, 21 h 50 (pause demandée par l'utilisateur, rien commité)
+
+Trois défauts trouvés et corrigés ce soir, chacun avec un test vu rouge puis vert. Suite complète : 218 passent, 3 sont ignorés. Le test des octets a été ajouté après ce dernier passage complet, et n'a tourné que dans `test_zmq_web` (vert).
+- **`ThreadPoolExecutor` absent de Pyodide** : `import IPython` échouait dans le Worker (`terminal/debugger.py`).
+  - Le code de `fils.doubler_futures` est déplacé dans `threading_web.doubler_futures(attendre, plus_tard)`, en pur Python.
+  - `fils` l'appelle avec ses propres crochets, et le Worker l'installe aussi, dans `preambule.installer`.
+  - Test : `test_futures_sur_fils_cooperatifs`.
+- **Gel de la page** : `wait_for_ready` tourne comme coroutine (`run_sync` de jupyter_core).
+  - Son `poll` zmq ne pouvait pas suspendre, parce que `bloquant` refuse dès qu'une autre pile est suspendue. La boucle tournait donc à vide pendant DELAI secondes, et la page ne recevait plus rien du Worker.
+  - Correctif : `bloquant._en_tache()`. Le pas d'une tâche asyncio est une entrée promettante, puisque Pyodide sort de la tâche suspendue et y rentre à la reprise (`stack_switching/pystate.c`).
+  - Test : `test_tache_asyncio_peut_suspendre_pendant_une_autre_attente` (test_web).
+- **`connect(b"tcp://…")`** (valeur de `getsockopt(LAST_ENDPOINT)`, utilisée par ipykernel dans `init_control`) : `_analyser` accepte maintenant les octets. Test : `test_adresses_en_octets`.
+
+Où en est jalon8a, d'après les mesures dans Firefox :
+- le noyau démarre et lie ses 6 ports ;
+- il reçoit les `kernel_info_request` (une par seconde) et y répond par `kernel_info_reply` (journal `--debug`) ;
+- mais `wait_for_ready` expire quand même.
+
+Étape suivante : savoir si la réponse shell et le message iopub, qu'exige `wait_for_ready`, arrivent à la page. Une trace `recu op port pair` a été posée sur `zmq_web.recevoir` dans jalon8a.py mais n'a pas encore tourné. Suspect n° 1 : le PUB du Worker ne connaît pas les abonnements du SUB de la page.
+
+Instrumentation PROVISOIRE dans `essais/spyder/jalon8a.py`, à retirer avant le commit :
+- `DELAI = 25` (à remettre à 120) ;
+- `--debug` sur argv ;
+- traces des boucles, de `recevoir` et du registre zmq.
+
+Sondes d'essai : `sonde_noyau.py` et `noyau_pas.py`.
+
+## Jalon 8a atteint (11/10/2026, 22 h 10) : 6/6 dans Firefox
+
+Reprise après la pause (« reprends »). Deux défauts de plus, chacun avec un test vu rouge puis vert ; suite complète : 221
+passent, 3 ignorés. Instrumentation provisoire retirée de `jalon8a.py` (DELAI remis à 120), sonde rejouée sur le code propre.
+- **Réponses du noyau livrées à la mauvaise socket** : `_connectees` était indexé par l'identité seule. Or jupyter_client donne
+  la MÊME identité (la `bsession` de la session) aux sockets shell, stdin et control d'un client : la dernière connectée
+  recevait tout, `get_msg` du shell restait vide. Trouvé par une trace sur `ZMQSocketChannel.get_msg` (identité toujours
+  `Empty`) et une sur `poster` (réponses adressées à l'autre). Correctif : clé `(port, identité)`, et le port voyage dans
+  `vers_pair`. Test : `test_meme_identite_sur_deux_ports_distants`. Alternative écartée : une identité propre à chaque socket
+  côté page — elle change ce que voit le ROUTER du noyau (l'identité est l'adresse de retour du protocole Jupyter).
+- **`RuntimeError: cannot join current thread`** dans `stop_channels` (`hb_channel.join`) : `threading_web._pile` gardait
+  les fils suspendus, si bien que le script principal, repris pendant que le fil hb attendait, se croyait ce fil. Correctif :
+  `_courant` (un seul fil courant), mis de côté dans `attendre` et rétabli à la reprise. Test :
+  `test_fil_suspendu_n_est_plus_le_fil_courant`. C'est la règle de JSPI : une pile suspendue n'est plus la pile qui tourne.
+
+Mesure (Firefox 155, sonde, `capture_jalon8a.console.log`) : lancement 0,47 s ; premier message 2,87 s après
+`start_channels` ; `kernel_info_reply` ipython 3.13.2 ; `print` → stream stdout `'bonjour\n'` ; `1+1` → `execute_result`
+`['2']` en 0,10 s ; arrêt en 0,14 s ; tas wasm de la page 60 → 158 Mio ; 6,3 s au total. Niveau de preuve : mesuré dans
+Firefox seul ; Chrome non essayé (relais `sudo -u smartaudiotools` requis).
+
+Points ouverts :
+- **Arrêt en code -2, pas 0.** `_async_shutdown_kernel` de jupyter_client appelle TOUJOURS `interrupt_kernel` avant le
+  `shutdown_request` (manager.py, « if self.has_kernel ») ; en `interrupt_mode` « signal », c'est un SIGINT, et
+  `Popen.send_signal` de la doublure traite tout signal comme une mort du Worker. Un vrai ipykernel attrape SIGINT
+  (KeyboardInterrupt) et sort ensuite en 0 sur le `shutdown_request`. Le livrer pour de bon demande un tampon
+  d'interruption Pyodide (`setInterruptBuffer`, SharedArrayBuffer, donc isolation cross-origin) : c'est aussi ce qu'il
+  faudra au bouton « Interrompre le noyau » de Spyder, à traiter avec lui, pas ici. L'arrêt fonctionne (0,14 s).
+- `ProcessusWeb._erreur` → kill → `finished(0)` : un Worker en erreur rend 0 (vu en lecture, pas de cas réel).
+- `_garde_vie` (preambule) ne garde qu'un futur si plusieurs `run_forever` s'imbriquent (vu en lecture, pas de cas réel).
+- Sondes d'essai `sonde_noyau.py`, `noyau_pas.py`, `sonde_boucle.py` : non commitées (diagnostic ponctuel).
+
+À regarder en premier par un relecteur : `zmq_web.recevoir`/`_attacher`/`_detacher` (la clé), `threading_web.attendre`.

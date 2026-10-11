@@ -29,39 +29,20 @@ def doublure(nom, **attrs):
         print(f"doublure : {nom}")
 
 
-class _Mem:
-    total = 2 << 30
-    available = 1 << 30
-    percent = 50.0
-
-
 class PickleShareDB(dict):
     """Ce que module_completion en fait : un dict persistant ; ici en mémoire."""
     def __init__(self, root):
         super().__init__()
 
 
-doublure("psutil", cpu_percent=lambda *a, **k: 0.0, pid_exists=lambda pid: False, virtual_memory=lambda: _Mem(),
-         Process=lambda *a, **k: None)
 doublure("pickleshare", PickleShareDB=PickleShareDB)        # en attendant la roue pure
 doublure("three_merge", merge=lambda a, b, c: a)             # idem
 doublure("jellyfish", levenshtein_distance=lambda a, b: 0)   # extension C, sans roue Pyodide
 doublure("bcrypt")                                           # extension C, remoteclient seulement
 doublure("keyring", __path__=[], get_password=lambda *a: None, set_password=lambda *a: None)
 doublure("keyring.errors", NoKeyringError=type("NoKeyringError", (Exception,), {}))
-# zmq (extension C, sans roue Pyodide) : ce que jupyter_client, spyder_kernels et Spyder en lisent à l'IMPORT (classes de base,
-# annotations, constantes) ; aucun socket n'est jamais ouvert ici (jalon 6 : import nu). Le transport réel est l'obstacle 1 de la note.
-_Classe = type("Classe", (), {"shadow": classmethod(lambda cls, *a: cls())})
-doublure("zmq", __path__=[], Context=_Classe, Socket=_Classe, Message=_Classe, MessageTracker=_Classe, Poller=_Classe,
-         ZMQError=type("ZMQError", (Exception,), {}), curve_keypair=lambda: (b"", b""),
-         **{n: i for i, n in enumerate("DEALER REQ SUB SUBSCRIBE POLLIN NOBLOCK IDENTITY EAGAIN ROUTER PUB".split())})
-for _nom, _attrs in (("zmq.asyncio", dict(Context=_Classe, Socket=_Classe, Poller=_Classe)),
-                     ("zmq.eventloop", dict(__path__=[])), ("zmq.eventloop.zmqstream", dict(ZMQStream=_Classe)),
-                     ("zmq.sugar", dict(__path__=[])), ("zmq.sugar.socket", dict(Socket=_Classe)),
-                     ("zmq.utils", dict(__path__=[])), ("zmq.utils.garbage", dict(gc=None))):
-    if "zmq" in sys.modules and not getattr(sys.modules["zmq"], "__file__", None):  # la doublure, pas le vrai
-        doublure(_nom, **_attrs)
-        setattr(sys.modules[_nom.rpartition(".")[0]], _nom.rpartition(".")[2], sys.modules[_nom])
+# zmq et psutil (extensions C, sans roue Pyodide) : plus de doublure ici depuis le jalon 8a (11/10/2026), celles de qtpy6
+# (qtpy6/web/zmq_web.py, psutil_web.py) sont posées par l'import de qtpy6.QtCore dans la page, plus bas.
 # pylint : absent de SmartPython comme de la page ; le plugin Pylint lit sa version dès l'import (main_widget.py,
 # importlib.metadata.version), et find_internal_plugins importe tous les plugins (jalon 7) : des métadonnées seules.
 try:

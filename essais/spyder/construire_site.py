@@ -28,9 +28,11 @@ PYODIDE_QT = Path("/DATA/Python/qtpy6/exemple/pyodide-qt")
 PAQUETS = ("spyder qtpy IPython asttokens chardet colorama decorator diff_match_patch executing intervaltree jedi packaging parso "
            "prompt_toolkit pure_eval pygments qdarkstyle qtawesome qtconsole sortedcontainers spyder_kernels textdistance "
            "stack_data superqt tinycss2 traitlets wcwidth webencodings "
-           "dateutil jupyter_client jupyter_core msgpack platformdirs pyuca tornado watchdog jinja2 markupsafe").split()  # jalon 6 : mainwindow + 33 plugins
+           "dateutil jupyter_client jupyter_core msgpack platformdirs pyuca tornado watchdog jinja2 markupsafe "  # jalon 6 : mainwindow + 33 plugins
+           "ipykernel comm cloudpickle matplotlib_inline").split()  # jalon 8a : le noyau (relevé de sys.modules au démarrage)
 DISTRIBUTIONS = ["qstylizer", "ipython_pygments_lexers", "typing_extensions", "six"]  # modules d'un seul fichier : --paquet prendrait site-packages
 FORK = Path("/DATA/Python/FORKS/SmartPythonEditor")
+JUPYTER_CLIENT = next(Path(__import__("jupyter_client").__file__).parent.parent.glob("jupyter_client-*.dist-info"))
 EXCLURE = ["spyder/plugins/help/utils/js/", "qtpy6/web/js/pdfjs/",
            "spyder/locale/spyder.pot", "spyder/locale/fr/LC_MESSAGES/spyder.po",  # jalon 7 : config/base.py liste le
            *(f"spyder/locale/{l.name}/" for l in (FORK / "spyder/locale").iterdir() if l.name != "fr"),  # dossier ; le .mo
@@ -50,7 +52,9 @@ def assembler(archive, fichiers=(), **k):
     """L'assembleur de qtpy6, avec les exclusions d'ici en plus (dont tout dossier tests/)."""
     k["exclure"] = [*k.get("exclure", ()), *EXCLURE]
     fichiers = {**dict(fichiers), **{f"spyder.egg-info/{n}": FORK / "spyder.egg-info" / n  # jalon 7 : les points d'entrée
-                                     for n in ("PKG-INFO", "entry_points.txt")}}  # spyder.plugins, que MainWindow.setup lit
+                                     for n in ("PKG-INFO", "entry_points.txt")},  # spyder.plugins, que MainWindow.setup lit
+                 **{f"{JUPYTER_CLIENT.name}/{n}": JUPYTER_CLIENT / n  # jalon 8a : le point d'entrée local-provisioner ;
+                    for n in ("METADATA", "entry_points.txt")}}  # sans lui, le repli de jupyter_client rend un module
     original = _assembler.zipfile.ZipFile
 
     class Zip(original):
