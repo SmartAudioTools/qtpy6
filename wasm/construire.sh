@@ -287,7 +287,12 @@ phase_dynamique() {
                             echo "$g/multimedia/libwasmmediaplugin.a"; prl_objets "$g/multimedia/libwasmmediaplugin.prl"; } | neuf)) ;;
       Quick3D) entier+=("$q"/libQt6{Quick3D,Quick3DUtils}.a)  # entières : Graphs en importe des membres que rien ne référence ici
                libs=($({ qtlib Quick3D Quick3DRuntimeRender Quick3DUtils ShaderTools; printf '%s\n' "$q"/libQt6Bundled{Spirv_Cross,Glslang_Glslang,Glslang_Spirv,Glslang_Osdependent}.a
-                         qml_greffon QtQuick3D qquick3dplugin; } | neuf)) ;;  # les shaders se compilent à l'exécution (ShaderTools, glslang, SPIRV-Cross)
+                         qml_greffon QtQuick3D qquick3dplugin  # les shaders se compilent à l'exécution (ShaderTools, glslang, SPIRV-Cross)
+                         # les modules QML d'appoint (11/10/2026) ; pas AssetUtils : sans importeur (assimp) construit, rien à charger
+                         qtlib Quick3DHelpers Quick3DHelpersImpl Quick3DEffects Quick3DParticles Quick3DAssetImport Quick3DParticleEffects
+                         qml_greffon QtQuick3D/Helpers qtquick3dhelpersplugin; qml_greffon QtQuick3D/Helpers/impl qtquick3dhelpersimplplugin
+                         qml_greffon QtQuick3D/Effects qtquick3deffectplugin; qml_greffon QtQuick3D/Particles3D qtquick3dparticles3dplugin
+                         qml_greffon QtQuick3D/ParticleEffects qtquick3dparticleeffectsplugin; } | neuf)) ;;
       Graphs) entier+=("$q/libQt6Graphs.a")  # entière : GraphsWidgets en importe des membres
               libs=($({ qtlib Graphs QuickShapes; qml_greffon QtGraphs graphsplugin; } | neuf)) ;;
       *) libs=("$q/libQt6$m.a") ;;
@@ -352,7 +357,7 @@ phase_paquet() {
   local pyc="$RACINE/build/paquet"
   dossier "$pyc"; cp "$RACINE/build/dynamique/dist/python_stdlib.zip" "$pyc/"
   /DATA/Python/outils_wasm/venv-pyodide/bin/pyodide py-compile --silent --compression-level 9 "$pyc/python_stdlib.zip"
-  "$HOTEPY" - "$RACINE/build/dynamique/dist" "$pyc/python_stdlib.zip" "$DEP/hebergement/LICENSE-Pyodide-PySide6.txt" "$RACINE/pyodide-pyside6-0.29.3.4.zip" <<'PY'
+  "$HOTEPY" - "$RACINE/build/dynamique/dist" "$pyc/python_stdlib.zip" "$DEP/hebergement/LICENSE-Pyodide-PySide6.txt" "$RACINE/pyodide-pyside6-0.29.3.5.zip" <<'PY'
 import hashlib, sys, zipfile
 from pathlib import Path
 dist, stdlib, licence, sortie = map(Path, sys.argv[1:])

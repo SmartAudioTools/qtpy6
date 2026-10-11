@@ -393,11 +393,36 @@ roue sqlite3 vérifiée par sha256.
   Chrome 140 (QtWebEngine 6.11) rend les trois scènes (513 points verts, 1 628 rouges, 99 couleurs ; `sonde_chromium.log`,
   `capture_chromium.png` relue), et `essais/modules_qt_fin` reste à quatre OK avec la nouvelle sonde. Niveau de preuve : le
   moteur Blink de Chrome 140 avec WebGL logiciel ; un Chrome de bureau avec GPU (postes du lycée) n'est pas mesuré.
-- Quick3D : seuls `QtQuick3D` (qquick3dplugin) est lié ; `QtQuick3D.Helpers`, `.Effects`, `.Particles3D`, `.AssetUtils`
-  manquent à un QML qui les importe (erreur de module QML à l'exécution, pas de lien).
+- ~~Quick3D : seuls `QtQuick3D` (qquick3dplugin) est lié ; `QtQuick3D.Helpers`, `.Effects`, `.Particles3D`, `.AssetUtils`
+  manquent à un QML qui les importe~~ FAIT le 11/10/2026 (0.29.3.5), voir la section suivante ; AssetUtils reste absent.
 - Greffons d'images : mng et jp2 absents (libmng, jasper non fournis par Qt).
 - La boucle des exports croisés est plafonnée à trois passes sans échec explicite si la troisième en laisse : c'est
   `symboles.py verifier`, juste après, qui arrêterait la phase.
+
+## Les modules QML d'appoint de Quick3D (0.29.3.5, 11/10/2026)
+
+Demande de l'utilisateur : « continues », sur la liste des points ouverts (Quick3D d'appoint, puis mng/jp2).
+
+**Fait** : `wasm/construire.sh`, cas `Quick3D` de la phase dynamique : `pyside_QtQuick3D.so` lie aussi les bibliothèques
+Quick3DHelpers, HelpersImpl, Effects, Particles, AssetImport (que Particles3D importe) et ParticleEffects, ainsi que les
+greffons QML `QtQuick3D.Helpers`, `.Helpers.impl`, `.Effects`, `.Particles3D` et `.ParticleEffects`. Tout était déjà
+compilé dans Qt-WASM : rien n'est recompilé, seul le lien change. `pyside_QtQuick3D.so` passe de 6,5 à 7,8 Mo, et le
+zip de 25,9 à 26,4 Mo. Archive `pyodide-pyside6-0.29.3.5.zip`, 26 399 859 octets, sha256 `88490cbe…9368` (`versions.json`).
+
+**Écarté** : `QtQuick3D.AssetUtils` (RuntimeLoader). Il charge des modèles par les greffons d'import (assimp), qui ne sont pas
+construits (`plugins/assetimporters` absent) : il s'importerait sans rien savoir lire. Un module séparé
+`pyside_QtQuick3DHelpers.so` est aussi écarté : ce sont des modules QML, sans liaison Python, que rien ne chargerait
+à la demande. Ils se lient donc au module QtQuick3D, qu'un QML 3D tire de toute façon.
+
+**Vérifié** :
+  - `symboles.py verifier` vert (phase dynamique) ;
+  - `essais/quick3d_appoint/page.py`, sonde `--chromium` (Chrome 140, WebGL logiciel), quatre OK, capture relue :
+    - AxisHelper et sa grille, OrbitCameraController, ExtendedSceneEnvironment avec vignette ;
+    - effet `Vignette` ;
+    - particules rouges de ParticleSystem3D ;
+    - `import QtQuick3D.ParticleEffects` enregistré.
+  - En natif, le même QML est Ready, sans erreur (pas de rendu 3D hors écran).
+  - NON testé : Firefox, et les autres effets et types de ces modules.
 
 ## Le son d'un .ogg dans le navigateur : greffon audio de QtMultimedia corrigé (0.29.3.4, 10/10/2026)
 
