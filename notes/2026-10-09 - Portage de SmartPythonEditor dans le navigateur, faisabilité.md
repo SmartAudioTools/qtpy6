@@ -932,8 +932,13 @@ POINTS OUVERTS :
   n'est pas un défaut de cette étape : `doubler_futures()` (`qtpy6/web/fils.py`, commit 1475f75 d'une autre session) lit
   `js.navigator` dès l'import de `QtCore`. **`test_moteur_web_doublé_dans_le_navigateur` ÉCHOUE donc dans la suite
   telle qu'elle est**, comme tous les tests `en_navigateur` (mesuré par le Superviseur : `pytest -k navigateur`, 5 failed
-  / 4 passed, dont quatre sur « No module named 'js' ») ; il n'a été vu vert qu'avec un faux `js`. Pas de correctif de
-  `fils.py` ici : signalé à l'utilisateur par le Superviseur, qui l'attribue.
+  / 4 passed, dont quatre sur « No module named 'js' ») ; il n'a été vu vert qu'avec un faux `js`. **Corrigé le
+  11/10/2026 (19 h 15, commit à part, attribué par l'utilisateur en lançant le plan zmq, dont ce correctif est le
+  préalable — ordre fixé par le Superviseur, le chantier touchant `fils.py`)** : `js` n'est plus lu qu'à l'appel de `os.cpu_count()`, comme les autres doublures qui ne chargent `js`
+  qu'au premier usage ; sans cœurs annoncés par le navigateur, le `cpu_count` natif. Écarté : un `try/except
+  ImportError` autour de l'import au chargement, qui aurait gardé un `os.cpu_count` faux dans le navigateur dès que
+  `js` manque un instant, et ne dit pas pourquoi. Vérifié : `pytest -k "navigateur or fils_cooperatifs"`, 10 passed
+  (5 failed / 4 passed avant, mesure du Superviseur).
 - La correspondance `PySide6.QtWebEngine*` vers qtpy6 vit dans `preparer.py`, c'est-à-dire dans l'essai. Si une
   application importe PySide6 directement (via qtpy), c'est à qtpy6 de poser ces noms, comme pour les autres modules
   absents de WASM. À trancher avec la question du qtpy du fork.

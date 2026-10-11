@@ -580,7 +580,10 @@ def doubler_futures():
     cf.ThreadPoolExecutor, cf.Future, cf.wait, cf.as_completed = ThreadPoolExecutor, Future, wait, as_completed
     base.wait, base.as_completed = wait, as_completed  # Executor.map passe par Future.result : déjà doublé
 
-    import js  # noqa: PLC0415
-    coeurs = int(getattr(js.navigator, "hardwareConcurrency", 0) or 0)
-    if coeurs:
-        os.cpu_count = lambda: coeurs
+    cpu_count = os.cpu_count
+
+    def cpu_count_():
+        import js  # noqa: PLC0415 - à l'appel seulement : l'import de QtCore ne charge pas js (tests hors navigateur)
+        return int(getattr(js.navigator, "hardwareConcurrency", 0) or 0) or cpu_count()
+
+    os.cpu_count = cpu_count_
