@@ -285,3 +285,37 @@ donc nécessaire. C'est à corriger dans le générateur, par l'utilisateur ou l
 - Firefox 155, par la sonde : jalon7, 33/0, MainWindow visible, fin propre ; erreur7, la `ZeroDivisionError` est traitée.
 - Suite qtpy6 : 193 passent, 3 ignorés ; `test_qtpy6` 39/39 sous pyside6 et sous pyqt6.
 - Pas essayé : Chrome.
+
+## Jalon 8c, la console dans la page (12/10/2026, nuit) : une cause trouvée, un gel encore ouvert
+
+Demande : « passe au jalon 8b et à tous les suivant , tu peux monter à 80% ! ». L'essai `essais/spyder/jalon8c.py`
+prolonge jalon7 (crochet `SUITE` ajouté à `jalon7.py`) en cinq étapes : In [1], `1+1`, `a` dans l'explorateur, redémarrage,
+`a` oublié. Bureau : 5/5.
+
+**Corrigé : `QCoreApplication.postEvent` d'un événement de l'application.** Dans Firefox, le démarrage du noyau échouait
+sur un `TimeoutError` de `threading_web.Future.result`. Cause : Spyder rappelle ses futures par
+`DispatcherFuture.connect` → `postEvent(_QCallbackExecutor, _QCallbackEvent)` → `customEvent`, qui attend un `result()`.
+Qt appelait ce `customEvent` hors entrée suspendable, où `attendre` ne peut que vérifier une fois. Doublure
+(`bloquant.doubler_qtcore`) : un événement de type ≥ `User` est remis à une tâche suivante (`_plus_tard`) et livré par
+Python, `event()` s'il est redéfini en Python, sinon `customEvent()` ; les événements de Qt gardent sa file.
+- Écarté : livrer par `QCoreApplication.sendEvent` dans la tâche. Plus fidèle (filtres d'événements), mais la suspension
+  traverserait les trames C++ de Qt ; non retenu sans mesure qui le justifie. Limite assumée : les filtres d'événements
+  ne voient pas ces événements-là.
+- Test `test_evenement_poste_est_un_slot` (une boîte modale ouverte dans un `customEvent`) : échoue sans la doublure,
+  passe avec. Suite qtpy6 : 233 passent, 3 ignorés.
+
+**Toujours ouvert : la page gèle une fois la console connectée** (Firefox, « Script terminated by timeout »). Bissection,
+instrumentation provisoire retirée de l'essai depuis :
+- Le gel survient APRÈS `_connect_new_client_to_kernel` (fini normalement), avec un seul noyau (`get_cached_kernel`
+  forcé à `cache=False`) et sans la page de chargement HTML : ni le noyau de réserve ni le `QWebEngineView` n'en sont la
+  cause.
+- Un seul battement d'un `QTimer` de 100 ms passe ensuite ; la dernière tâche `_plus_tard` tracée (le throttler superqt)
+  se termine normalement.
+- Un filtre d'événements global a vu 349 événements, les derniers : `Paint` de l'éditeur, `LayoutRequest` de
+  IPythonConsoleWidget, PlotsWidget et VariableExplorerWidget, puis `Paint` et `Expose` de la fenêtre principale — puis
+  plus rien, et aucun `Paint` de `ShellWidget`/`ControlWidget` après leurs `UpdateLater`. Hypothèse : une boucle
+  synchrone dans la mise en page ou le dessin de la console (qtconsole), ou un fil de tubes (StdThread) qui ne rend
+  jamais la main. Non tranché.
+- Inutilisables pour situer la boucle : `sys.setprofile`/`_setprofileallthreads` (aucun échantillon) et les piles wasm
+  (`pyodide.asm.wasm` sans section `name`).
+- Prochain essai : neutraliser StdThread, puis tracer les `paintEvent`/`resizeEvent` de `ControlWidget`.

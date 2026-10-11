@@ -126,6 +126,8 @@ try:
         etape("post_visible_setup")
         if os.environ.get("JALON7_ERREUR"):  # erreur7.py : une exception dans un slot
             QTimer.singleShot(1000, lambda: 1 / 0)
+        if "SUITE" in globals():  # un essai qui prolonge celui-ci (jalon8c.py) : il appelle rapport() quand il a fini
+            SUITE(self, rapport)  # noqa: F821
 
     MainWindow.post_visible_setup = post_visible_setup_
 
@@ -144,7 +146,8 @@ try:
             traceback.print_exc()
         app.quit()
 
-    QTimer.singleShot(ATTENTE, rapport)  # armé avant create_window : exec() est dedans
+    if "SUITE" not in globals():
+        QTimer.singleShot(ATTENTE, rapport)  # armé avant create_window : exec() est dedans
     create_window(MainWindow, app, None, options, None)
     etape("sortie de exec()")
 except Exception:

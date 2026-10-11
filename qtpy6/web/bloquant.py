@@ -419,6 +419,27 @@ def doubler_qtcore(ns):
 
     ns["QTimer"].singleShot = staticmethod(un_coup_)
 
+    # postEvent d'un événement de l'application (type ≥ User) : son customEvent/event est un slot comme un autre, que Qt
+    # appellerait hors entrée suspendable (Spyder y rappelle ses futures, DispatcherFuture.connect, qui y attendent un
+    # result()). Remis à une tâche suivante, et par Python : event() s'il est redéfini, sinon customEvent(), ce que
+    # QObject::event fait pour ces types (sans les filtres d'événements). Les événements de Qt gardent sa file.
+    poster = QCoreApplication.postEvent
+
+    def poster_(receveur, evenement, *args):
+        if evenement.type() < QEvent.Type.User:
+            return poster(receveur, evenement, *args)
+
+        def envoyer():
+            if not mort(receveur):
+                classe = type(receveur)
+                redefini = any("event" in vars(c) for c in classe.__mro__
+                               if c.__module__.split(".")[0] not in ("PySide6", "PyQt6"))
+                (receveur.event if redefini else receveur.customEvent)(evenement)
+        _plus_tard(envoyer)
+        return None
+
+    QCoreApplication.postEvent = staticmethod(poster_)
+
     # Pas de fils dans le navigateur : un objet reste où il est. Remplacées même si la liaison les a : PyQt6-WASM n'a ni l'une
     # ni l'autre, PySide6-WASM les a mais sans le type QThread (Qt sans fils), si bien que thread() échoue en laissant son
     # erreur posée (« returned a result with an exception set » à l'appel suivant) et que moveToThread refuse notre QThread.

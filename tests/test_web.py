@@ -982,6 +982,27 @@ def test_un_coup_de_minuterie_est_un_slot():
 
 
 @greenlet_seul
+def test_evenement_poste_est_un_slot():
+    """Spyder rappelle ses futures par postEvent + customEvent (DispatcherFuture.connect) : le rappel peut suspendre."""
+    sortie = simule("""
+        from qtpy6.QtCore import QCoreApplication, QEvent, QObject, QTimer
+        from qtpy6.QtWidgets import QMessageBox
+        class E(QEvent):
+            def __init__(self):
+                super().__init__(QEvent.Type(QEvent.Type.User + 1))
+        class R(QObject):
+            def customEvent(self, e):
+                b = QMessageBox(QMessageBox.Icon.Question, "Q", "?", QMessageBox.StandardButton.Yes)
+                QTimer.singleShot(30, lambda: b.done(7))
+                print("rendu", b.exec())
+        r = R()
+        QCoreApplication.postEvent(r, E())
+        tourner(300)
+    """)
+    assert sortie.strip() == "rendu 7"
+
+
+@greenlet_seul
 def test_relais_comme_une_connexion_native():
     sortie = simule("""
         import gc, weakref
