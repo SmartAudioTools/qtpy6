@@ -424,7 +424,10 @@ construits (`plugins/assetimporters` absent) : il s'importerait sans rien savoir
     - particules rouges de ParticleSystem3D ;
     - `import QtQuick3D.ParticleEffects` enregistré.
   - En natif, le même QML est Ready, sans erreur (pas de rendu 3D hors écran).
-  - NON testé : Firefox, et les autres effets et types de ces modules.
+  - Même verdict dans Firefox 155, WebGL réel (sonde sans `--chromium` lancée par l'utilisateur hors bac à sable,
+    11/10/2026 ; le Firefox headless du bac à sable n'a pas de WebGL) : quatre OK, helpers 1 279, effects 1 320,
+    particules 986, particle_effects 12 005 points rouges, capture relue (`essais/quick3d_appoint/sonde_firefox.log`).
+  - NON testé : les autres effets et types de ces modules.
 
 ## mng et jp2, à la demande par `import qtpy6.QtImageFormats` (0.29.3.6, 11/10/2026)
 
