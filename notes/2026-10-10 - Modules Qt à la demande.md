@@ -322,7 +322,8 @@ Positioning… n'existent pas sur cette plateforme. Puis : « compile aussi WebS
       l'agrégat (lié en dernier), pas entre fournisseurs.
   Paquet `pyodide-pyside6-0.29.3.3.zip`.
 - `wasm/qt_statique.cpp` : `Q_IMPORT_PLUGIN` des cinq greffons d'images (QTgaPlugin, QWbmpPlugin, QTiffPlugin,
-  QWebpPlugin, QICNSPlugin). mng et jp2 demandent libmng et jasper, absents ; dds n'existe plus dans qtimageformats 6.10.
+  QWebpPlugin, QICNSPlugin). mng et jp2 (libmng, jasper) : à la demande depuis le 11/10, section « mng et jp2 » ; dds
+  n'existe plus dans qtimageformats 6.10.
 - `wasm/patches/pyodide-pyside6.patch` : `-lwebsocket.js` sur le lien du module principal (`llvm-nm` : libQt6WebSockets.a
   importe dix `emscripten_websocket_*`, qui ne viennent que de cette bibliothèque JavaScript d'Emscripten) ; même ligne
   ajoutée à la main au `Makefile.envs` déjà patché (le patch se reconnaît à son inverse), ancien `pyodide.asm.{js,wasm}` à
@@ -395,7 +396,8 @@ roue sqlite3 vérifiée par sha256.
   moteur Blink de Chrome 140 avec WebGL logiciel ; un Chrome de bureau avec GPU (postes du lycée) n'est pas mesuré.
 - ~~Quick3D : seuls `QtQuick3D` (qquick3dplugin) est lié ; `QtQuick3D.Helpers`, `.Effects`, `.Particles3D`, `.AssetUtils`
   manquent à un QML qui les importe~~ FAIT le 11/10/2026 (0.29.3.5), voir la section suivante ; AssetUtils reste absent.
-- Greffons d'images : mng et jp2 absents (libmng, jasper non fournis par Qt).
+- ~~Greffons d'images : mng et jp2 absents (libmng, jasper non fournis par Qt)~~ FAIT le 11/10/2026 (0.29.3.6), voir la
+  section « mng et jp2 ».
 - La boucle des exports croisés est plafonnée à trois passes sans échec explicite si la troisième en laisse : c'est
   `symboles.py verifier`, juste après, qui arrêterait la phase.
 
@@ -423,6 +425,56 @@ construits (`plugins/assetimporters` absent) : il s'importerait sans rien savoir
     - `import QtQuick3D.ParticleEffects` enregistré.
   - En natif, le même QML est Ready, sans erreur (pas de rendu 3D hors écran).
   - NON testé : Firefox, et les autres effets et types de ces modules.
+
+## mng et jp2, à la demande par `import qtpy6.QtImageFormats` (0.29.3.6, 11/10/2026)
+
+Demandes de l'utilisateur : « rallonge de 2 points, attaque mng/jp2 », puis « ça ne peut pas être chargé à la demande pour
+ne pas alourdir pour rien ? », puis « import explicite, fais l'essai d'inscription d'abord ».
+
+**Essai d'inscription (avant tout code, scratchpad de la session)** : un greffon d'image dans un module latéral chargé
+APRÈS le démarrage (`loadDynamicLibrary`, `global: true`) est-il vu de `QImageReader` ? Oui : `Q_IMPORT_PLUGIN` passe par
+un constructeur statique (`qRegisterStaticPluginFunction`), exécuté au chargement du module, et `QFactoryLoader` relit
+la liste des greffons statiques à chaque appel. `supportedImageFormats()` le liste, `canRead`, `read` et
+`QImage.fromData` le servent. C'est ce qui rend le chargement à la demande possible sans toucher à Qt.
+
+**Fait** :
+  - `wasm/telecharger_sources.sh`, `wasm/versions.txt` : libmng 2.0.3 et jasper 4.2.9, avec leur sha256 ;
+  - `wasm/construire.sh` :
+    - `images_wasm` construit `libmng.a` et `libjasper.a` statiques sous `$RACINE/images-wasm`, zlib du port emscripten
+      (celle de Qt, « Using system zlib ») ;
+    - `qt_wasm` accepte des options cmake (qui rejouent la configuration) : qtimageformats est configuré avec
+      `FEATURE_mng=ON FEATURE_jasper=ON` et les chemins des deux bibliothèques ; témoin `libqmng.a` ;
+    - `MODULES_ANNEXES="ImageFormats"` : `pyside_QtImageFormats.so` (583 Ko, greffons `libqmng.a`, `libqjp2.a` et les
+      deux bibliothèques), lié, croisé et vérifié comme les modules à la demande, mais sans liaison PySide ;
+  - `wasm/pyodide-qt.mjs` : `ANNEXES`, chargées par le même finder que `DEMANDE`, avec un module Python vide (pas de
+    `PyInit` dans le `.so`) ;
+  - `qtpy6/QtImageFormats.py` : rien en natif (Qt y charge ses greffons lui-même), l'import de `PySide6.QtImageFormats`
+    dans le navigateur. Une application écrit `import qtpy6.QtImageFormats` des deux côtés (règle des doublures,
+    `CLAUDE.md`) ;
+  - `wasm/fumee.mjs` : mng et jp2 absents au départ, présents après l'import ; jp2 en aller-retour par Qt, mng de deux
+    images (rouge puis bleue) lu image par image ;
+  - paquet `pyodide-pyside6-0.29.3.6.zip`, 26 586 850 octets, sha256 `eb21bccf…3818` (`versions.json`).
+
+**Choix et alternatives écartées** :
+  - **import explicite plutôt que dans l'agrégat** (+0,6 Mo au démarrage de toutes les pages pour deux formats rares) ;
+  - **plutôt qu'une détection automatique** (charger à la vue d'une extension `.mng`/`.jp2`) : elle rate les images que Qt
+    ouvre seul (QML `Image`, `QIcon`, une ressource), et elle demanderait d'intercepter `QImageReader` ;
+  - libmng sans JNG ni lcms : `qmnghandler.cpp` définit `MNG_NO_INCLUDE_JNG`, et le `config.h` livré dans l'archive est
+    celui d'une machine qui avait lcms2 et libjpeg (`lcms2.h` introuvable) : la recette en retire ces lignes ;
+  - jasper sans `JAS_WASM`, qui vise la libc WASI et non emscripten ; `JAS_STDC_VERSION` est exigé en compilation croisée ;
+  - `FEATURE_mng=ON FEATURE_jasper=ON` forcés : une première configuration sans les bibliothèques les avait mis à OFF
+    dans le cache cmake, et les chemins seuls ne les rallumaient pas (`config.summary` : « no »).
+
+**Vérifié** :
+  - `symboles.py verifier` vert ;
+  - `node wasm/fumee.mjs`, sur `dist/` puis sur le zip dépaqueté (pyc) : OK, import par le finder (`run_sync`) ;
+  - NON testé dans un navigateur (Firefox, Chrome) : même chemin de chargement que les modules à la demande, déjà mesuré.
+  - Le jp2 fait écrire à jasper « warning: skipping unknown tag type » sur la sortie d'erreur, sans effet sur l'image.
+  - En natif, le PySide6 de SmartPython n'a ni `libqmng` ni `libqjp2` (`plugins/imageformats`) : l'import ne les donne
+    pas, il n'en est pas la cause. Point ouvert, hors de ce paquet.
+
+**Pour un relecteur** : le piège du test, un `QImageReader(QBuffer(...))` dont Python détruit le tampon avant `read()`
+(« table index is out of bounds »), a d'abord fait croire à un défaut du greffon ; la lecture d'un fichier le lit bien.
 
 ## Le son d'un .ogg dans le navigateur : greffon audio de QtMultimedia corrigé (0.29.3.4, 10/10/2026)
 

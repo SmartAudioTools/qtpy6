@@ -22,6 +22,9 @@ const DEMANDE = Object.fromEntries(["PrintSupport", "Network", "Sql", "Xml", "Co
                                     "Qml", "Quick", "QuickWidgets", "QuickControls2", "Multimedia", "MultimediaWidgets", "Charts",
                                     "WebSockets", "Quick3D", "Graphs", "GraphsWidgets"]
                                    .map(m => [`PySide6.Qt${m}`, `/lib/pyside_Qt${m}.so`]));
+// Les modules sans liaison PySide (des greffons Qt seulement, construire.sh : MODULES_ANNEXES) : chargés de même, mais le
+// module Python est vide - le .so n'a pas de PyInit, ses greffons s'inscrivent au chargement. qtpy6.QtImageFormats l'importe.
+const ANNEXES = { "PySide6.QtImageFormats": "/lib/pyside_QtImageFormats.so" };
 // Les jumeaux compressés de l'hébergement (NOM.br, NOM.gz : hebergement/telecharger.sh), comme en_jumeau de qtpy6web.js :
 // le meilleur que le navigateur décompresse, le fichier lui-même à défaut (en développement). Une réponse marquée
 // X-Qtpy6-Decompresse vient du service worker d'une page, qui la range décompressée.
@@ -68,7 +71,8 @@ export async function loadPyodide(options = {}) {
     import sys, importlib.machinery as m
     class QtAgrege:  # les six modules de l'agrégat, servis par le même fichier ; les autres chargés au premier import
         NOMS = frozenset(${JSON.stringify(MODULES)})
-        DEMANDE = ${JSON.stringify(DEMANDE)}
+        DEMANDE = ${JSON.stringify({ ...DEMANDE, ...ANNEXES })}
+        ANNEXES = frozenset(${JSON.stringify(Object.keys(ANNEXES))})
         @classmethod
         def find_spec(cls, nom, chemin=None, cible=None):
             if nom in cls.NOMS:
@@ -83,9 +87,13 @@ export async function loadPyodide(options = {}) {
                     except RuntimeError as e:  # pas de suspension possible ici
                         raise ImportError(f"{nom} se charge au premier import, depuis le script lancé par "
                                           f"qtpy6.web.lancer ou un slot ({e})", name=nom) from None
+                if nom in cls.ANNEXES:
+                    return m.ModuleSpec(nom, Vide, origin=so)
             else:
                 return None
             return m.ModuleSpec(nom, m.ExtensionFileLoader(nom, so), origin=so)
+    class Vide:
+        create_module = exec_module = staticmethod(lambda module: None)
     sys.meta_path.insert(0, QtAgrege)
 _poser()
 del _poser`);

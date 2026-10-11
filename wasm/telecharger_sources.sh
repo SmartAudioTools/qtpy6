@@ -49,13 +49,19 @@ echo "== Recette de Pyodide-Qt (MIT)"
 [ -d pyodide-with-pyqt6/.git ] || git clone -q --depth 1 https://github.com/JarrettSJohnson/pyodide-with-pyqt6.git
 # Pas emdawnwebgpu, que la recette prend aussi : Qt n'a aucun symbole wgpu (llvm-nm), construire.sh ne le lie pas.
 
+echo "== libmng et jasper (11/10/2026), pour les greffons d'images mng et jp2 de qtimageformats, que Qt ne fournit pas"
+prendre "https://downloads.sourceforge.net/project/libmng/libmng-devel/2.0.3/libmng-2.0.3.tar.gz"
+echo "cf112a1fb02f5b1c0fce5cab11ea8243852c139e669c44014125874b14b7dfaa  libmng-2.0.3.tar.gz" | sha256sum -c -  # Homebrew et MacPorts
+prendre "https://github.com/jasper-software/jasper/releases/download/version-4.2.9/jasper-4.2.9.tar.gz"
+echo "f71cf643937a5fcaedcfeb30a22ba406912948ad4413148214df280afc425454  jasper-4.2.9.tar.gz" | sha256sum -c -  # API GitHub
+
 echo "== Ports emscripten (zlib, bzip2), dans un cache à part que la compilation recopiera"
 EM_CONFIG="$EMSDK/.emscripten" EM_CACHE="$SRC/em_cache" "$EMSDK/upstream/emscripten/embuilder" build zlib bzip2
 
 echo "== Empreintes"
 {
   echo "# wasm/telecharger_sources.sh, $(date -I)"
-  sha256sum ./*.tar.xz pyodide/cpython/downloads/*.tgz
+  sha256sum ./*.tar.xz ./*.tar.gz pyodide/cpython/downloads/*.tgz
   for d in pyodide pyodide/pyodide-build libffi hiwire pyodide-with-pyqt6; do echo "git $(git -C "$d" rev-parse HEAD)  $d"; done
   ls em_cache/ports/
 } | tee "$DEP/wasm/versions.txt"

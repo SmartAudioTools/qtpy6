@@ -32,13 +32,13 @@ Le récit, les choix argumentés et les niveaux de preuve sont dans
 |---|---|
 | `emsdk` | Copie privée d'emscripten 4.0.9, corrigée comme Pyodide l'attend |
 | `qthote` | Qt 6.10.2 natif : moc, rcc, uic et QtCore pour le générateur ; qsb (qtshadertools), qmltyperegistrar, qmlcachegen... (qtdeclarative) et balsam, shadergen (qtquick3d), que la compilation croisée de Qt Quick, Quick3D et Graphs demande par `-qt-host-path` |
-| `qt` | qtbase, qtsvg, qtshadertools, qtdeclarative (Qml, Quick, Controls), qtmultimedia, qtcharts, qtwebsockets, qtimageformats (greffons tga, wbmp, tiff, webp, icns, dans l'agrégat), qtquick3d et qtgraphs statiques pour WebAssembly, sans fils, exceptions wasm |
+| `qt` | qtbase, qtsvg, qtshadertools, qtdeclarative (Qml, Quick, Controls), qtmultimedia, qtcharts, qtwebsockets, qtimageformats (greffons tga, wbmp, tiff, webp, icns dans l'agrégat ; mng et jp2, avec libmng et jasper, dans `pyside_QtImageFormats.so`, chargé par `import qtpy6.QtImageFormats`), qtquick3d et qtgraphs statiques pour WebAssembly, sans fils, exceptions wasm |
 | `shiboken` | Le générateur shiboken6 natif, corrigé pour le lien statique (`patches/shiboken-*`) |
 | `cpython` | Le CPython de Pyodide : en-têtes et `libpython3.13.a` |
 | `pyside` | libshiboken, libpyside et les 24 liaisons (QtCore, QtGui, QtWidgets, QtSvg, QtSvgWidgets, puis PrintSupport, Network, Sql, Xml, Concurrent, OpenGL, OpenGLWidgets, Test, Qml, Quick, QuickWidgets, QuickControls2, Multimedia, MultimediaWidgets, Charts, WebSockets, Quick3D, Graphs, GraphsWidgets), compilées en croisé |
 | `pyodide` | Archive les objets PySide, compile `qt_statique.cpp`, corrige et relie Pyodide (`patches/pyodide-*`, avec `-sFETCH` pour QNetworkAccessManager), écrit un `pyodide-lock.json` vide |
 | `dynamique` | `pyside_agrege.so` (les cinq liaisons de base et Qt, chargé au démarrage) et un `pyside_Qt<M>.so` par module à la demande (liaison, `libQt6<M>.a`, greffons) ; `symboles.py --verifier` échoue si un import d'un `.so` n'est fourni ni par l'agrégat, ni par le module principal, ni par un `.so` chargé avant |
-| `paquet` | `$RACINE/pyodide-pyside6-0.29.3.5.zip` : les fichiers de `dist/` qu'une page charge, sous `pyodide-qt/`, avec la licence (`hebergement/LICENSE-Pyodide-PySide6.txt`, nommée `LICENSE.txt`), à dates fixes ; son sha256 va dans `qtpy6/web/versions.json` (`pyodide_pyside6`), et le zip dans la release du même nom, que télécharge `hebergement/telecharger.sh` |
+| `paquet` | `$RACINE/pyodide-pyside6-0.29.3.6.zip` : les fichiers de `dist/` qu'une page charge, sous `pyodide-qt/`, avec la licence (`hebergement/LICENSE-Pyodide-PySide6.txt`, nommée `LICENSE.txt`), à dates fixes ; son sha256 va dans `qtpy6/web/versions.json` (`pyodide_pyside6`), et le zip dans la release du même nom, que télécharge `hebergement/telecharger.sh` |
 
 ## Les fichiers
 

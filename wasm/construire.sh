@@ -11,6 +11,7 @@ PYODIDE="$SRC/pyodide"
 EMSDK="$PYODIDE/emsdk/emsdk"           # la copie corrigée que Pyodide attend à cet endroit
 QTHOTE="$RACINE/qt-hote"               # Qt 6.10.2 natif : moc, rcc, uic et QtCore pour le générateur shiboken
 QTWASM="$RACINE/qt-wasm"               # Qt 6.10.2 statique pour WebAssembly
+IMAGES="$RACINE/images-wasm"           # libmng et jasper, pour les greffons mng et jp2 de qtimageformats
 HOTEPY=/DATA/Python/SmartPython/CachyOS/versions/SmartPython/bin/python  # 3.13, comme le CPython de Pyodide
 JOURNAUX="$RACINE/journaux"
 mkdir -p "$JOURNAUX"
@@ -89,14 +90,36 @@ phase_qthote() {
   qt_hote qtquick3d bin/balsam  # Qt6Quick3DTools (balsam, shadergen), que la compilation croisée de qtquick3d et qtgraphs cherche dans le Qt hôte
 }
 
-qt_wasm() {  # qt_wasm <module> <témoin, relatif à $QTWASM> : un module de Qt-WASM, avec les options de qtbase (statique, sans fils)
+qt_wasm() {  # qt_wasm <module> <témoin, relatif à $QTWASM> [option cmake...] (avec options : configuration rejouée) : un module de Qt-WASM, avec les options de qtbase (statique, sans fils)
   [ -f "$QTWASM/$2" ] && return
   deballer "$SRC/$1-everywhere-src-$QT.tar.xz" "$RACINE/src/$1"
   compgen -G "$DEP/wasm/patches/$1-*.patch" >/dev/null && patcher "$1" "$RACINE/src/$1"  # qtmultimedia : portail « fils » levé pour emscripten
   mkdir -p "$RACINE/build/$1-wasm" && cd "$RACINE/build/$1-wasm"
-  [ -f build.ninja ] || "$QTWASM/bin/qt-configure-module" "$RACINE/src/$1" -- -DQT_BUILD_EXAMPLES=OFF -DQT_BUILD_TESTS=OFF
+  [ -f build.ninja ] && [ $# -le 2 ] || "$QTWASM/bin/qt-configure-module" "$RACINE/src/$1" -- -DQT_BUILD_EXAMPLES=OFF -DQT_BUILD_TESTS=OFF "${@:3}"
   cmake --build . --parallel
   cmake --install .
+}
+
+images_wasm() {  # libmng et jasper, statiques, pour les greffons mng et jp2 (Qt ne les fournit pas) ; zlib : le port
+  # emscripten, celui de Qt (« Using system zlib ») et de CPython. Ni JPEG (JNG) ni lcms : qmnghandler.cpp définit
+  # MNG_NO_INCLUDE_JNG, et le config.h livré dans l'archive est celui d'une machine qui avait les deux.
+  [ -f "$IMAGES/lib/libjasper.a" ] && return
+  deballer "$SRC/libmng-2.0.3.tar.gz" "$RACINE/src/libmng"
+  remplacer "$RACINE/src/libmng/config.h" '/MNG_FULL_CMS\|HAVE_LIBJPEG\|HAVE_LIBLCMS/d'
+  local b="$RACINE/build/libmng-wasm" c; mkdir -p "$b" "$IMAGES/lib" "$IMAGES/include"
+  for c in "$RACINE"/src/libmng/libmng_*.c; do
+    emcc -c -Oz -fPIC -sUSE_ZLIB=1 -DMNG_NO_INCLUDE_JNG -w "$c" -o "$b/$(basename "${c%.c}").o"
+  done
+  emar rcs "$IMAGES/lib/libmng.a" "$b"/*.o
+  cp "$RACINE"/src/libmng/libmng{,_conf,_types}.h "$IMAGES/include/"
+  deballer "$SRC/jasper-4.2.9.tar.gz" "$RACINE/src/jasper"
+  # Pas JAS_WASM, qui vise la libc WASI ; JAS_STDC_VERSION est exigé en compilation croisée (C11 chez emscripten).
+  emcmake cmake -S "$RACINE/src/jasper" -B "$RACINE/build/jasper-wasm" -G Ninja -DCMAKE_BUILD_TYPE=MinSizeRel \
+    -DCMAKE_INSTALL_PREFIX="$IMAGES" -DJAS_CROSSCOMPILING=1 -DJAS_STDC_VERSION=201112L -DJAS_ENABLE_SHARED=OFF \
+    -DJAS_ENABLE_PROGRAMS=OFF -DJAS_ENABLE_DOC=OFF -DJAS_ENABLE_OPENGL=OFF -DJAS_ENABLE_LIBJPEG=OFF \
+    -DJAS_ENABLE_LIBHEIF=OFF -DJAS_ENABLE_MULTITHREADING_SUPPORT=OFF -DJAS_USE_JAS_INIT=OFF
+  cmake --build "$RACINE/build/jasper-wasm"
+  cmake --install "$RACINE/build/jasper-wasm"
 }
 
 phase_qt() {
@@ -119,7 +142,11 @@ phase_qt() {
   qt_wasm qtmultimedia lib/libQt6Multimedia.a
   qt_wasm qtcharts lib/libQt6Charts.a
   qt_wasm qtwebsockets lib/libQt6WebSockets.a  # les quatre suivants : 10/10/2026, « compile aussi WebSockets, Graphs, Quick3D et ImageFormats »
-  qt_wasm qtimageformats plugins/imageformats/libqwebp.a  # des greffons seulement (webp, tiff, tga, wbmp, icns), dans l'agrégat
+  images_wasm
+  # Des greffons seulement : webp, tiff, tga, wbmp, icns dans l'agrégat ; mng et jp2 (11/10/2026) dans pyside_QtImageFormats.so,
+  # chargé à la demande. Le témoin est libqmng.a : un arbre configuré avant le 11/10 est reconfiguré avec les deux bibliothèques.
+  qt_wasm qtimageformats plugins/imageformats/libqmng.a -DFEATURE_mng=ON -DFEATURE_jasper=ON -DLIBMNG_LIBRARY="$IMAGES/lib/libmng.a" \
+    -DLIBMNG_INCLUDE_DIR="$IMAGES/include" -DJASPER_LIBRARY_RELEASE="$IMAGES/lib/libjasper.a" -DJASPER_INCLUDE_DIR="$IMAGES/include"
   qt_wasm qtquick3d lib/libQt6Quick3D.a
   qt_wasm qtgraphs lib/libQt6Graphs.a
 }
@@ -168,6 +195,7 @@ PYCIBLE="$PYODIDE/cpython/installs/python-$PYTHON"  # le CPython de Pyodide : en
 # latéral par liaison (phase dynamique). L'ordre est celui des dépendances (PySideHelpers.cmake). MODULES en dérive.
 MODULES_DEMANDE="PrintSupport Network Sql Xml Concurrent OpenGL OpenGLWidgets Test Qml Quick QuickWidgets QuickControls2 Multimedia MultimediaWidgets Charts WebSockets Quick3D Graphs GraphsWidgets"  # ceux qui ont leur propre .so, dans l'ordre de CHARGEMENT
 MODULES="Core;Gui;Widgets;Svg;SvgWidgets;${MODULES_DEMANDE// /;}"
+MODULES_ANNEXES="ImageFormats"  # sans liaison PySide (des greffons Qt seulement) : un .so chargé par un import qtpy6 explicite
 
 phase_pyside() {
   # libshiboken, libpyside et les modules, compilés en croisé par le générateur hôte (QFP_SHIBOKEN_HOST_PATH),
@@ -266,7 +294,7 @@ phase_dynamique() {
   qtlib() { local n; for n; do echo "$q/libQt6$n.a"; prl_objets "$q/libQt6$n.prl"; done; }
   qml_greffon() {  # qml_greffon <dossier de qml/> <greffon> : l'objet qui l'importe (nommé d'après la cible, pas la bibliothèque), l'archive et ses ressources
     ls "$QTWASM/qml/$1"/objects-Release/*_init/*_init.cpp.o; echo "$QTWASM/qml/$1/lib$2.a"; prl_objets "$QTWASM/qml/$1/lib$2.prl"; }
-  for m in $MODULES_DEMANDE; do
+  for m in $MODULES_DEMANDE $MODULES_ANNEXES; do
     local libs=() importes="" entier=("$lien/Qt$m.a") tire=()  # tire : membres d'archive que rien ne référence ici, qu'un autre module importe
     case $m in
       OpenGL) ;;
@@ -295,6 +323,9 @@ phase_dynamique() {
                          qml_greffon QtQuick3D/ParticleEffects qtquick3dparticleeffectsplugin; } | neuf)) ;;
       Graphs) entier+=("$q/libQt6Graphs.a")  # entière : GraphsWidgets en importe des membres
               libs=($({ qtlib Graphs QuickShapes; qml_greffon QtGraphs graphsplugin; } | neuf)) ;;
+      ImageFormats) entier=()  # greffons mng et jp2 (11/10/2026) : inscrits au chargement du module, QImageReader relit la liste à chaque appel
+                    libs=("$g"/imageformats/libq{mng,jp2}.a "$IMAGES"/lib/lib{mng,jasper}.a)
+                    importes=$'Q_IMPORT_PLUGIN(QMngPlugin)\nQ_IMPORT_PLUGIN(QJp2Plugin)' ;;
       *) libs=("$q/libQt6$m.a") ;;
     esac
     printf '%s\n' "${libs[@]}" | neuf > /dev/null  # propriétaire des archives des cas simples aussi
@@ -321,7 +352,7 @@ phase_dynamique() {
   for f in $FOURNISSEURS; do : > "$dyn/exports_$f.rsp"; done
   for _ in 1 2 3; do
     "$HOTEPY" "$DEP/wasm/symboles.py" croises "$PYODIDE/dist/pyodide.asm.wasm" "$dyn/agrege_tout.so" "$dyn/tout" \
-      $(for m in $MODULES_DEMANDE; do echo "$dyn/dist/pyside_Qt$m.so"; done) > "$dyn/croises.txt"
+      $(for m in $MODULES_DEMANDE $MODULES_ANNEXES; do echo "$dyn/dist/pyside_Qt$m.so"; done) > "$dyn/croises.txt"
     [ -s "$dyn/croises.txt" ] || break
     for f in $FOURNISSEURS; do
       sed -n "s#^pyside_Qt$f.so #-Wl,--export=#p" "$dyn/croises.txt" > "$dyn/croises_$f.rsp"
@@ -338,7 +369,7 @@ phase_dynamique() {
   # 3. Chaque import de chaque module résolu (principal, agrégat, module chargé avant lui) : sinon Emscripten pose un
   # bouchon qui échoue au premier appel, sans rien dire au chargement (Pyodide est sans ASSERTIONS).
   "$HOTEPY" "$DEP/wasm/symboles.py" verifier "$PYODIDE/dist/pyodide.asm.wasm" "$dyn/dist/pyside_agrege.so" \
-    $(for m in $MODULES_DEMANDE; do echo "$dyn/dist/pyside_Qt$m.so"; done) || { echo "phase dynamique : imports non résolus" >&2; return 1; }
+    $(for m in $MODULES_DEMANDE $MODULES_ANNEXES; do echo "$dyn/dist/pyside_Qt$m.so"; done) || { echo "phase dynamique : imports non résolus" >&2; return 1; }
   for f in package.json pyodide.asm.js pyodide.asm.wasm pyodide.js pyodide-lock.json python_stdlib.zip test.html; do
     cp "$PYODIDE/dist/$f" "$dyn/dist/"
   done
@@ -357,7 +388,7 @@ phase_paquet() {
   local pyc="$RACINE/build/paquet"
   dossier "$pyc"; cp "$RACINE/build/dynamique/dist/python_stdlib.zip" "$pyc/"
   /DATA/Python/outils_wasm/venv-pyodide/bin/pyodide py-compile --silent --compression-level 9 "$pyc/python_stdlib.zip"
-  "$HOTEPY" - "$RACINE/build/dynamique/dist" "$pyc/python_stdlib.zip" "$DEP/hebergement/LICENSE-Pyodide-PySide6.txt" "$RACINE/pyodide-pyside6-0.29.3.5.zip" <<'PY'
+  "$HOTEPY" - "$RACINE/build/dynamique/dist" "$pyc/python_stdlib.zip" "$DEP/hebergement/LICENSE-Pyodide-PySide6.txt" "$RACINE/pyodide-pyside6-0.29.3.6.zip" <<'PY'
 import hashlib, sys, zipfile
 from pathlib import Path
 dist, stdlib, licence, sortie = map(Path, sys.argv[1:])

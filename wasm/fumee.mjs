@@ -1,6 +1,6 @@
 // Test de fumée, sous node : le Pyodide de construire.sh importe PySide6 et fait circuler un signal, sa bibliothèque
-// standard est en .pyc, les dix-neuf modules Qt à la demande se chargent au premier import (sqlite, DOM, QTest...), et qtpy6
-// s'y charge en mode paresseux.
+// standard est en .pyc, les dix-neuf modules Qt à la demande se chargent au premier import (sqlite, DOM, QTest...), qtpy6
+// s'y charge en mode paresseux, et qtpy6.QtImageFormats ajoute mng et jp2.
 //   node wasm/fumee.mjs [dossier]      (le paquet de phase_paquet dépaqueté ; modèle : scripts/smoke-test.mjs de Pyodide-Qt)
 // QApplication et les widgets veulent un navigateur (DOM) : la sonde de qtpy6.web, pas d'ici.
 import { readFile } from "node:fs/promises";
@@ -104,5 +104,23 @@ f"paresseux={_binding.LAZY} noms={len(etoiles)} alias={hasattr(jamais_nomme, 'cl
 `);
 console.log(qtpy6);
 if (!qtpy6.startsWith("paresseux=True") || !qtpy6.endsWith("alias=True")) { console.error("ÉCHEC qtpy6"); process.exit(1); }
+
+// mng et jp2 (11/10/2026) : absents au départ, inscrits par l'import de qtpy6.QtImageFormats (pyside_QtImageFormats.so).
+// Le jp2 fait l'aller-retour par Qt lui-même ; le mng (le greffon ne l'écrit pas) : deux images 4x3, rouge puis bleue.
+const images = await py.runPythonAsync(`
+import base64
+avant = {bytes(f).decode() for f in QtGui.QImageReader.supportedImageFormats()} & {"mng", "jp2"}
+import qtpy6.QtImageFormats
+image = QtGui.QImage(4, 3, QtGui.QImage.Format.Format_RGB32); image.fill(QtGui.QColor("red"))
+tampon = QtCore.QBuffer(); tampon.open(QtCore.QIODevice.OpenModeFlag.WriteOnly); image.save(tampon, "jp2")
+jp2 = QtGui.QImage.fromData(bytes(tampon.data()), "jp2")
+open("/tmp/essai.mng", "wb").write(base64.b64decode(
+    "ik1ORw0KGgoAAAAcTUhEUgAAAAQAAAADAAAACgAAAAAAAAAAAAAAAAAAAAFtsOezAAAAClRFUk0DAAAAAAF/////Z5eL6QAAAAFzUkdCAK7OHOkAAAANSUhEUgAAAAQAAAADAQMAAACOOjyFAAAAA1BMVEX/AAAZ4gk3AAAAB3RJTUUH6goLDiEUemHhcAAAAAtJREFUCNdjYAABAAAGAAFm9MlsAAAAAElFTkSuQmCCAAAADUlIRFIAAAAEAAAAAwEDAAAAjjo8hQAAAANQTFRFAAD/injSVwAAAAd0SU1FB+oKCw4hFHph4XAAAAALSURBVAjXY2AAAQAABgABZvTJbAAAAABJRU5ErkJgggAAAABNRU5EISD31Q=="))
+mng = QtGui.QImageReader("/tmp/essai.mng")
+couleurs = [hex(mng.read().pixel(0, 0)) for _ in range(2)]
+f"avant={sorted(avant)} jp2={jp2.width()}x{jp2.height()} rouge={QtGui.QColor(jp2.pixel(0, 0)).red() > 200} mng={couleurs}"
+`);
+console.log(images);
+if (images !== "avant=[] jp2=4x3 rouge=True mng=['0xffff0000', '0xff0000ff']") { console.error("ÉCHEC mng, jp2"); process.exit(1); }
 console.log("fumée : OK");
 process.exit(0);  // la fausse page laisse la boucle de node vivante : sans cela, il attendrait indéfiniment

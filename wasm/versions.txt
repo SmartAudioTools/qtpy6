@@ -1,4 +1,4 @@
-# wasm/telecharger_sources.sh, 2026-10-10
+# wasm/telecharger_sources.sh, 2026-10-11
 05eec38bb71bffff8860786e3c0766cc4b86affc72439bd246c54889bdcb7400  ./pyside-setup-everywhere-src-6.10.2.tar.xz
 aeb78d29291a2b5fd53cb55950f8f5065b4978c25fb1d77f627d695ab9adf21e  ./qtbase-everywhere-src-6.10.2.tar.xz
 405116b4c5eded981484c4c154eb392d44b69b587342f1193181175e309f2c00  ./qtcharts-everywhere-src-6.10.2.tar.xz
@@ -10,6 +10,8 @@ b95439f31d1e580c379e9828b48b03b932b0bdade4ff09f4dd639eff9da2cd75  ./qtquick3d-ev
 18d9dbbc4f7e6e96e6ed89a9965dc032e2b58158b65156c035537826216716c9  ./qtshadertools-everywhere-src-6.10.2.tar.xz
 f07ff80f38caf235187200345392ca7479445ddf49a36c3694cd52a735dad6e1  ./qtsvg-everywhere-src-6.10.2.tar.xz
 eccc751bea509ef656d20029693987a0fc03c58e21c38f1351480f3c8eb42ebd  ./qtwebsockets-everywhere-src-6.10.2.tar.xz
+f71cf643937a5fcaedcfeb30a22ba406912948ad4413148214df280afc425454  ./jasper-4.2.9.tar.gz
+cf112a1fb02f5b1c0fce5cab11ea8243852c139e669c44014125874b14b7dfaa  ./libmng-2.0.3.tar.gz
 b8d79530e3b7c96a5cb2d40d431ddb512af4a563e863728d8713039aa50203f9  pyodide/cpython/downloads/Python-3.13.2.tgz
 git 72e3c78d53a32a76e0aca7443ad24e5cae1042d3  pyodide
 git 0eb494ffb3536971da3309d98ac56f6515f985a4  pyodide/pyodide-build
