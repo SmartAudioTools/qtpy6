@@ -274,7 +274,10 @@ class Blink:
             port = s.getsockname()[1]
         python = sys.executable if importlib.util.find_spec("PyQt6.QtWebEngineWidgets") else "/usr/bin/python3"
         env = dict(os.environ, QT_QPA_PLATFORM="offscreen", QTWEBENGINE_DISABLE_SANDBOX="1",
-                   QTWEBENGINE_CHROMIUM_FLAGS="--no-zygote --disable-gpu",  # le zygote et le GPU veulent des sockets
+                   # le zygote et le processus GPU veulent des sockets ; WebGL en rendu logiciel (SwiftShader) dans le
+                   # processus : avec --disable-gpu, pas de contexte WebGL, Quick/Graphs/Quick3D rendaient vide (11/10/2026)
+                   QTWEBENGINE_CHROMIUM_FLAGS="--no-zygote --in-process-gpu --ignore-gpu-blocklist --use-gl=angle "
+                                              "--use-angle=swiftshader --enable-unsafe-swiftshader",
                    QTWEBENGINE_REMOTE_DEBUGGING=f"127.0.0.1:{port}")
         self.processus = subprocess.Popen([python, "-c", HOTE, url, str(largeur), str(hauteur)], env=env,
                                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

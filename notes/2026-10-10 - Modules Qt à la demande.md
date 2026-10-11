@@ -134,7 +134,7 @@ fichiers de la page.
     journal (`console.warn`/`error`, erreurs JS, rejets). Sans elle, les qWarning de Qt-WASM (« WebGL context creation
     failed », « Context is lost ») sont invisibles : ils vont à `console.warn`, pas à stderr. **Idée, pas codée** : en
     faire une option `--console` de `qtpy6.web.sonde`.
-- Chrome (postes du lycée) : non testé ; le relais Chromium de l'utilisateur reste à faire si une page l'exige.
+- Chrome : moteur Blink de Chrome 140 (sonde `--chromium`, WebGL logiciel) testé le 11/10/2026, voir « Points ouverts » ; un Chrome de bureau avec GPU (postes du lycée) non mesuré.
 - `hebergement/telecharger.sh` lancé depuis le bac à sable (sans réseau) : le zip dépaqueté dans `exemple/pyodide-qt`,
   la roue sqlite3 recopiée depuis `SmartTeacher/QCM/web/pyqt6/pyodide-qt` (même empreinte) et les jumeaux br/gz produits à
   la main (les cinq dernières lignes du script) : le dossier est complet, 42 fichiers.
@@ -366,7 +366,7 @@ roue sqlite3 vérifiée par sha256.
 - `symboles.py verifier` vert sur les dix-neuf modules et `node wasm/fumee.mjs` vert (`ws=1024 q3d=True graphs=True
   gw=True images=True`) : testé. Ce que la fumée prouve : les quatre liaisons s'importent et se chargent dans l'ordre de
   `DEPENDANCES`, un `QWebSocket` se construit, `QImageReader` liste les cinq formats.
-- Rendu Quick3D et Graphs : testé dans Firefox 155 avec WebGL (11/10/2026, ci-dessous) ; NON testé dans Chrome. NON testé : une
+- Rendu Quick3D et Graphs : testé dans Firefox 155 et Chrome 140 (QtWebEngine, WebGL logiciel) le 11/10/2026, ci-dessous. NON testé : une
   connexion WebSocket réelle (le bac à sable n'a pas le réseau) ; la lecture effective d'une image webp ou tiff.
 - Relu par la session : le diff entier des onze fichiers ; les tailles ; le journal de l'exemple.
 
@@ -387,9 +387,12 @@ roue sqlite3 vérifiée par sha256.
   `capture_firefox.png`) : chaque scène dans un QQuickWidget créé depuis un slot, verdict sur les pixels de
   `grabFramebuffer()`. Firefox 155 : GraphsView OK (357 points verts, la courbe), View3D OK (1 320 points rouges, le cube
   éclairé), Bars3D OK (83 couleurs). Capture relue : les trois scènes sont rendues.
-  Chrome NON vérifié : la sonde `--chromium` (QtWebEngine 6.11, Chrome 140) n'obtient aucun contexte WebGL sur cette
-  machine (« WebGL context creation failed » ×13, framebuffer 0×0, `sonde_chromium.log`) — limite de l'outil de mesure,
-  pas de Qt-WASM. Reste : la page ouverte dans un vrai Chrome (postes du lycée).
+  Chrome : d'abord ÉCHEC apparent (framebuffer 0×0, « WebGL context creation failed » ×13) — la faute à la SONDE, qui lançait
+  QtWebEngine avec `--disable-gpu`. Sonde corrigée le même jour (`qtpy6/web/sonde.py` : WebGL logiciel SwiftShader dans le
+  processus, `--in-process-gpu --use-angle=swiftshader --enable-unsafe-swiftshader`), qui tourne même DANS le bac à sable :
+  Chrome 140 (QtWebEngine 6.11) rend les trois scènes (513 points verts, 1 628 rouges, 99 couleurs ; `sonde_chromium.log`,
+  `capture_chromium.png` relue), et `essais/modules_qt_fin` reste à quatre OK avec la nouvelle sonde. Niveau de preuve : le
+  moteur Blink de Chrome 140 avec WebGL logiciel ; un Chrome de bureau avec GPU (postes du lycée) n'est pas mesuré.
 - Quick3D : seuls `QtQuick3D` (qquick3dplugin) est lié ; `QtQuick3D.Helpers`, `.Effects`, `.Particles3D`, `.AssetUtils`
   manquent à un QML qui les importe (erreur de module QML à l'exécution, pas de lien).
 - Greffons d'images : mng et jp2 absents (libmng, jasper non fournis par Qt).
