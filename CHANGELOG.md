@@ -14,6 +14,11 @@
   corrige 3 codes en fin d'épreuve en 29 s au lieu de 54 s l'un après l'autre (`web.md`).
   Correctif : `js` n'est lu qu'à l'appel de `os.cpu_count()`, plus à l'import de `QtCore` (les tests hors navigateur
   de `test_web.py` échouaient sur `No module named 'js'`).
+- La valeur par défaut d'un réglage de session (`auto`, `default`) n'est plus écrite : la choisir dans QtSelector
+  retire la ligne de `QtEnvironment.sh` (`set_env(clé, None)`, `reg delete` sous Windows). Un `QT_API=auto` exporté à
+  toute la session faisait échouer au lancement chaque programme qui lit `QT_API` avec qtpy ordinaire (Spyder,
+  qtawesome, matplotlib : « Specified QT_API='auto' is not in valid options »). Et `get_env` rend le défaut, plus la
+  valeur héritée de la connexion, quand le réglage n'existe plus : le retour au défaut vaut sans se reconnecter.
 - Un réglage de session changé dans QtSelector vaut pour une application lancée du bureau sans relire
   `QtEnvironment.sh` (SmartTeacher), sans reconnexion : `set_env` écrit avec chaque réglage sa copie
   `QTPY6_LOGIN_<clé>`, et `get_env` ne préfère l'environnement que s'il diffère de cette copie, donc

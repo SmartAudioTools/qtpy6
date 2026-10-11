@@ -7,6 +7,11 @@ change does not reach: the session setting wins over them. To tell them from a v
 set on purpose (``QT_STYLE=Fusion python app.py``, a launcher, Python code), each
 setting is written with a copy, ``QTPY6_LOGIN_<key>``, exported with it: a value that
 differs from its copy was set after the login, and wins over the session setting.
+
+The default value of a setting (``auto``, ``default``) is not written: ``set_env(key, None)``
+removes the setting, since an exported ``QT_API=auto`` breaks every other program of the
+session that reads it (qtpy, matplotlib: ``auto`` is not one of their values). A variable
+that still holds its login value then gives way to the default, without logging out.
 """
 import os
 import shlex
@@ -19,7 +24,7 @@ def get_env(key, default=None):
     if value is not None and value != os.environ.get(_LOGIN + key):
         return value
     session = _session_value(key)
-    return session if session is not None else os.environ.get(key, default)
+    return session if session is not None else default
 
 
 if os.name == 'nt':
@@ -41,8 +46,12 @@ if os.name == 'nt':
         info = subprocess.STARTUPINFO()
         info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         for name in (key, _LOGIN + key):
-            os.environ[name] = value
-            subprocess.Popen(['setx', name, value], startupinfo=info)
+            if value is None:
+                os.environ.pop(name, None)
+                subprocess.Popen(['reg', 'delete', r'HKCU\Environment', '/v', name, '/f'], startupinfo=info)
+            else:
+                os.environ[name] = value
+                subprocess.Popen(['setx', name, value], startupinfo=info)
 
     # Same effect as the "DPI aware" property of pythonw.exe: no blurry window scaling with Qt6.
     try:
@@ -68,15 +77,20 @@ else:
         return None
 
     def set_env(key, value):
-        os.environ[key] = os.environ[_LOGIN + key] = value
-        new_line = f'export {key}={shlex.quote(value)} {_LOGIN}{key}={shlex.quote(value)}\n'
+        new_lines = []
+        if value is None:
+            os.environ.pop(key, None)
+            os.environ.pop(_LOGIN + key, None)
+        else:
+            os.environ[key] = os.environ[_LOGIN + key] = value
+            new_lines.append(f'export {key}={shlex.quote(value)} {_LOGIN}{key}={shlex.quote(value)}\n')
         lines = _env_file_lines()
         for i, line in enumerate(lines):
             if line.startswith(f'export {key}='):
-                lines[i] = new_line
+                lines[i:i + 1] = new_lines
                 break
         else:
-            lines.append(new_line)
+            lines += new_lines
         os.makedirs(os.path.dirname(_ENV_FILE), exist_ok=True)
         with open(_ENV_FILE, 'w') as file:
             file.writelines(lines)

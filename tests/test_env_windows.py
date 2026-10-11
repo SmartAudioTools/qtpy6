@@ -101,3 +101,13 @@ def test_set_env(windows):
 def test_dpi_awareness(windows, shcore, expected):
     _, calls = windows(shcore=shcore)
     assert calls == [expected]
+
+
+def test_set_env_removed(windows):
+    env, calls = windows()
+    env.set_env('QT_API', 'PySide6')
+    env.set_env('QT_API', None)
+    assert 'QT_API' not in os.environ and 'QTPY6_LOGIN_QT_API' not in os.environ
+    assert calls[-2:] == [(['reg', 'delete', r'HKCU\Environment', '/v', 'QT_API', '/f'], subprocess.STARTF_USESHOWWINDOW),
+                          (['reg', 'delete', r'HKCU\Environment', '/v', 'QTPY6_LOGIN_QT_API', '/f'],
+                           subprocess.STARTF_USESHOWWINDOW)]

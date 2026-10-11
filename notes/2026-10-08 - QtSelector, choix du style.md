@@ -96,3 +96,33 @@ contenu du fichier), `test_env_file_written_by_hand`, `test_font_settings` et `t
 Niveau de preuve : testé sous Linux en processus réels ; Windows testé seulement contre des
 `winreg`/`setx` simulés, pas sur une vraie machine. Une ligne `export A=… B=…` sourcée par `sh`
 exporte bien les deux variables (vérifié) ; dans une vraie ouverture de session Plasma : non vérifié.
+
+## 11/10/2026 — la valeur par défaut n'est plus écrite (`QT_API=auto` cassait qtpy)
+
+Demande : le dock Claude lancé du menu KDE échouait sur `Specified QT_API='qt_api' is not in valid
+options` ; l'utilisateur : « ce n'est pas du à ce que j'avais mis en place avec une autre session pour
+permetre à QtSelector d'etre immédiatement pris en compte en cas de modifications ? », puis « tu lis le
+mécansime mis en place puis tu corrige ce qui doit etre corrigé ».
+
+Cause : `QtEnvironment.sh` portait `export QT_API=auto` (avant : une valeur `qt_api`, d'origine non
+retrouvée). Exporté à toute la session, `auto` n'est pas une valeur de qtpy ordinaire : Spyder,
+qtawesome, matplotlib échouent. SmartOS le contournait déjà (`qt_api_env.sh`, `mise_a_jour.sh`).
+
+Livré : `set_env(clé, None)` retire le réglage (ligne du fichier, `reg delete` des deux noms sous
+Windows, `os.environ`) ; QtSelector écrit `None` quand la valeur choisie est son défaut ; `get_env` rend
+`default` plutôt que la valeur héritée de la connexion quand le réglage n'existe plus.
+
+Écarté :
+- écrire `auto` et garder les contournements SmartOS : toute application qtpy ordinaire lancée hors de
+  ces scripts casse ;
+- un fichier de réglages non exporté pour `auto` : deux mécanismes au lieu d'un (même raison qu'au-dessus) ;
+- retirer la ligne sans toucher `get_env` : la valeur héritée de la connexion survivrait jusqu'à la
+  reconnexion, contraire au but de la section précédente.
+
+Preuve : tests Linux en processus réels (`test_env_file_removed`, fin de `test_selector_choices`), qui
+échouent sans le correctif ; Windows seulement contre des doublures (`test_set_env_removed`). Suite
+complète : 215 passés, 3 sautés, sous PySide6 et PyQt6.
+
+Limite : la ligne `export QT_API=auto` déjà écrite chez l'utilisateur ne part qu'au prochain choix dans
+QtSelector (choisir PySide6 puis de nouveau auto : reprendre la même valeur n'émet aucun signal).
+Les contournements de SmartOS restent, pour les machines pas encore nettoyées.

@@ -9,7 +9,8 @@ from qtpy6 import API_NAMES, QtGui, QtWidgets, get_env, set_env
 
 
 class _SettingComboBox(QtWidgets.QComboBox):
-    """The session's value of `key` among `choices` (added when unknown), written back on change."""
+    """The session's value of `key` among `choices` (added when unknown), written back on change;
+    choosing `default` removes the setting."""
     key = default = None
     choices = ()
 
@@ -27,7 +28,7 @@ class _SettingComboBox(QtWidgets.QComboBox):
         self.current_text_changed.connect(self._write)
 
     def _write(self, value):
-        set_env(self.key, value)
+        set_env(self.key, None if value == self.default else value)  # the default is not written: see _env
 
 
 class QtApiSelector(_SettingComboBox):
@@ -65,7 +66,7 @@ class QtFontSelector(QtWidgets.QFontComboBox):
         self.current_text_changed.connect(self._write)
 
     def _write(self, value):
-        set_env('QT_FONT', value)
+        set_env('QT_FONT', None if value == 'default' else value)
 
 
 class QtSelector(QtWidgets.QWidget):

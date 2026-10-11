@@ -244,6 +244,25 @@ def test_env_file(env_file, monkeypatch):
 
 
 @pytest.mark.skipif(os.name == 'nt', reason='the registry is not a file')
+def test_env_file_removed(env_file, monkeypatch):
+    """`auto` exported for the whole session broke qtpy (Spyder, qtawesome, matplotlib): the default is not written."""
+    qtpy6.set_env('QT_FONT', 'Serif')
+    qtpy6.set_env('QT_API', 'PySide6')
+    qtpy6.set_env('QT_API', None)
+    assert 'QT_API' not in os.environ and 'QTPY6_LOGIN_QT_API' not in os.environ
+    assert env_file.read_text() == "export QT_FONT=Serif QTPY6_LOGIN_QT_FONT=Serif\n"
+    assert qtpy6.get_env('QT_API', 'auto') == 'auto'
+    # A program started from the desktop still inherits the login value: it gives way to the default.
+    monkeypatch.setenv('QT_API', 'PySide6')
+    monkeypatch.setenv('QTPY6_LOGIN_QT_API', 'PySide6')
+    assert qtpy6.get_env('QT_API', 'auto') == 'auto'
+    monkeypatch.setenv('QT_API', 'pyqt6')  # set on purpose: it still wins
+    assert qtpy6.get_env('QT_API', 'auto') == 'pyqt6'
+    qtpy6.set_env('QT_SCALE', None)  # nothing to remove
+    assert env_file.read_text() == "export QT_FONT=Serif QTPY6_LOGIN_QT_FONT=Serif\n"
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='the registry is not a file')
 def test_env_file_written_by_hand(env_file):
     env_file.parent.mkdir()
     env_file.write_text('# Qt\n\nexport QT_FONT_SIZE=12  # points\nexport QT_FONT="Noto Sans"\n'
@@ -288,7 +307,9 @@ def test_selector_choices(app, env_file):
     assert scale.current_text() == '3.7' and scale.count() == len(QtSelector.QtScaleSelector.choices) + 1
     assert font.current_text() == 'No Such Family' and font.item_text(0) == 'default'
     font.set_current_text('default')
-    assert qtpy6.get_env('QT_FONT') == 'default'
+    api.set_current_text('auto')
+    assert qtpy6.get_env('QT_FONT') is None and qtpy6.get_env('QT_API') is None
+    assert 'QT_API' not in env_file.read_text() and 'QT_FONT' not in env_file.read_text()
 
 
 def test_selector_main(app, env_file, monkeypatch):

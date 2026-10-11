@@ -100,6 +100,9 @@ exportée en même temps. Une variable égale à sa copie est héritée de la
 connexion, et le réglage de session l'emporte ; une variable qui en diffère a été
 posée exprès (`QT_STYLE=Fusion python app.py`, un lanceur, du code Python), et
 c'est elle qui l'emporte.
+La valeur par défaut d'un réglage (`auto`, `default`) n'est pas écrite :
+`set_env(clé, None)` retire le réglage, car un `QT_API=auto` exporté casse les
+programmes qui lisent `QT_API` avec qtpy ordinaire.
 
 | Réglage | Valeurs | Effet |
 |---|---|---|
