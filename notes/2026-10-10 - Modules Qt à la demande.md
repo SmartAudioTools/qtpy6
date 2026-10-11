@@ -367,8 +367,20 @@ roue sqlite3 vérifiée par sha256.
 - `symboles.py verifier` vert sur les dix-neuf modules et `node wasm/fumee.mjs` vert (`ws=1024 q3d=True graphs=True
   gw=True images=True`) : testé. Ce que la fumée prouve : les quatre liaisons s'importent et se chargent dans l'ordre de
   `DEPENDANCES`, un `QWebSocket` se construit, `QImageReader` liste les cinq formats.
-- Rendu Quick3D et Graphs : testé dans Firefox 155 et Chrome 140 (QtWebEngine, WebGL logiciel) le 11/10/2026, ci-dessous. NON testé : une
-  connexion WebSocket réelle (le bac à sable n'a pas le réseau) ; la lecture effective d'une image webp ou tiff.
+- Rendu Quick3D et Graphs : testé dans Firefox 155 et Chrome 140 (QtWebEngine, WebGL logiciel) le 11/10/2026, ci-dessous.
+- Connexion WebSocket réelle : testée le 11/10/2026 (« continue » sur les points ouverts), `essais/websocket_echo/` :
+  serveur d'écho `websockets` sur 127.0.0.1:8765 (`serveur.py`, le réseau local suffit, le bac à sable ne bloque que
+  l'extérieur), QtWebSockets importé depuis un slot, un texte (« bonjour é ✓ ») et un binaire (00 01 7f 80 ff) renvoyés à
+  l'identique, fermeture propre (code 1000 côté serveur). OK dans Firefox 155 et Chrome 140 (`sonde.log`,
+  `sonde_chromium.log`, `serveur*.log`). Piège de l'essai : un serveur lancé en arrière-plan meurt avec l'appel Bash qui
+  l'a lancé ; serveur et sonde vont dans le MÊME appel (premier essai faux : « remote host closed », serveur sans connexion).
+  **Écart mesuré** : `disconnected` émis DEUX fois dans le navigateur, une seule en natif (même scénario, PySide6 de
+  SmartPython). Cause, par lecture de `qtwebsockets/src/websockets/qwebsocket_wasm_p.cpp` : `close()` émet `disconnected`
+  aussitôt, puis le rappel `onclose` du navigateur (`setSocketClosed`, état déjà Unconnected) l'émet à nouveau ; même forme
+  pour `errorOccurred`, émis par `onerror` puis par un `onclose` non propre (l'écart déjà vu sur un port fermé). Non corrigé :
+  un correctif de Qt (émettre seulement si l'état change) demande une nouvelle archive, à décider.
+  NON testé : `wss://` (TLS du navigateur), un serveur d'une autre origine distante ; la lecture effective d'une image webp
+  ou tiff venue d'ailleurs que de Qt.
 - Relu par la session : le diff entier des onze fichiers ; les tailles ; le journal de l'exemple.
 
 ### Points ouverts (à regarder en premier)
