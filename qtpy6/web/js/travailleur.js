@@ -9,7 +9,9 @@
 //           {prechauffer: {indexURL, roues}} (charger Pyodide dès maintenant, sans script : le {lancer} qui suivra
 //           l'épargne ; roues : [url de .whl] installées ensuite, que le {lancer} ne chargera plus ; répétable),
 //           {lancer: {indexURL, zip, dossier, argv, cwd, roues, env, web}} (env : os.environ du programme ; web : le dossier
-//           qtpy6/web dépaqueté, d'où le préambule), {entree: texte} (stdin), {entree: null} (fin de fichier) ;
+//           qtpy6/web dépaqueté, d'où le préambule), {entree: texte} (stdin), {entree: null} (fin de fichier),
+//           {signal: n} (Popen.send_signal hors SIGKILL/SIGTERM : gardé dans self.signaux, que le préambule livre au
+//           prochain time.sleep) ;
 //           le zip porte ses chemins depuis la racine du système de fichiers, où il est dépaqueté ; roues :
 //           {module: url de .whl}, chacune chargée au premier import de son module (rien sinon : ni octets ni délai)
 //   émis :  {sortie} (stdout), {sortie_erreur} (stderr), {fin: code}, {erreur} (Pyodide injoignable, JSPI absent)
@@ -55,6 +57,7 @@ async function traiter({ id, fonction, args }) {
   }
 }
 
+self.signaux = [];  // {signal} reçus, pas encore livrés au Python du programme
 const entrees = [], attentes = [];  // stdin : ce qui est arrivé sans être lu, et les lectures qui attendent
 self.prochaine_entree = () => entrees.length ? Promise.resolve(entrees.shift()) : new Promise(r => attentes.push(r));
 
@@ -154,6 +157,7 @@ onmessage = e => {
     return;
   }
   if (m.lancer) { lancer(m.lancer).catch(e => postMessage({ erreur: String(e) })); return; }
+  if (m.signal) { self.signaux.push(m.signal); return; }
   if ("entree" in m) { attentes.length ? attentes.shift()(m.entree) : entrees.push(m.entree); return; }
   file = m.init ? file.then(() => demarrer(m.init)).catch(e => postMessage({ erreur: String(e) }))
                 : file.then(() => traiter(m.appel));

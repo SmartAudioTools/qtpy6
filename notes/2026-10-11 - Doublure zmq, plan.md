@@ -184,3 +184,56 @@ Points ouverts :
 - Sondes d'essai `sonde_noyau.py`, `noyau_pas.py`, `sonde_boucle.py` : non commitées (diagnostic ponctuel).
 
 À regarder en premier par un relecteur : `zmq_web.recevoir`/`_attacher`/`_detacher` (la clé), `threading_web.attendre`.
+
+## Jalon 8b en cours (11/10/2026, 23 h) : état à la mise en pause
+
+- `essais/spyder/jalon8b.py` : 7/7 sur le bureau. Témoin « comm prêt » = `_comm_ready_received` (l'état SpyderKernelReady
+  attend le kernel_info que demande la console, absente ici) ; appel distant = `get_syspath` (un `@comm_handler`, `get_cwd`
+  n'en est pas un). Verdicts imprimés dès qu'ils sont posés (la page peut geler).
+- Battement : `zmq_web` op `echo` — le Worker annonce son `device(QUEUE, s, s)`, la page répond à sa place tant qu'il vit ;
+  `oublier(worker)` à sa mort (`travailleur._mourir`). Tests rouges puis verts (test_zmq_web, 38 passent). Pas encore
+  mesuré dans la page.
+- Page (Firefox, `diag8b.py`, sonde jetable non commitée) : l'appel distant BLOQUANT expire (le non bloquant n'a pas été
+  relevé), et le noyau renvoie `_comm_ready` toutes les secondes : le Worker ne voit donc pas les messages comm du
+  client, ou ne voit pas la réponse au `_comm_ready`. Piste suivante : tracer côté Worker les `comm_msg` reçus sur shell.
+- Interruption : `interrupt_kernel` tue le Worker (pas de SharedArrayBuffer sans isolation cross-origin) : décision à
+  l'utilisateur, ne rien coder. Dans jalon8b la page a gelé à cette étape (jusqu'au délai de 500 s) : à localiser.
+- Rien de commité pour 8b.
+
+## Jalon 8b atteint (12/10/2026, 0 h 15) : 7/7 dans Firefox, trois passes de suite
+
+Demande citée : « passe au jalon 8b et à tous les suivant , tu peux monter à 80% ! », reprise sur « reprends ».
+Trois défauts de doublure trouvés et corrigés dans qtpy6, aucun dans le code de Spyder ni des noyaux (règle : rien dans
+le fork, ni dans jupyter_client, ipykernel, spyder_kernels).
+
+1. **Les messages comm étaient tous perdus dans le Worker** (`zmq_web.ZMQStream._livrer`). La cause : Spyder envoie ses
+   messages comm sur le canal **control**, et ipykernel y abonne une coroutine, `dispatch_control`. pyzmq planifie un
+   rappel awaitable par `asyncio.ensure_future`, mais la doublure l'appelait sans plus, d'où « coroutine
+   'Kernel.dispatch_control' was never awaited ». La doublure fait maintenant comme pyzmq. Les deux symptômes de la note
+   précédente (l'appel bloquant qui expire, `_comm_ready` renvoyé chaque seconde) avaient cette seule cause.
+   - Test `test_zmqstream_rappel_coroutine_planifie` : rouge avant la correction, vert après.
+2. **L'interruption tuait le noyau.** Avec `pgid` à None (mesuré dans la page), jupyter_client appelle
+   `Popen.send_signal(SIGINT)`, que la doublure traduisait en `kill` du Worker. Hypothèse écartée par la mesure :
+   « `os.killpg` muet sous emscripten » ; ce chemin n'est jamais emprunté.
+   - Désormais SIGKILL et SIGTERM terminent le Worker. Les autres signaux partent en `{signal: n}`
+     (`ProcessusWeb.signaler`). Dans le Worker, le préambule double `time.sleep` : il suspend (JSPI) au lieu de bloquer,
+     et livre au réveil les signaux reçus au gestionnaire Python. Celui de SIGINT, posé par ipykernel, lève
+     `KeyboardInterrupt`.
+   - Limite documentée (décision de l'utilisateur : ne pas coder l'isolation) : un calcul qui ne dort jamais n'est pas
+     interruptible. Il faudrait un SharedArrayBuffer, donc une page COOP/COEP.
+   - Effet de bord voulu : pendant un `time.sleep` du noyau, les messages de la page passent (zmq, battement).
+   - Tests : `test_popen_sigint_signale_sans_tuer` et `test_preambule_sleep_livre_les_signaux`.
+3. **Le redémarrage ne répondait plus** (« Kernel didn't respond in 120 seconds »). Le nouveau noyau relie les mêmes
+   ports dans un nouveau Worker, mais les sockets du client restaient branchées sur l'ancien. libzmq se reconnecte seul,
+   et `declarer_distant` fait de même : une socket connectée à un port relié ailleurs s'y rattache, avec un `connect`
+   renvoyé au nouveau Worker, abonnements compris.
+   - Test `test_port_relie_ailleurs_reconnecte`.
+
+Les **gels aléatoires** de la page (boucle JS vivante, CPU nul, une tâche Python suspendue jamais réveillée) ne se sont
+pas reproduits en trois passes après ces corrections. Lien de cause supposé, non démontré : ils survenaient tous après
+l'interruption ou pendant un lancement, quand le client parlait à un Worker mort. À surveiller aux jalons 8c et 8d.
+
+**Vérifié.** Bureau : 7/7. Firefox, par la sonde : 7/7 sur trois passes (58 s, 31 s, 31 s), interruption en 1,2 à 1,5 s,
+redémarrage avec un pid différent. Suite qtpy6 : 226 passent, 3 ignorés, 1 échec, `test_service_worker[chromium]`. Il
+échoue aussi lancé seul : le cache v=1 de `sw.js` survit sous Chromium. C'est un fichier que ce travail ne touche pas, et
+le défaut reste ouvert hors de ce jalon. Chrome n'a pas été essayé pour 8b.

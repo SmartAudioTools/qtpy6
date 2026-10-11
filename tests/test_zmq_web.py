@@ -227,6 +227,28 @@ def test_zmqstream():
     assert flux.closed()
 
 
+def test_zmqstream_rappel_coroutine_planifie():
+    """ipykernel passe une coroutine (``Kernel.dispatch_control``) à ``on_recv`` du canal control : comme pyzmq, la
+    doublure doit la planifier, sinon tout message control est perdu (« coroutine … was never awaited »)."""
+    contexte, routeur, dealer = paire()
+    flux = zmq_web.ZMQStream(routeur)
+    recus = []
+
+    async def rappel(frames):
+        recus.append(frames)
+
+    async def principal():
+        flux.on_recv(rappel)
+        dealer.send_multipart([b"1"])
+        zmq_web.pomper()
+        for _ in range(3):
+            await asyncio.sleep(0)
+
+    asyncio.run(principal())
+    assert len(recus) == 1 and recus[0][1:] == [b"1"]
+    flux.close()
+
+
 def test_asyncio():
     asyn = zmq_web.asyncio
     contexte = asyn.Context()
@@ -336,6 +358,24 @@ def test_protocole_distant_cote_connecte():
     assert message["frames"] == [b"x"]
     zmq_web.recevoir("w1", {"op": "vers_pair", "port": 5555, "pair": identite, "frames": [b"y"]})
     assert dealer.recv_multipart(zmq_web.NOBLOCK) == [b"y"]
+
+
+def test_port_relie_ailleurs_reconnecte():
+    """Un noyau redémarré relie les mêmes ports dans un autre Worker : le client s'y reconnecte, comme libzmq."""
+    envoyes = []
+    zmq_web.installer(poster=lambda destination, message: envoyes.append((destination, message)))
+    zmq_web.declarer_distant(5555, "w1")
+    dealer = zmq_web.Context().socket(zmq_web.DEALER)
+    dealer.connect("tcp://127.0.0.1:5555")
+    identite = dealer.getsockopt(zmq_web.IDENTITY)
+    envoyes.clear()
+    zmq_web.recevoir("w2", {"op": "bind", "port": 5555})
+    assert envoyes == [("w2", {"op": "connect", "port": 5555, "type": zmq_web.DEALER, "pair": identite,
+                               "abonnements": []})]
+    dealer.send_multipart([b"x"])
+    assert envoyes[-1][0] == "w2" and envoyes[-1][1]["op"] == "vers_lie"
+    zmq_web.recevoir("w2", {"op": "bind", "port": 5555})  # même destination : rien de plus
+    assert len(envoyes) == 2
 
 
 def test_protocole_distant_cote_lie():
@@ -655,3 +695,43 @@ def test_fil_suspendu_n_est_plus_le_fil_courant():
     threading_web.pomper()
     assert vus == [fil, threading_web.main_thread(), fil]
     assert threading_web.current_thread() is threading_web.main_thread()
+
+
+def test_battement_annonce_par_le_worker():
+    """Le Heartbeat d'ipykernel est ``device(QUEUE, s, s)`` sur un port lié : dans un Worker, un calcul qui ne rend
+    jamais la main arrêterait l'écho. Le Worker annonce donc ce port à la page (``echo``), qui répondra à sa place
+    (jalon 8b)."""
+    envoyes = []
+    zmq_web.installer(poster=lambda destination, message: envoyes.append((destination, message)))
+    zmq_web.en_travailleur = True
+    contexte = zmq_web.Context()
+    rep = contexte.socket(zmq_web.ROUTER)
+    rep.bind("tcp://127.0.0.1:5620")
+    def lancer():
+        with pytest.raises(zmq_web.ZMQError):
+            zmq_web.device(zmq_web.QUEUE, rep, rep)
+
+    fil = threading_web.Thread(target=lancer, daemon=True)
+    fil.start()
+    zmq_web.plus_tard(contexte.term, 50)
+    fil.join(1)
+    assert (None, {"op": "echo", "port": 5620}) in envoyes
+
+
+def test_battement_repondu_par_la_page_tant_que_le_worker_vit():
+    """Côté page : un port annoncé ``echo`` répond tout de suite, sans aller au Worker (occupé ou non) ; une fois le
+    Worker oublié (``oublier``, à sa mort), plus de réponse : jupyter_client le voit mort, comme en natif."""
+    envoyes = []
+    zmq_web.installer(poster=lambda destination, message: envoyes.append((destination, message)))
+    zmq_web.recevoir("w1", {"op": "bind", "port": 5621})
+    zmq_web.recevoir("w1", {"op": "echo", "port": 5621})
+    contexte = zmq_web.Context()
+    req = contexte.socket(zmq_web.REQ)
+    req.connect("tcp://127.0.0.1:5621")
+    req.send(b"ping")
+    assert req.recv(zmq_web.NOBLOCK) == b"ping"
+    assert not [m for _, m in envoyes if m["op"] == "vers_lie"]
+    zmq_web.oublier("w1")
+    req.send(b"ping")
+    with pytest.raises(zmq_web.Again):
+        req.recv(zmq_web.NOBLOCK)

@@ -18,7 +18,10 @@ filtrage (PUB, SUB). Les messages entre interpréteurs sont des dictionnaires ``
 - ``vers_pair``  {port, pair, frames}              de la socket liée au port vers la socket connectée d'identité ``pair``
                                                    (une identité peut servir à plusieurs ports : shell et control) ;
 - ``subscribe`` / ``unsubscribe`` {port, pair, topic} ;  ``disconnect`` {port, pair} ;
-- ``bind``       {port}                            un Worker annonce à la page un port qu'il vient de lier."""
+- ``bind``       {port}                            un Worker annonce à la page un port qu'il vient de lier ;
+- ``echo``       {port}                            un Worker annonce que ce port lié n'est qu'un écho (le battement de
+                                                   cœur d'ipykernel) : la page répond à sa place tant qu'il vit, même
+                                                   pendant un calcul qui ne rend jamais la main."""
 
 from __future__ import annotations
 
@@ -197,6 +200,7 @@ class InterruptedSystemCall(ZMQError):
 _lies: dict[int | str, Socket] = {}  # port (tcp) ou endpoint (ipc, inproc) → socket liée
 _distants: dict[int, str | None] = {}  # port → interpréteur qui l'a lié (côté page)
 _connectees: dict[tuple[int | str, bytes], Socket] = {}  # (port, identité) → socket connectée à un interpréteur distant
+_echos: dict[int, Any] = {}  # port → interpréteur qui l'a annoncé ``echo`` (côté page)
 _attentes: list[tuple[Socket, int | str]] = []  # connect() vers un port ni lié ni déclaré : libzmq l'accepte aussi
 _numeros_fd = itertools.count(1000)
 _sockets_connues: weakref.WeakValueDictionary[int, Socket] = weakref.WeakValueDictionary()  # underlying → socket
@@ -207,6 +211,7 @@ def reinitialiser() -> None:
     global en_travailleur
     _lies.clear()
     _distants.clear()
+    _echos.clear()
     _connectees.clear()
     _attentes.clear()
     en_travailleur = False
@@ -246,9 +251,20 @@ def _reprendre(cle: int | str) -> None:
 
 
 def declarer_distant(port: int, destination: str | None) -> None:
-    """La page apprend que ``port`` est (ou sera) lié dans l'interpréteur ``destination``."""
+    """La page apprend que ``port`` est (ou sera) lié dans l'interpréteur ``destination``. S'il l'était ailleurs (un
+    noyau redémarré dans un nouveau Worker), les sockets qui y étaient connectées s'y reconnectent, comme libzmq."""
     _distants[port] = destination
+    for (cle, identite), socket in list(_connectees.items()):
+        if cle == port and socket._cible.destination is not destination:
+            del _connectees[(cle, identite)]  # sans « disconnect » : l'ancien interpréteur est mort
+            socket._attacher(port)
     _reprendre(port)
+
+
+def oublier(destination: Any) -> None:
+    """L'interpréteur ``destination`` est mort : la page cesse de répondre à sa place aux battements de cœur."""
+    for port in [p for p, d in _echos.items() if d == destination]:
+        del _echos[port]
 
 
 def recevoir(origine: str | None, message: dict[str, Any]) -> None:
@@ -257,6 +273,9 @@ def recevoir(origine: str | None, message: dict[str, Any]) -> None:
     operation = message["op"]
     if operation == "bind":
         declarer_distant(message["port"], origine)
+        return
+    if operation == "echo":
+        _echos[message["port"]] = origine
         return
     if operation == "vers_pair":
         socket = _connectees.get((message["port"], message["pair"]))
@@ -337,6 +356,8 @@ class _Pair:
     def envoyer(self, frames: list[bytes], moi: Socket) -> None:
         if self.local is not None:
             self.local._deposer(frames, moi.identity if self.lie else None)
+        elif self.lie and self.port in _echos and _echos[self.port] == self.destination:
+            moi._deposer(list(frames), None)  # battement de cœur : la page répond pour le Worker vivant
         elif self.lie:
             poster(self.destination, _op(op="vers_lie", port=self.port, pair=moi.identity, frames=frames))
         else:
@@ -771,6 +792,10 @@ def device(device_type: int, frontend: Socket, backend: Socket) -> None:
     _relier(frontend, backend)
     if backend is not frontend:
         _relier(backend, frontend)
+    elif en_travailleur:  # un écho : la page répondra à sa place (``echo``), même quand ce Worker calcule
+        for cle in frontend._cles:
+            if isinstance(cle, int):
+                poster(None, _op(op="echo", port=cle))
     attendre(lambda: frontend.context.closed or frontend.closed or backend.closed, None)
     raise ZMQError(ETERM)
 
@@ -843,7 +868,9 @@ class ZMQStream:
         while self._rappel is not None and self.socket._inbox and (limite is None or livres < limite):
             frames = self.socket.recv_multipart(NOBLOCK, self._copie)
             livres += 1
-            self._rappel(frames)
+            resultat = self._rappel(frames)
+            if _asyncio.iscoroutine(resultat):  # ipykernel : dispatch_control ; pyzmq la planifie de même
+                _asyncio.ensure_future(resultat)
         return livres
 
     def flush(self, flag: int = POLLIN | POLLOUT, limit: int | None = None) -> int:

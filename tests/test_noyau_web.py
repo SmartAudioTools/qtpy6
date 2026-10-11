@@ -222,6 +222,13 @@ def test_popen_kill_et_terminate(popen):
     assert q.returncode == -15 and not psutil_web.pid_exists(q.pid)
 
 
+def test_popen_sigint_signale_sans_tuer(popen, faux_js):
+    p = popen(CMD)
+    p._p.worker = faux_js
+    p.send_signal(2)
+    assert p.returncode is None and not p._p.tue and faux_js.postes == [{"signal": 2}] and psutil_web.pid_exists(p.pid)
+
+
 def test_popen_sorties_redirigees(popen):
     fichier = io.BytesIO()
     p = popen(CMD, stdout=fichier, stderr=subprocess.STDOUT)
@@ -297,9 +304,10 @@ import asyncio, importlib.util, sys, time, types
 js = types.ModuleType("js"); js.posts = []; js.prets = []
 js.postMessage = js.posts.append; js.Object = types.SimpleNamespace(fromEntries=None); js.zmq_pret = js.prets.append
 ffi = types.ModuleType("pyodide.ffi"); pyodide = types.ModuleType("pyodide"); pyodide.ffi = ffi
+_dormir = time.sleep  # le préambule double time.sleep, qui appelle run_sync
 def run_sync(c):
-    time.sleep(0.01); c.close()
-ffi.run_sync = run_sync; ffi.to_js = lambda o, **k: o; ffi.create_proxy = lambda f: f
+    _dormir(0.01); c.close()
+ffi.run_sync = run_sync; ffi.can_run_sync = lambda: True; ffi.to_js = lambda o, **k: o; ffi.create_proxy = lambda f: f
 sys.modules.update(js=js, pyodide=pyodide, **{{"pyodide.ffi": ffi}})
 spec = importlib.util.spec_from_file_location("_pre", {str(PREAMBULE)!r})
 pre = importlib.util.module_from_spec(spec); spec.loader.exec_module(pre)
@@ -335,6 +343,25 @@ asyncio.run(principal(), loop_factory=asyncio.SelectorEventLoop)  # une boucle r
 print(touches)
 """)
     assert sortie == "False True True\n[{'zmq': {'op': 'bind', 'port': 1}}]\n['tot', 'tard']"
+
+
+def test_preambule_sleep_livre_les_signaux():
+    sortie = _sous_processus(ENTETE_WORKER + """
+class Signaux(list):
+    length = property(len)
+    def shift(self):
+        return self.pop(0)
+js.signaux = Signaux()
+pre.installer(WEB)
+time.sleep(0.01)  # rien en attente : rend normalement
+js.signaux.append(2)
+try:
+    while True:
+        time.sleep(0.01)
+except KeyboardInterrupt:
+    print("interrompu", len(js.signaux))
+""")
+    assert sortie == "interrompu 0"
 
 
 def test_preambule_recevoir_page():

@@ -38,6 +38,7 @@ import importlib.util
 import itertools
 import json
 import os
+import sys
 import tempfile
 import zipfile
 
@@ -282,6 +283,13 @@ class ProcessusWeb(QObject):
         if self.worker is not None:
             self.worker.postMessage(_objet({"zmq": message}))
 
+    def signaler(self, sig: int) -> None:
+        """Un signal qui ne termine pas le processus (SIGINT…) : le Worker le livre au gestionnaire Python au prochain
+        ``time.sleep`` (``preambule._doubler_sleep``). Un calcul qui ne dort jamais ne le voit pas : l'interrompre en plein
+        bytecode demande un SharedArrayBuffer partagé avec le Worker, donc une page isolée (COOP/COEP)."""
+        if self.worker is not None:
+            self.worker.postMessage(_objet({"signal": int(sig)}))
+
     def closeWriteChannel(self):
         if self.worker is not None:
             self.worker.postMessage(_objet({"entree": None}))
@@ -302,9 +310,15 @@ class ProcessusWeb(QObject):
     def kill(self):
         if self.worker is None:
             return
+        self._mourir()
+        QTimer.singleShot(0, lambda: self.finished.emit(0))  # comme QProcess : ``finished`` après le retour de ``kill``
+
+    def _mourir(self) -> None:
         self.worker.terminate()
         self.worker = None
-        QTimer.singleShot(0, lambda: self.finished.emit(0))  # comme QProcess : ``finished`` après le retour de ``kill``
+        zmq_web = sys.modules.get("qtpy6.web.zmq_web")
+        if zmq_web is not None:  # plus de battement de cœur répondu pour lui : jupyter_client le voit mort
+            zmq_web.oublier(self)
 
     def _recevoir(self, evenement):
         m = evenement.data.to_py()
@@ -317,8 +331,7 @@ class ProcessusWeb(QObject):
             if m.get(canal):  # le décodeur au fil de l'eau rend "" sur un caractère coupé
                 self._arrive(canal, m[canal])
         if "fin" in m:
-            self.worker.terminate()
-            self.worker = None
+            self._mourir()
             self.finished.emit(m["fin"])
         elif "erreur" in m:  # Pyodide injoignable, JSPI absent : le processus n'a pas pu naître
             self._erreur(0, m["erreur"])

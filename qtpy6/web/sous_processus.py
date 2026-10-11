@@ -197,9 +197,13 @@ class Popen:
         return self.returncode
 
     def send_signal(self, sig: int) -> None:
-        if sig and self.returncode is None:  # le signal 0 ne fait que tester l'existence
+        if not sig or self.returncode is not None:  # le signal 0 ne fait que tester l'existence
+            return
+        if sig in (9, 15):  # SIGKILL, SIGTERM : la fin du processus
             self._signale = int(sig)
             self._p.kill()
+        else:  # SIGINT… : au Python du Worker, qui appelle son gestionnaire (``KeyboardInterrupt``), comme sur un bureau
+            self._p.signaler(int(sig))
 
     def terminate(self) -> None:
         self.send_signal(15)

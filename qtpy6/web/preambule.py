@@ -52,6 +52,38 @@ def _plus_tard(fonction: Callable[[], Any], delai_ms: int = 0) -> None:
     asyncio.get_event_loop().call_later(delai_ms / 1000, fonction)
 
 
+def _livrer_signaux() -> None:
+    """Les signaux envoyés par la page (``Popen.send_signal`` : ``{signal: n}``, gardés dans ``self.signaux`` par
+    travailleur.js) : le gestionnaire Python de chacun, appelé ici, dans la pile du programme. Celui de SIGINT, par défaut
+    ou posé par ipykernel pendant une exécution, lève ``KeyboardInterrupt``."""
+    import js  # noqa: PLC0415
+    import signal  # noqa: PLC0415
+
+    signaux = getattr(js, "signaux", None)
+    while signaux is not None and signaux.length:
+        sig = int(signaux.shift())
+        gestionnaire = signal.getsignal(sig)
+        if callable(gestionnaire):
+            gestionnaire(sig, sys._getframe(1))
+
+
+def _doubler_sleep() -> None:
+    """``time.sleep`` suspend le Worker (JSPI) au lieu de le bloquer : les messages de la page (zmq, signaux) passent
+    pendant l'attente, et les signaux reçus sont livrés au réveil (une boucle ``while True: time.sleep(…)`` s'interrompt)."""
+    from pyodide.ffi import can_run_sync, run_sync  # noqa: PLC0415
+
+    sleep = time.sleep
+
+    def sleep_(secs: float) -> None:
+        if can_run_sync():
+            run_sync(asyncio.sleep(secs))
+        else:
+            sleep(secs)
+        _livrer_signaux()
+
+    time.sleep = sleep_
+
+
 def _poster(destination: Any, message: dict[str, Any]) -> None:
     """Dans le Worker, la seule destination est la page : ``destination`` n'est pas lue."""
     import js  # noqa: PLC0415
@@ -106,4 +138,5 @@ def installer(dossier_web: str, boucle: asyncio.AbstractEventLoop | None = None)
     boucle = boucle or asyncio.get_event_loop()
     threading_web.partager_boucle(boucle)  # les boucles qu'ipykernel crée par fil
     _garde_vie(boucle)
+    _doubler_sleep()
     js.zmq_pret(create_proxy(recevoir_page))  # la page a pu écrire avant : travailleur.js vide ce qu'il a gardé
