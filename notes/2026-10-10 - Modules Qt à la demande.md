@@ -475,6 +475,12 @@ la liste des greffons statiques à chaque appel. `supportedImageFormats()` le li
   - Le jp2 fait écrire à jasper « warning: skipping unknown tag type » sur la sortie d'erreur, sans effet sur l'image.
   - En natif, le PySide6 de SmartPython n'a ni `libqmng` ni `libqjp2` (`plugins/imageformats`) : l'import ne les donne
     pas, il n'en est pas la cause. Point ouvert, hors de ce paquet.
+    Mesuré le 11/10/2026 : les greffons du Qt système (`/usr/lib/qt6/plugins/imageformats/libqmng.so`, `libqjp2.so`,
+    qt6-imageformats 6.11.2) copiés dans un dossier `imageformats/` ajouté par `QCoreApplication.addLibraryPath` se
+    chargent dans ce PySide6 (Qt 6.11.1) : formats mng et jp2 présents, jp2 écrit puis relu 4x3 rouge (QT_DEBUG_PLUGINS :
+    « loaded library »). Non mesuré, d'après la règle du chargeur de Qt : il refuse un greffon d'une version mineure
+    PLUS RÉCENTE que la sienne (les métadonnées ne portent que 6.11), donc un Qt système passé en 6.12 face à un
+    PySide6 resté en 6.11 casserait l'essai. Non branché dans qtpy6.QtImageFormats : à décider.
 
 **Pour un relecteur** : le piège du test, un `QImageReader(QBuffer(...))` dont Python détruit le tampon avant `read()`
 (« table index is out of bounds »), a d'abord fait croire à un défaut du greffon ; la lecture d'un fichier le lit bien.
