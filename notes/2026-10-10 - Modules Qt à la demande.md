@@ -468,7 +468,9 @@ la liste des greffons statiques à chaque appel. `supportedImageFormats()` le li
 **Vérifié** :
   - `symboles.py verifier` vert ;
   - `node wasm/fumee.mjs`, sur `dist/` puis sur le zip dépaqueté (pyc) : OK, import par le finder (`run_sync`) ;
-  - NON testé dans un navigateur (Firefox, Chrome) : même chemin de chargement que les modules à la demande, déjà mesuré.
+  - `essais/images_demande/page.py`, sonde `--chromium` (Chrome 140 de QtWebEngine), depuis un slot : formats avant [],
+    après ['jp2', 'mng'], import en 0,02 s, jp2 relu rouge, mng rouge puis bleu, verdict OK ; capture relue (les trois
+    images affichées). NON testé : Firefox, un Chrome de bureau, un vrai fichier mng animé ou jp2 photographique.
   - Le jp2 fait écrire à jasper « warning: skipping unknown tag type » sur la sortie d'erreur, sans effet sur l'image.
   - En natif, le PySide6 de SmartPython n'a ni `libqmng` ni `libqjp2` (`plugins/imageformats`) : l'import ne les donne
     pas, il n'en est pas la cause. Point ouvert, hors de ce paquet.
