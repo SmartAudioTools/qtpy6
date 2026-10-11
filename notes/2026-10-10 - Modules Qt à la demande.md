@@ -542,3 +542,14 @@ Archive `pyodide-pyside6-0.29.3.4.zip`, 25 913 626 octets, sha256 `0d8f5a7a…15
   - NON testé : le son entendu et la fin de lecture (`EndOfMedia`). Le Firefox du bac à sable n'a pas d'horloge audio :
     c'est l'essai de l'utilisateur dans son navigateur, après publication.
   - Chrome non essayé.
+
+## Modules PySide6 restants : non compilés, décision du 11/10/2026
+
+« que reste-t-il qui existe dans PySide6 à compiler ? » : 33 modules du PySide6 de bureau (6.11.1) n'ont pas de liaison.
+Une quinzaine n'existent pas en wasm (WebEngine, Pdf, DBus, Bluetooth, SerialPort, Positioning…). Restaient comme
+plausibles UiTools, Help, StateMachine, Scxml, WebChannel, NetworkAuth, RemoteObjects, QuickTest, SpatialAudio,
+DataVisualization et les six Qt3D. « compile les plausibles, en commençant par QtUiTools », puis, après un relevé montrant
+qu'aucun n'est importé par SmartPythonEditor (2 066 fichiers .py, greffons compris ; seul le `uic` de PyQt apparaît, dans
+le `setup.py` de TortoiseHg, à la construction) ni par SmartTeacher : « arrête, on ne compile que ce qui sert ».
+Rien n'a été construit ; l'extension de `wasm/telecharger_sources.sh` aux sept dépôts Qt a été annulée (jamais lancée).
+Règle pour la suite : un module s'ajoute quand une application qtpy6 l'importe, pas pour couvrir la liste de PySide6.
