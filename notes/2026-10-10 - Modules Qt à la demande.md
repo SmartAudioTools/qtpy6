@@ -366,14 +366,30 @@ roue sqlite3 vérifiée par sha256.
 - `symboles.py verifier` vert sur les dix-neuf modules et `node wasm/fumee.mjs` vert (`ws=1024 q3d=True graphs=True
   gw=True images=True`) : testé. Ce que la fumée prouve : les quatre liaisons s'importent et se chargent dans l'ordre de
   `DEPENDANCES`, un `QWebSocket` se construit, `QImageReader` liste les cinq formats.
-- NON testé : un rendu Quick3D ou Graphs (il faut un navigateur avec WebGL, hors bac à sable comme pour Quick) ; une
+- Rendu Quick3D et Graphs : testé dans Firefox 155 avec WebGL (11/10/2026, ci-dessous) ; NON testé dans Chrome. NON testé : une
   connexion WebSocket réelle (le bac à sable n'a pas le réseau) ; la lecture effective d'une image webp ou tiff.
 - Relu par la session : le diff entier des onze fichiers ; les tailles ; le journal de l'exemple.
 
 ### Points ouverts (à regarder en premier)
 
-- Sonde page (Firefox) non faite pour ces quatre : à importer depuis un slot comme les sept précédents (essai
-  `essais/modules_qt_suite/page.py`, à étendre), et le rendu 3D hors bac à sable.
+- ~~Sonde page (Firefox) non faite pour ces quatre~~ FAITE le 11/10/2026 (`essais/modules_qt_fin/page.py`, paquet
+  `build/dynamique/dist` du 10/10 18 h 49, Firefox 155 sans interface dans le bac à sable, `sonde.log`), chacun importé
+  depuis un slot, quatre verdicts OK :
+    - images : 21 formats lus (tga, tif/tiff, wbmp, webp, icns compris) ; aller-retour webp et tiff (save puis relu, même
+      pixel à ±1) ;
+    - WebSockets : import 0,06 s (tire Network) ; `ws://127.0.0.1:9/` → ConnectingState, erreur, UnconnectedState. Le
+      navigateur rend « UnknownSocketError, The remote host closed the connection », émis DEUX fois (natif :
+      ConnectionRefusedError, une fois) — écart sans conséquence relevé, non corrigé ;
+    - Graphs : import QtGraphs 0,43 s, QtGraphsWidgets 0,47 s ; QLineSeries et QBarSet construits ;
+    - Quick3D : QQuickWidget sur un QML `import QtQuick3D` (View3D, cube) → Ready, aucune erreur : le module QML est
+      enregistré. Rendu NON vérifié (pas de WebGL ici, comme pour Quick).
+  Rendu FAIT le 11/10/2026 (`essais/rendu_webgl/page.py`, sonde lancée par l'utilisateur hors bac à sable, `sonde_firefox.log`,
+  `capture_firefox.png`) : chaque scène dans un QQuickWidget créé depuis un slot, verdict sur les pixels de
+  `grabFramebuffer()`. Firefox 155 : GraphsView OK (357 points verts, la courbe), View3D OK (1 320 points rouges, le cube
+  éclairé), Bars3D OK (83 couleurs). Capture relue : les trois scènes sont rendues.
+  Chrome NON vérifié : la sonde `--chromium` (QtWebEngine 6.11, Chrome 140) n'obtient aucun contexte WebGL sur cette
+  machine (« WebGL context creation failed » ×13, framebuffer 0×0, `sonde_chromium.log`) — limite de l'outil de mesure,
+  pas de Qt-WASM. Reste : la page ouverte dans un vrai Chrome (postes du lycée).
 - Quick3D : seuls `QtQuick3D` (qquick3dplugin) est lié ; `QtQuick3D.Helpers`, `.Effects`, `.Particles3D`, `.AssetUtils`
   manquent à un QML qui les importe (erreur de module QML à l'exécution, pas de lien).
 - Greffons d'images : mng et jp2 absents (libmng, jasper non fournis par Qt).
