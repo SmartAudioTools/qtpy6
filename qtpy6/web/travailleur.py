@@ -31,6 +31,7 @@ du worker reçoit des listes et des dicts ordinaires et rend de même. Elle peut
 Le worker est lu dans ce paquet (``js/travailleur.js``) et lancé depuis une URL ``blob:`` : ``indexURL`` et les URL des
 archives sont rendues absolues ici, un worker né d'un blob n'ayant pas d'adresse à laquelle les rapporter."""
 
+import enum
 import importlib.resources
 import io
 import itertools
@@ -214,8 +215,18 @@ class ProcessusWeb(QObject):
     readyReadStandardError = Signal()
     finished = Signal(int)
 
-    class ProcessChannelMode:  # les valeurs de Qt
-        SeparateChannels, MergedChannels = 0, 1
+    # Les énumérations de Qt, valeurs comprises, et leurs membres aussi à plat sur la classe comme PySide6 les sert
+    # (``QProcess.MergedChannels``) : Spyder les lit dès la définition de ses classes (``@Slot(QProcess.ProcessError)``).
+    ProcessChannelMode = enum.IntEnum("ProcessChannelMode", dict(
+        SeparateChannels=0, MergedChannels=1, ForwardedChannels=2, ForwardedOutputChannel=3, ForwardedErrorChannel=4))
+    ProcessError = enum.IntEnum("ProcessError", dict(
+        FailedToStart=0, Crashed=1, Timedout=2, ReadError=3, WriteError=4, UnknownError=5))
+    ProcessState = enum.IntEnum("ProcessState", dict(NotRunning=0, Starting=1, Running=2))
+    ExitStatus = enum.IntEnum("ExitStatus", dict(NormalExit=0, CrashExit=1))
+    ProcessChannel = enum.IntEnum("ProcessChannel", dict(StandardOutput=0, StandardError=1))
+    InputChannelMode = enum.IntEnum("InputChannelMode", dict(ManagedInputChannel=0, ForwardedInputChannel=1))
+    locals().update({m.name: m for e in (ProcessChannelMode, ProcessError, ProcessState, ExitStatus, ProcessChannel,
+                                         InputChannelMode) for m in e})
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -256,6 +267,9 @@ class ProcessusWeb(QObject):
     def closeWriteChannel(self):
         if self.worker is not None:
             self.worker.postMessage(_objet({"entree": None}))
+
+    def state(self) -> "ProcessusWeb.ProcessState":
+        return self.ProcessState.Running if self.worker is not None else self.ProcessState.NotRunning
 
     def readAllStandardOutput(self):
         return self._vider("sortie")

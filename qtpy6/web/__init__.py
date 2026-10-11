@@ -55,7 +55,8 @@ def navigateur():
 
 def application(polices: str | os.PathLike[str] | None = None, defaut: QFont | tuple | None = None,
                 persistant: str | os.PathLike[str] | None = None) -> QApplication:
-    """La QApplication du processus, créée au besoin et rendue. Hors session graphique (ni DISPLAY ni WAYLAND_DISPLAY),
+    """La QApplication du processus, créée au besoin et rendue ; une QApplication créée ailleurs (la SpyderApplication de
+    Spyder) est préparée de même, une seule fois. Hors session graphique (ni DISPLAY ni WAYLAND_DISPLAY),
     ``QT_QPA_PLATFORM`` passe à ``offscreen`` : les tests et les exports tournent sans écran. Dans le navigateur, Qt n'a
     AUCUNE police système : les fichiers ``.ttf``/``.otf`` du dossier ``polices`` y sont chargés (la première à chasse
     fixe devient ``systemFont(FixedFont)``), et ``defaut`` (un QFont, ou ``("Noto Sans", 9)``) devient la police de
@@ -71,10 +72,14 @@ def application(polices: str | os.PathLike[str] | None = None, defaut: QFont | t
     from . import stockage  # noqa: PLC0415
 
     global _APP
-    if QApplication.instance() is None:
+    app = QApplication.instance()
+    if app is None:
         if not navigateur() and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
             os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-        _APP = app = QApplication(sys.argv[:1])  # gardée : sous PyQt6, une
+        app = QApplication(sys.argv[:1])
+    if _APP is not app:
+        # Préparée une fois, qu'elle vienne d'ici ou de l'application (Spyder crée sa SpyderApplication, jalon 7).
+        _APP = app  # gardée : sous PyQt6, une
         # QApplication dont la dernière référence Python disparaît est détruite, et toutes ses fenêtres avec elle
         _ramasser(app)
         if navigateur():

@@ -8,7 +8,7 @@ editeur.py sans), puis le mesure avec la sonde :
 
 Même mécanisme que ``python -m qtpy6.web.construire``, avec en plus : le fork Spyder et les roues pures sur sys.path (d'où
 ``--paquet spyder`` prend le fork), les paquets purs que l'import de CodeEditor tire (relevé par audit de sys.modules sur le
-bureau), les dossiers de Spyder inutiles ici laissés dehors (MathJax de l'aide : 29 Mo, traductions : 6 Mo, tests : 4 Mo),
+bureau), les dossiers de Spyder inutiles ici laissés dehors (MathJax de l'aide : 29 Mo, traductions sauf le .mo français : 6 Mo, tests : 4 Mo), les métadonnées de spyder (ses points d'entrée),
 les polices DejaVu, et deux mesures imprimées dans le journal de la page : durée totale et tas WebAssembly."""
 
 import json
@@ -30,7 +30,11 @@ PAQUETS = ("spyder qtpy IPython asttokens chardet colorama decorator diff_match_
            "stack_data superqt tinycss2 traitlets wcwidth webencodings "
            "dateutil jupyter_client jupyter_core msgpack platformdirs pyuca tornado watchdog").split()  # jalon 6 : mainwindow + 33 plugins
 DISTRIBUTIONS = ["qstylizer", "ipython_pygments_lexers", "typing_extensions", "six"]  # modules d'un seul fichier : --paquet prendrait site-packages
-EXCLURE = ["spyder/plugins/help/utils/js/", "spyder/locale/", "qtpy6/web/js/pdfjs/",
+FORK = Path("/DATA/Python/FORKS/SmartPythonEditor")
+EXCLURE = ["spyder/plugins/help/utils/js/", "qtpy6/web/js/pdfjs/",
+           "spyder/locale/spyder.pot", "spyder/locale/fr/LC_MESSAGES/spyder.po",  # jalon 7 : config/base.py liste le
+           *(f"spyder/locale/{l.name}/" for l in (FORK / "spyder/locale").iterdir() if l.name != "fr"),  # dossier ; le .mo
+           # français est gardé, pour une interface en français
            "jedi/third_party/typeshed/stubs/"]  # stubs tiers (12 Mo) : jamais consultés ici, voir roues_jedi.py
 EXCLURE_TESTS = "/tests/"
 POLICES = [f"/usr/share/fonts/TTF/DejaVu{n}.ttf" for n in ("Sans", "Sans-Bold", "SansMono", "SansMono-Bold")]
@@ -45,6 +49,8 @@ MESURE = ('  await rendu();\n'
 def assembler(archive, fichiers=(), **k):
     """L'assembleur de qtpy6, avec les exclusions d'ici en plus (dont tout dossier tests/)."""
     k["exclure"] = [*k.get("exclure", ()), *EXCLURE]
+    fichiers = {**dict(fichiers), **{f"spyder.egg-info/{n}": FORK / "spyder.egg-info" / n  # jalon 7 : les points d'entrée
+                                     for n in ("PKG-INFO", "entry_points.txt")}}  # spyder.plugins, que MainWindow.setup lit
     original = _assembler.zipfile.ZipFile
 
     class Zip(original):

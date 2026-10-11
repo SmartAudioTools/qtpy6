@@ -62,6 +62,19 @@ for _nom, _attrs in (("zmq.asyncio", dict(Context=_Classe, Socket=_Classe, Polle
     if "zmq" in sys.modules and not getattr(sys.modules["zmq"], "__file__", None):  # la doublure, pas le vrai
         doublure(_nom, **_attrs)
         setattr(sys.modules[_nom.rpartition(".")[0]], _nom.rpartition(".")[2], sys.modules[_nom])
+# pylint : absent de SmartPython comme de la page ; le plugin Pylint lit sa version dès l'import (main_widget.py,
+# importlib.metadata.version), et find_internal_plugins importe tous les plugins (jalon 7) : des métadonnées seules.
+try:
+    import importlib.metadata
+    importlib.metadata.version("pylint")
+except importlib.metadata.PackageNotFoundError:
+    import tempfile
+    _meta = os.path.join(tempfile.mkdtemp(prefix="doublures-"), "pylint-3.3.0.dist-info")
+    os.makedirs(_meta)
+    with open(os.path.join(_meta, "METADATA"), "w") as _f:
+        _f.write("Metadata-Version: 2.1\nName: pylint\nVersion: 3.3.0\n")
+    sys.path.append(os.path.dirname(_meta))
+    print("doublure : métadonnées de pylint")
 # PySide6.QtPrintSupport : plus de doublure depuis le 10/10/2026, le module est chargé à la demande (wasm/pyodide-qt.mjs).
 doublure("inflection",                                       # pour qstylizer ; les deux seules fonctions qu'il appelle
          underscore=lambda m: re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", m)).lower(),

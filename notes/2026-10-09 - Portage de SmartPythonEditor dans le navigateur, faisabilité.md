@@ -813,3 +813,63 @@ précédent dont la voie B copierait l'architecture noyau ; Binder : un vrai Spy
   PySide6 — ce sont les deux listes qui diront ce que la voie B coûte vraiment), puis la capture web.
 - Si c'est la voie C : lister ce que l'utilisateur attend d'un « éditeur » pour les élèves (fichiers multiples ?
   débogueur ? complétion ?) ; chaque brique est un item de TODO du lecteur web.
+
+## Jalon 7 : la vraie MainWindow (en cours ; pause de l'utilisateur à 18 h, reprise à 18 h 22, arrêt quota à 18 h 30)
+
+Plan accepté par le Superviseur : `essais/spyder/jalon7.py`, même script sur le bureau (offscreen, `SPYDER_CONFDIR`
+jetable) et dans la page ; trois verdicts par plugin (passe / casse avec cause / non mesuré).
+
+FAIT (non commité) :
+- `qtpy6/web/__init__.py`, `application()` : prépare aussi une QApplication créée ailleurs (Spyder crée sa
+  `SpyderApplication`, dont `set_font` n'existe pas sur une QApplication ordinaire ; qtpy6 ne doit donc pas la créer).
+- `essais/spyder/construire_site.py` : métadonnées de spyder (`PKG-INFO`, `entry_points.txt` : `find_internal_plugins`
+  lit les points d'entrée) et locale française (`.mo` seul ; `config/base.py` liste le dossier) dans app.zip.
+- `essais/spyder/preparer.py` : doublure des métadonnées de pylint (absent de SmartPython comme de la page).
+- `essais/spyder/jalon7.py`.
+
+MESURÉ sur le bureau seulement (la page n'a pas encore été essayée) :
+- **Défaut du fork, commun bureau/page, à signaler à la session du fork** : le plugin Completions passe à
+  `inspect.signature` tous les `create_*` de sa page de préférences, dont `QWidget.create`/`createWindowContainer`,
+  natifs sans signature (ValueError, PySide6 6.11.1 ET PyQt6 6.11.0). Contourné dans l'essai seulement.
+- `--no-web-widgets` des deux côtés : sur le bureau, Help casse sinon (`FrameWebView.setFont() takes no keyword
+  arguments`, PySide6) et le dock absent fait échouer Layout.
+- PyQt6, offscreen : 31 passe, 0 casse, 2 non mesuré (help, onlinehelp) ; setup 2,1 s, RSS 88 → 289 Mio ;
+  `post_visible_setup` atteint.
+- PySide6 6.11.1, offscreen : setup sans casse, puis **segfault** dans `CodeEditor.setPlainText` (ouverture du fichier
+  temporaire, `post_visible_setup` → `reopen_last_session`). Cause non cherchée ; propre à PySide6 sur le bureau.
+
+MESURÉ dans la page (sonde Firefox, 11/10/2026, PySide6 6.10.2) :
+- Premier passage : 30 passe, 1 casse, 2 non mesuré. Completions casse sur `QProcess.ProcessError` : **manque de
+  qtpy6**, la doublure `ProcessusWeb` n'avait pas les énumérations de `QProcess`. Corrigé dans
+  `qtpy6/web/travailleur.py` (FAIT, non commité) : les six énumérations de Qt, avec leurs valeurs, en `enum.IntEnum`,
+  leurs membres aussi posés à plat sur la classe comme PySide6 les sert (`QProcess.MergedChannels`, `QProcess.NotRunning`,
+  les deux formes figurent dans le fork), et `state()`. Écarté : ne poser que `ProcessError`. Le relevé du fork
+  (`grep QProcess\.`) en lit six autres membres, et la prochaine casse aurait été la même.
+- `post_visible_setup` lance ensuite le serveur d'instance unique dans un `threading.Thread` : `RuntimeError: can't start
+  new thread`. **Manque de qtpy6, NON tranché** : une doublure coopérative de `threading.Thread` (comme `QThread` dans
+  `fils.py`) ferait tourner `accept()` bloquant sur le fil unique, et c'est là le vrai risque. Un serveur d'instance
+  unique n'a de toute façon pas d'objet dans une page. Contourné dans l'essai seulement (`--new-instance`, une option de
+  Spyder). Le fork n'a que trois autres `threading.Thread` (transport LSP, terminal externe).
+- Second passage : **31 passe, 0 casse, 2 non mesuré** ; setup 2,9 s ; tas wasm 50 → 215 Mio. Puis le MÊME plantage que
+  PySide6 sur le bureau, dans `CodeEditor.setPlainText` (« too much recursion »). Ce n'est donc pas un manque du web.
+- Cause cherchée sur le bureau (gdb, PySide6 6.11.1) : ce n'est pas une récursion Python (la pile Python reste à
+  22 cadres) mais une fonction interne de QtCore qui s'appelle elle-même environ 40 000 fois. Elle part de
+  `QPlainTextEdit::setPlainText`, passe par une émission de signal de QtWidgets et finit dans
+  `PySide::SignalManager::retrieveMetaObject`. Hypothèse non vérifiée : un cycle de connexions signal → signal que PyQt6
+  ne parcourt pas de la même façon. La fonction n'est pas résolue, faute de symboles.
+
+- Hypothèse du cycle ÉCARTÉE (18 h 35, bureau, PySide6) : `SignalInstance.connect` instrumenté, 472 connexions
+  signal → signal relevées avant le premier `setPlainText` (769 signaux gardés vivants, clé = identité), recherche en
+  profondeur : 0 cycle. La récursion passe donc par autre chose (un slot natif, une connexion à un slot Python qui
+  réémet) ; piste suivante, non faite : bissecter les slots de `textChanged`, `contentsChange` et `blockCountChanged`.
+- Confié à la session du fork (`smartpythoneditor-a0`, 18 h 37) avec la reproduction, ainsi que les deux autres défauts
+  relevés : Completions et `inspect.signature` (méthodes natives sans signature), Help et `FrameWebView.setFont()` sous
+  PySide6. Le défaut est commun au bureau et à la page : ce n'est pas un manque de qtpy6.
+
+- Bureau, PyQt6, rapport final rétabli (18 h 45) : la ligne « fenêtre » manquait sans erreur. Ce n'était pas une sortie
+  anticipée (gdb sur `exit_group` : retour normal de `main`), mais la console interne de Spyder, qui redirige
+  `sys.stdout`/`sys.stderr` après `post_visible_setup`. `rapport()` les rétablit (`sys.__stdout__`). Mesuré : 31/0/2,
+  « fenêtre : MainWindow, visible, 8 s après exec() ; 309 Mio », sortie de `exec()` à 8,6 s.
+
+RESTE : rapport final de la page (après la correction du fork) ; doublure de `threading.Thread`, à trancher ; doublures
+zmq et `QWebEngineView`.
