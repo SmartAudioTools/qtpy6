@@ -523,3 +523,19 @@ boutons. viztracer et line_profiler restent dehors (extensions C).
 VÉRIFIÉ : sonde Firefox, `capture_spe.png` : Exécuter, Exécuter la cellule, Profiler, Stop, Interpréteur centrés.
 POINTS OUVERTS : la liste de l'Interpréteur est vide dans la page ; un réglage propre (greffon window_controls qui
 masque ses boutons en plein écran, ou `_recenter` qui n'en dépend plus) est une décision du fork, pas de l'essai.
+
+### Interpréteur vide, contour de focus, Pyxel : diagnostics (12/10/2026, 04 h 50, quota à 83 %, rien de corrigé)
+
+Demande : « le choix de l'interpreteur est vide . pourquoi ? les onglet ne prennent pas le contour bleu clair en haut et
+sur les coté quand fenetre à le focus. il manque les outils pour Pyxel ».
+  - Interpréteur : le combo lit `main_interpreter/custom_interpreters_list`, remplie à l'installation par
+    `SmartOS/Commun/scripts/update_spyder_interpreters.py` (environnements pyenv). Dans la page elle est vide, et
+    `sys.executable` vaut `/home/pyodide/this.program` (relevé par la sonde), `main_interpreter/executable` vaut `''`.
+    Essai écarté puis annulé : y mettre `sys.executable` donne le libellé « Python home » (le combo prend le dossier deux
+    crans au-dessus). À décider : un chemin d'apparence pyenv propre à la page (libellé « Python 3.13 »), mais c'est un
+    faux chemin passé à MainInterpreter, à vérifier contre le lancement du noyau dans le Worker.
+  - Contour bleu : d'après une recherche par sous-agent (lecture seulement), il n'est posé que par les greffons
+    spyder_konsole et spyder_claude (`_appliquer_cadre` sur `QApplication.focusChanged`), pas par le fork. Le style
+    statique de l'onglet actif (stylesheet.py 685-708) est gris. Aucun de ces greffons n'est dans le site. À confirmer
+    sur le natif : quels onglets bleuissent réellement.
+  - Pyxel : spyder_pyxel dépend de `pyxel>=2.9` (moteur Rust, extension native), absent de Pyodide-Qt ; non évalué.
