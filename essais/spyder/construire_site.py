@@ -16,7 +16,12 @@ import os
 import sys
 from pathlib import Path
 
-sys.path[:0] = ["/DATA/Python/FORKS/SmartPythonEditor", "/DATA/Python/qtpy6/essais/roues/lib"]
+GREFFONS = ("spyder_stop_toolbar", "spyder_interpreter_toolbar")  # spe.py : les greffons de SmartPythonEditor qui
+# portent ses boutons Stop et Interpréteur (smartos-support/plugins-catalogue.txt), en pur Python ; window_controls dessine
+# des boutons de fenêtre, sans objet dans une page, viztracer et line_profiler ont des extensions C
+GREFFONS_SOURCES = Path("/DATA/Python/FORKS/SmartPythonEditorPlugins")
+sys.path[:0] = ["/DATA/Python/FORKS/SmartPythonEditor", "/DATA/Python/qtpy6/essais/roues/lib",
+                *(str(GREFFONS_SOURCES / g) for g in GREFFONS)]
 os.environ.setdefault("QT_API", "pyside6")
 os.environ.setdefault("SPYDER_QT_SKIP_VERSION_CHECK", "1")
 
@@ -29,7 +34,7 @@ PAQUETS = ("spyder qtpy IPython asttokens chardet colorama decorator diff_match_
            "prompt_toolkit pure_eval pygments qdarkstyle qtawesome qtconsole sortedcontainers spyder_kernels textdistance "
            "stack_data superqt tinycss2 traitlets wcwidth webencodings "
            "dateutil jupyter_client jupyter_core msgpack platformdirs pyuca tornado watchdog jinja2 markupsafe "  # jalon 6 : mainwindow + 33 plugins
-           "ipykernel comm cloudpickle matplotlib_inline").split()  # jalon 8a : le noyau (relevé de sys.modules au démarrage)
+           "ipykernel comm cloudpickle matplotlib_inline").split() + list(GREFFONS)  # jalon 8a : le noyau (relevé de sys.modules au démarrage)
 DISTRIBUTIONS = ["qstylizer", "ipython_pygments_lexers", "typing_extensions", "six"]  # modules d'un seul fichier : --paquet prendrait site-packages
 FORK = Path("/DATA/Python/FORKS/SmartPythonEditor")
 JUPYTER_CLIENT = next(Path(__import__("jupyter_client").__file__).parent.parent.glob("jupyter_client-*.dist-info"))
@@ -75,6 +80,8 @@ def assembler(archive, fichiers=(), **k):
                  **{f"{JUPYTER_CLIENT.name}/{n}": JUPYTER_CLIENT / n  # jalon 8a : le point d'entrée local-provisioner ;
                     for n in ("METADATA", "entry_points.txt")},  # sans lui, le repli de jupyter_client rend un module
                  **METADONNEES,
+                 **{f"{g}.egg-info/{n}": GREFFONS_SOURCES / g / f"{g}.egg-info" / n  # leurs points d'entrée spyder.plugins
+                    for g in GREFFONS for n in ("PKG-INFO", "entry_points.txt")},
                  **{f"config-reference/{n}": FORK / "smartos-support/config-reference" / n  # spe.py : la configuration
                     for n in ("spyder.ini", "transient.ini")}}  # que l'installation de SmartPythonEditor pose
     original = _assembler.zipfile.ZipFile

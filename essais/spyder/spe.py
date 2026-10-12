@@ -4,7 +4,7 @@ instrumentation et sans fermeture automatique : ``site/index.html?script=spe.py`
 
 Deux réglages de CONFIGURATION, pas de branche dans le code de l'application :
   - les panneaux que l'utilisateur n'affiche pas sont désactivés (``<section>/enable``), comme le ferait la page de
-    préférences de Spyder : Plots, aide, aide en ligne, historique, profileur, pylint, complétions ;
+    préférences de Spyder : Plots, aide, aide en ligne, historique, pylint, complétions ;
   - l'option de Spyder ``--no-web-widgets`` : la page de chargement de la console, rendue par la doublure QWebEngineView
     de qtpy6, gèle la page (bissection du 12/10, notes/2026-10-11 - Doublure zmq, plan.md). Point ouvert côté qtpy6."""
 
@@ -30,7 +30,7 @@ import preparer  # noqa: E402, F401  (doublures avant tout import de Spyder)
 from spyder.app import cli_options  # noqa: E402
 from spyder.config.manager import CONF  # noqa: E402
 
-for section in "plots help onlinehelp historylog profiler pylint completions".split():
+for section in "plots help onlinehelp historylog pylint completions".split():
     CONF.set(section, "enable", False)
 # Les réglages délibérés de installation_SmartPythonEditor.sh (spyder_config_set.py), hors main/version, déjà juste.
 for section, option, valeur in (("editor", "show_filename_toolbar", False),
@@ -61,7 +61,21 @@ if sys.platform == "emscripten":  # comme jalon8c.py : le Worker du noyau prend 
 
 
 def SUITE(main, rapport):  # noqa: N802, ARG001 - jalon7.py l'appelle après post_visible_setup : la fenêtre reste ouverte
-    pass
+    """Contournement d'ESSAI : le centrage des boutons Exécuter…Interpréteur (mainmenu du fork, ``_recenter``) suppose à
+    droite la barre ``window_controls_toolbar`` du greffon spyder_window_controls, dont la zone extensible prend la place
+    restante ; sans elle, c'est la barre Interpréteur qui la prend, et le groupe colle à Fichiers (journal
+    smartos_rangee.jsonl relevé dans la page, 12/10/2026). Le greffon lui-même n'est pas embarqué : il porte aussi les
+    boutons Réduire/Agrandir/Fermer, sans objet dans une page. Ici sa seule zone extensible. Point ouvert : le greffon
+    qui masque ses boutons quand la fenêtre est en plein écran (à décider, il change aussi le bureau)."""
+    from qtpy6.QtCore import Qt
+    from qtpy6.QtWidgets import QSizePolicy, QToolBar, QWidget
+    barre = QToolBar(main)
+    barre.setObjectName("window_controls_toolbar")
+    barre.setMovable(False)
+    zone = QWidget(barre)
+    zone.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+    barre.addWidget(zone)
+    main.addToolBar(Qt.ToolBarArea.TopToolBarArea, barre)
 
 
 exec(compile(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "jalon7.py")).read(), "jalon7.py", "exec"))

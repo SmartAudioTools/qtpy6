@@ -500,3 +500,26 @@ d'erreur. Chromium (l'utilisateur, 04:30) : `print("coucou")` exécuté, « couc
 
 Points ouverts : la boîte des dépendances manquantes est coupée dans `spe.py` (contournement d'essai) ; le lien élèves
 (hébergement) reste à faire ; avertissement « Duplicate name six…METADATA » à la construction (six listé deux fois).
+
+### Barre d'outils : boutons manquants et groupe centré (12/10/2026, 04 h 30)
+
+Demande : « la barre d'outils manque de certains bouton (profiling , stop, choix de l'interpreteur) et n'ont pas la meme
+disposition ( plays, pose, stop, intrepreeteur etc doivent être au milieu) ».
+
+FAIT (essai seulement, ni le fork ni les greffons touchés) :
+  - `construire_site.py` embarque les greffons `spyder_stop_toolbar` et `spyder_interpreter_toolbar`
+    (`/DATA/Python/FORKS/SmartPythonEditorPlugins`, sources et `egg-info` pour leurs points d'entrée) ; `spe.py` ne
+    désactive plus le profileur.
+  - Centrage : `_recenter` (mainmenu du fork) suppose la barre `window_controls_toolbar` du greffon
+    spyder_window_controls tout à droite, dont la zone extensible prend la place restante. Sans elle, c'est la barre
+    Interpréteur qui la prend (438 à 496 px relevés par le journal `smartos_rangee.jsonl` lu dans la page) : largeur de
+    la zone de gauche calculée à 0, groupe collé aux boutons Fichiers. `spe.py` (SUITE) pose une barre vide de ce nom,
+    avec sa seule zone extensible.
+
+POURQUOI : embarquer spyder_window_controls donnait la zone, mais aussi les boutons Réduire/Agrandir/Fermer (refusés :
+« sans cadre ni titre ni boutons de fenetre ») et ses appels kwriteconfig6 ; il n'a aucune option pour masquer ses
+boutons. viztracer et line_profiler restent dehors (extensions C).
+
+VÉRIFIÉ : sonde Firefox, `capture_spe.png` : Exécuter, Exécuter la cellule, Profiler, Stop, Interpréteur centrés.
+POINTS OUVERTS : la liste de l'Interpréteur est vide dans la page ; un réglage propre (greffon window_controls qui
+masque ses boutons en plein écran, ou `_recenter` qui n'en dépend plus) est une décision du fork, pas de l'essai.
