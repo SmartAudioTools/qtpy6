@@ -323,3 +323,17 @@ projet_monkey_correction_exercice_33_tilemaps_images.py" avec SmartPythonEditor 
   `compile(src, "x", "exec")` et `gc.collect()` passent, `ast.parse` plante (reproduit sans affichage dans mon Firefox).
   Hypothèse non vérifiée : la vérification de pile C d'ast2obj sous la commutation de pile JSPI. C'est pourquoi l'essai
   lance le jeu par `exec(compile(...))`. À corriger dans qtpy6 (doublure dans le Worker) : TODO du son.
+
+### Suite (16:50-17:05) : le plantage est dans le ramasse-miettes du noyau, pas dans `ast.parse`
+
+Demande : « corrige ça maintenant ». Essais `spe_m3.py` sans affichage (non commité) : `ast.parse` du fichier entier
+puis `%runfile` ne plantent PAS (éditeur ouvert ou non) ; la console revient à l'invite sans erreur fatale (indice seul :
+la sortie du noyau n'est pas lisible depuis la page). Le plantage dépend donc de l'état du noyau.
+Essai de l'utilisateur `spe_monkey.py?…&bouton=1` (lancement au triangle, option ajoutée) : erreur fatale du noyau
+`RuntimeError: index out of bounds` à l'octet 2120812 de `pyodide/pyodide.asm.wasm`. Localisé par lecture de la section
+CODE : fonction n° 4219, deux index avant `PyGC_Collect` (4221), donc une fonction statique du ramasse-miettes
+(collecte/parcours). Lecture : un objet corrompu ou un `tp_traverse` défaillant dans le tas du noyau ; `ast.parse`
+n'était que l'allocation qui déclenchait la collecte. Les messages « Cannot enter a promising task » et
+« exc must be an exception » sont des suites de ce même état. Piste suivante : `gc.collect()` après chaque étape du
+noyau (XHR des fichiers, `import pyxel`, `pyxel.init`) pour trouver qui crée l'objet ; les adresses wasm ne sont
+symbolisables que par position (pas de section de noms).

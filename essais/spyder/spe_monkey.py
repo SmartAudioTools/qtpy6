@@ -33,6 +33,8 @@ def suite(main):
     jeu = js.URLSearchParams.new(js.location.search).get("jeu")
     dossier = "/home/pyodide/monkey"
     chemin = dossier + "/" + jeu
+    bouton = js.URLSearchParams.new(js.location.search).get("bouton") == "1"  # lancer au triangle, pas tout seul
+    lancement = "" if bouton else f'exec(compile(open({chemin!r}).read(), {chemin!r}, "exec"), {{"__name__": "__main__", "__file__": {chemin!r}}})'
     os.makedirs(dossier, exist_ok=True)
     from qtpy6.QtCore import QTimer
 
@@ -57,7 +59,7 @@ for nom in ({jeu!r}, "projet_monkey.pyxres"):
     x.responseType = "arraybuffer"; x.send()
     open({dossier!r} + "/" + nom, "wb").write(bytes(js.Uint8Array.new(x.response).to_py()))
 os.chdir({dossier!r})
-exec(compile(open({chemin!r}).read(), {chemin!r}, "exec"), {{"__name__": "__main__", "__file__": {chemin!r}}})
+{lancement}
 """
     from qtpy6.QtCore import QTimer
     console = main.get_plugin("ipython_console")

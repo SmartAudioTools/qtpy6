@@ -11,6 +11,8 @@ essais et pièges : `notes/2026-10-12 - Pyxel dans la page.md`.
   reçus. Rien du greffon ni de l'éditeur ne change.
 - [ ] **`SystemError: Cannot enter a promising task…`** : c'est `ast.parse` dans le noyau, appelé par `%runfile`
   (triangle « Exécuter », F5) — le noyau plante, un jeu d'élève ne se lance pas par le bouton. Isolé le 12/10
-  (`notes/2026-10-12 - Pyxel dans la page.md`, essai `spe_monkey.py`). Piste : doublure qtpy6 dans le Worker.
+  (`notes/2026-10-12 - Pyxel dans la page.md`, essai `spe_monkey.py`). Le 12/10 à 17 h : c'est en fait le ramasse-miettes
+  (fonction wasm 4219, voisine de `PyGC_Collect`) qui plante sur un objet corrompu ; trouver qui le crée (`gc.collect()`
+  après chaque étape du noyau). Essai : `spe_monkey.py?…&bouton=1`.
 - [ ] La fenêtre d'erreur fugitive vue par l'utilisateur au lancement de `spe_monkey.py` : à identifier.
 - Les sondes se donnent en bloc NON vert à coller dans une Konsole tant que le relais `!` sudo est bloqué.
