@@ -37,8 +37,11 @@ change pas ; ce qui manque dans la page est une doublure qtpy6.
 
 ## Doublures qtpy6 que l'option A demande (à écrire)
 
-1. `multiprocessing.shared_memory.SharedMemory` entre la page et le Worker du noyau, sur un SharedArrayBuffer (la page
-   est déjà isolée COOP/COEP pour le travailleur, `travailleur.py`).
+1. `multiprocessing.shared_memory.SharedMemory` entre la page et le Worker du noyau. ⚠ Corrigé à 11 h 40 : la page
+   n'est PAS isolée COOP/COEP (web.md, « Les fils sont coopératifs » ; `travailleur.signaler` le dit aussi), donc pas de
+   SharedArrayBuffer. Deux voies : un miroir par messages (le segment du noyau envoyé à la page à chaque notification de
+   la FIFO, les événements de la page renvoyés au noyau) ; ou isoler la page (service worker qui pose COOP/COEP, ce qui
+   apporterait aussi l'interruption du noyau, au prix des ressources tierces refusées sans CORP). Choix de l'utilisateur.
 2. La FIFO de notification (`os.mkfifo`/`os.open`/`os.write` côté noyau) et `QSocketNotifier` sur son descripteur côté
    page — ou un réveil équivalent porté par la même mémoire partagée.
 3. SDL dans un Worker : `pyxel.init` avec `SDL_VIDEODRIVER=offscreen` — à mesurer dès que la roue est là (le port SDL
