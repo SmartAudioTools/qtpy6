@@ -15,6 +15,18 @@ import builtins, os, sys
 import js
 # Essai 24 : la page isolée par sw.js (COOP/COEP) : le Worker du noyau a-t-il SharedArrayBuffer ?
 _isole = (js.self.crossOriginIsolated, hasattr(js, "SharedArrayBuffer"))
+# Essai 25 : SharedMemory créée par la page (SUITE), attachée ici par son nom, comme bridge/kernel.py
+import struct, time
+from multiprocessing import shared_memory
+try:
+    _shm = shared_memory.SharedMemory(name="qtpy6_essai25")
+    _lu = (hex(struct.unpack_from("<I", _shm.buf, 0)[0]), bytes(_shm.buf[4095:4099]), _shm.size)
+    _shm.buf[8:12] = b"noya"
+    struct.pack_into("<I", _shm.buf, 12, 0xBEEF)
+    time.sleep(0.05)
+except BaseException as e:
+    _lu = repr(e)
+print("RES" "ULTAT shm worker", _lu, "attendu ('0xcafe', b'page', 4099)")
 # Essai 23 : l'ordre du greffon (bridge/kernel.py) : __import__ enveloppé, flip capturé dès que pyxel, encore
 # partiellement initialisé, a init/run/flip ; la doublure doit être déjà en place à cet instant.
 _capte = {}
@@ -87,6 +99,13 @@ def SUITE(main, rapport):  # noqa: N802
     except BaseException:
         import traceback
         js.console.log("SUITE spe " + traceback.format_exc())
+    global _SHM
+    import struct
+    from multiprocessing import shared_memory
+    _SHM = shared_memory.SharedMemory(name="qtpy6_essai25", create=True, size=4099)
+    struct.pack_into("<I", _SHM.buf, 0, 0xCAFE)
+    _SHM.buf[4095:4099] = b"page"
+    js.console.log("SHM page " + repr(_SHM))
     js.console.log("SUITE pyxel : minuterie armée")
     from qtpy6.QtCore import QTimer
     import js
@@ -114,6 +133,7 @@ def SUITE(main, rapport):  # noqa: N802
             debut.append(time.monotonic())
             QTimer.singleShot(2000, lambda: console.get_current_shellwidget().execute(CELLULE_3))
         if ("RESULTAT flip" in texte or "RESULTAT run leve" in texte or "RESULTAT KO" in texte or "Error" in texte) or time.monotonic() - debut[0] > 90:
+            js.console.log("RES" "ULTAT shm page " + repr((bytes(_SHM.buf[8:12]), hex(struct.unpack_from("<I", _SHM.buf, 12)[0]))) + " attendu (b'noya', '0xbeef')")
             js.console.log("CONSOLE >>> " + texte[:8000])
             js.window.etat = "pyxel-fini"
         else:

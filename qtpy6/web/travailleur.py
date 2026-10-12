@@ -47,7 +47,19 @@ from qtpy6.web.preambule import _vers_python
 
 REGLAGES = {}  # configurer() : indexURL, roues, filtre
 _URL_WORKER = None
-_FICHIERS_WORKER = ("preambule.py", "zmq_web.py", "threading_web.py", "psutil_web.py", "pyxel_web.py")  # de qtpy6/web, ce que le préambule du worker importe
+_FICHIERS_WORKER = ("preambule.py", "zmq_web.py", "threading_web.py", "psutil_web.py", "pyxel_web.py",
+                    "memoire_partagee.py")  # de qtpy6/web, ce que le préambule du worker importe
+
+
+def _nouveau_worker():
+    """Un Worker de module, qui reçoit les segments ``SharedMemory`` de la page (``memoire_partagee``)."""
+    import js  # noqa: PLC0415
+    from . import memoire_partagee  # noqa: PLC0415
+    worker = js.Worker.new(_url_worker(), type="module")
+    memoire_partagee.enregistrer_worker(worker)
+    return worker
+
+
 _RESERVE = None  # prechauffer() : (worker, indexURL) — un worker neuf dont le Pyodide charge, consommé par le prochain start()
 
 
@@ -83,7 +95,7 @@ def prechauffer(modules=()):
         _RESERVE[0].terminate()
         _RESERVE = None
     if _RESERVE is None:
-        _RESERVE = (js.Worker.new(_url_worker(), type="module"), indexURL)
+        _RESERVE = (_nouveau_worker(), indexURL)
     elif not urls:
         return
     _RESERVE[0].postMessage(_objet({"prechauffer": {"indexURL": indexURL, "roues": urls}}))
@@ -136,7 +148,7 @@ class Travailleur(QObject):
         from pyodide.ffi import create_proxy  # noqa: PLC0415
 
         absolu = lambda url: js.URL.new(url, js.location.href).href  # noqa: E731
-        self.worker = js.Worker.new(_url_worker(), type="module")
+        self.worker = _nouveau_worker()
         self._recepteur = create_proxy(self._recevoir)  # gardé : un proxy sans référence Python est détruit
         self.worker.onmessage = self._recepteur
         self._poster({"init": {"indexURL": absolu(self.indexURL), "module": self.module, "cwd": self.cwd,
@@ -278,7 +290,7 @@ class ProcessusWeb(QObject):
         if _RESERVE is not None and _RESERVE[1] == indexURL:  # le worker préchauffé : son Pyodide charge depuis prechauffer()
             self.worker, _RESERVE = _RESERVE[0], None
         else:
-            self.worker = js.Worker.new(_url_worker(), type="module")
+            self.worker = _nouveau_worker()
         self._recepteur = create_proxy(self._recevoir)
         self.worker.onmessage = self._recepteur
         zip_ = to_js(_zipper([a_zipper, cwd, tempfile.gettempdir()], REGLAGES.get("filtre"),

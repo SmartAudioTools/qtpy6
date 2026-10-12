@@ -146,6 +146,7 @@ _executer(**_lancement)
 
 onmessage = e => {
   const m = e.data;
+  if (m.memoire) { (self.qtpy6_memoires ??= new Map()).set(m.memoire.nom, m.memoire.sab); return; }  // memoire_partagee.py
   if (m.zmq) { self.recevoir_page ? self.recevoir_page(m.zmq) : zmq_tampon.push(m.zmq); return; }
   if (m.prechauffer) {  // le rejet est gardé pour le {lancer} qui consommera (le catch vide évite l'« unhandled rejection »)
     const { indexURL, roues = [] } = m.prechauffer;

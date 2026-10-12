@@ -140,13 +140,14 @@ def installer(dossier_web: str, boucle: asyncio.AbstractEventLoop | None = None)
     web = types.ModuleType("qtpy6.web")
     web.__path__ = [dossier_web]
     sys.modules.update({"qtpy6": paquet, "qtpy6.web": web})
-    from qtpy6.web import psutil_web, pyxel_web, threading_web, zmq_web  # noqa: PLC0415
+    from qtpy6.web import memoire_partagee, psutil_web, pyxel_web, threading_web, zmq_web  # noqa: PLC0415
 
     zmq_web.en_travailleur = True
     zmq_web.installer(_attendre, _plus_tard, _poster)
     threading_web.installer(_attendre, _plus_tard)
     threading_web.doubler_futures(_attendre, _plus_tard)  # IPython importe ThreadPoolExecutor, absent de Pyodide
     pyxel_web.installer()  # au premier import pyxel : init, flip, run du Worker
+    memoire_partagee.installer()  # SharedMemory(name=…) : un segment créé par la page
     psutil_web.installer()  # ipykernel l'importe au chargement ; le noyau surveille son parent (JPY_PARENT_PID)
     boucle = boucle or asyncio.get_event_loop()
     threading_web.partager_boucle(boucle)  # les boucles qu'ipykernel crée par fil

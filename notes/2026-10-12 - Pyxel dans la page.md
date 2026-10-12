@@ -42,7 +42,8 @@ change pas ; ce qui manque dans la page est une doublure qtpy6.
    SharedArrayBuffer. Deux voies : un miroir par messages (le segment du noyau envoyé à la page à chaque notification de
    la FIFO, les événements de la page renvoyés au noyau) ; ou isoler la page (service worker qui pose COOP/COEP, ce qui
    apporterait aussi l'interruption du noyau, au prix des ressources tierces refusées sans CORP). Choix de l'utilisateur.
-   **Choix de l'utilisateur (11 h 40, « oui on essaye ») : isoler la page** — fait et mesuré, essai 24.
+   **Choix de l'utilisateur (11 h 40, « oui on essaye ») : isoler la page** — fait et mesuré, essai 24 ; doublure
+   `SharedMemory` écrite, essai 25.
 2. La FIFO de notification (`os.mkfifo`/`os.open`/`os.write` côté noyau) et `QSocketNotifier` sur son descripteur côté
    page — ou un réveil équivalent porté par la même mémoire partagée.
 3. SDL dans un Worker : `pyxel.init` avec `SDL_VIDEODRIVER=offscreen` — à mesurer dès que la roue est là (le port SDL
@@ -232,6 +233,23 @@ running promising task` (Pyodide), avant et après la panique ; à regarder si e
     apparu dans la console (déplacé après `import pyxel`, il sort). Niveau de preuve : sonde Firefox, deux exécutions ;
     Chrome non mesuré.
 
+25. **Doublure `SharedMemory`** (11 h 55). Fait : `qtpy6/web/memoire_partagee.py` (`SharedMemory(name, create, size)`,
+    `buf`, `name`, `size`, `close`, `unlink`), posée dans `multiprocessing.shared_memory` côté page (`QtCore.py`) et côté
+    Worker (`preambule.installer`, fichier ajouté à `_FICHIERS_WORKER`). Le segment est un `SharedArrayBuffer` créé par
+    la page ; `travailleur._nouveau_worker` inscrit chaque Worker, qui reçoit les segments existants puis chaque nouveau
+    (`{memoire: {nom, sab}}`, rangé par `travailleur.js` dans `self.qtpy6_memoires`) ; l'attache par nom attend 2 s le
+    message dans un Worker, puis `FileNotFoundError` comme en natif. `buf` est un `bytearray` local (Pyodide ne voit que
+    sa mémoire wasm), réconcilié en JavaScript toutes les 4 ms contre l'image du dernier passage : mots changés ici
+    poussés (de la fin vers le début), puis mots changés ailleurs tirés (du début vers la fin), la queue non alignée par
+    octet ; cet ordre sert le verrou de séquence du greffon (en-tête avant les données). Écartés : `buf` posé directement
+    sur le SharedArrayBuffer (impossible : un memoryview Python ne pointe que dans la mémoire wasm de son Pyodide) ;
+    une copie entière à chaque passe (écraserait les écritures de l'autre côté). Limites : un segment créé dans un Worker
+    reste dans ce Worker ; un même mot écrit des deux côtés entre deux passes : le dernier passage gagne. Essai
+    (`spe_pyxel.py`) : la page crée 4 099 octets, écrit `0xCAFE` et `page` en queue ; le noyau s'attache par nom, lit
+    `('0xcafe', b'page', 4099)`, écrit `noya` et `0xBEEF` ; la page relit `(b'noya', '0xbeef')`. Premier passage : taille
+    4 100 au lieu de 4 099 (tampon arrondi au mot), corrigé (taille exacte, queue par octet ; réconciliation vérifiée
+    aussi sous node). Pyxel intact (61 images, 2,0 s, pixel 11). Niveau de preuve : sonde Firefox, deux exécutions.
+
 ## Ce que cela change pour le pont
 
 **Forme retenue (essais 20 et 21) : la boucle du greffon tourne telle quelle, qtpy6 ne double que `pyxel.flip` et
@@ -245,5 +263,5 @@ greffon) et interdit à la cellule d'être suspendue pendant les images (essai 1
 
 ## Point ouvert immédiat
 
-- `qtpy6/web/pyxel_web.py` écrit (essai 22). Page isolée (essai 24). Reste : les doublures 1 et 2 (`SharedMemory` sur SharedArrayBuffer, FIFO) pour que le panneau reçoive les images comme en natif.
+- `qtpy6/web/pyxel_web.py` écrit (essai 22). Page isolée (essai 24), `SharedMemory` doublée (essai 25). Reste : la doublure 2 (FIFO et `QSocketNotifier`, ou le sondage de secours du panneau) pour que le panneau reçoive les images comme en natif.
 - Le son (pas d'AudioContext dans un Worker) et les `SystemError: Cannot enter a promising task…` restent à examiner.
