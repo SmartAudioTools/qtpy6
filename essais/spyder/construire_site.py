@@ -130,5 +130,9 @@ texte = texte.replace('"/home/pyodide/app/editeur.py"',  # un seul site pour tou
 assert texte.count('window.etat = "en cours";') == 1
 texte = texte.replace('window.etat = "en cours";',  # les roues, pour le Worker du jalon 4 (travailleur.configurer)
                       'window.etat = "en cours"; window.roues = ' + json.dumps([f"./{Path(r).name}" for r in ROUES]) + ";")
+_import = 'import { preparer, lancer, print, rendu } from "./qtpy6web.js";'
+assert texte.count(_import) == 1  # la page isolée (SharedArrayBuffer : mémoire partagée du greffon Pyxel), par sw.js
+texte = texte.replace(_import, _import.replace("rendu }", "rendu, service_worker }")
+                      + '\nservice_worker("./sw.js", { cache: "essai_spyder", isoler: true });')
 page.write_text(texte, encoding="utf-8")
 print(f"site/app.zip : {taille // 1024} Kio")

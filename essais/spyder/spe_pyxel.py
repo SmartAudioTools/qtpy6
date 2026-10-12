@@ -12,6 +12,9 @@ import time
 ROUE = "./roues/pyxel-2.9.9-cp311-abi3-emscripten_5_0_3_wasm32.whl"
 ESSAI_CODE = """
 import builtins, os, sys
+import js
+# Essai 24 : la page isolée par sw.js (COOP/COEP) : le Worker du noyau a-t-il SharedArrayBuffer ?
+_isole = (js.self.crossOriginIsolated, hasattr(js, "SharedArrayBuffer"))
 # Essai 23 : l'ordre du greffon (bridge/kernel.py) : __import__ enveloppé, flip capturé dès que pyxel, encore
 # partiellement initialisé, a init/run/flip ; la doublure doit être déjà en place à cet instant.
 _capte = {}
@@ -26,6 +29,7 @@ builtins.__import__ = _guet
 import pyxel
 builtins.__import__ = _imp
 print("RES" "ULTAT capture", _capte, "attendu qtpy6.web.pyxel_web")
+print("RES" "ULTAT isolation worker", _isole, "attendu (True, True)")
 print("pyxel", pyxel.__file__)
 JEU = '''
 import os, pyxel
@@ -76,6 +80,7 @@ _SUITE_SPE = SUITE
 def SUITE(main, rapport):  # noqa: N802
     import js
     js.console.log("SUITE pyxel : entrée")
+    js.console.log("ISOLATION page " + str(js.self.crossOriginIsolated) + " SAB " + str(hasattr(js, "SharedArrayBuffer")))
     js.console.log("WEBGL page " + str([str(js.document.createElement("canvas").getContext(k)) for k in ("webgl2", "webgl")]) + " offscreen " + str(js.OffscreenCanvas.new(8, 8).getContext("webgl2")))
     try:
         _SUITE_SPE(main, rapport)

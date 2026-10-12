@@ -18,6 +18,18 @@ const REQUETE = new URLSearchParams(location.search);
 const NOM = REQUETE.get("cache") || "qtpy6";
 const CACHE = NOM + location.search;
 const PYODIDE = REQUETE.get("p") || "";
+// isoler=… (service_worker(…, { isoler: true })) : la page et ses workers isolés (crossOriginIsolated : SharedArrayBuffer,
+// mémoire partagée entre la page et un Worker), sans rien demander à l'hôte (GitHub Pages ne pose pas d'en-têtes) : les
+// en-têtes COOP/COEP ajoutés ici à toute réponse de la même origine. « credentialless » plutôt que « require-corp » : les
+// fichiers d'un autre domaine (cdn.jsdelivr.net) passent sans en-tête CORP, chargés sans cookies.
+const ISOLER = REQUETE.has("isoler");
+const isoler = r => {
+  if (!ISOLER || !["basic", "default"].includes(r.type)) return r;  // default : une réponse construite ici (jumeau rangé)
+  const h = new Headers(r.headers);
+  h.set("Cross-Origin-Opener-Policy", "same-origin");
+  h.set("Cross-Origin-Embedder-Policy", "credentialless");
+  return new Response(r.body, { status: r.status, statusText: r.statusText, headers: h });
+};
 
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", e => e.waitUntil(Promise.all([self.clients.claim(),  // contrôler dès la première visite :
@@ -58,5 +70,5 @@ self.addEventListener("fetch", e => {
       // ne doit pas transformer une réponse reçue en erreur réseau
       e.waitUntil(cache.put(e.request, reponse.clone()).catch(() => {}));
     return reponse;
-  }));
+  }).then(isoler));
 });

@@ -122,13 +122,26 @@ async function en_jumeau(fetch_origine, adresse) {
 // la requête du script, ?v=… à chaque déploiement, repart sur un cache neuf). `pyodide` : le Pyodide des workers
 // (Travailleur), dont sw.js sert aux workers neufs les fichiers bruts depuis l'entrée de leur jumeau. Enregistré sur un
 // navigateur qui n'en a pas (ou un contexte non sûr, http hors 127.0.0.1) : rien, et `garder` ne fait rien.
-export function service_worker(script, { cache = "qtpy6", pyodide, erreur = console.error } = {}) {
+// `isoler` : la page isolée (crossOriginIsolated, SharedArrayBuffer) par les en-têtes que sw.js ajoute. Une page déjà
+// chargée ne change pas d'en-têtes : à la première visite, elle se recharge UNE fois, une fois sw.js actif (sessionStorage
+// garde contre la boucle si l'isolation échoue malgré tout : erreur signalée, la page continue non isolée).
+export function service_worker(script, { cache = "qtpy6", pyodide, isoler = false, erreur = console.error } = {}) {
   const sw = navigator.serviceWorker;
   if (!sw) return () => {};
   const url = new URL(script, location.href);
   url.searchParams.set("cache", cache);
   if (pyodide) url.searchParams.set("p", new URL(pyodide, location.href).href);
+  if (isoler) url.searchParams.set("isoler", "1");
   sw.register(url).catch(erreur);
+  if (isoler) {
+    const cle = "qtpy6-isoler", memoire = (f) => { try { return f(sessionStorage); } catch { return null; } };
+    if (self.crossOriginIsolated) memoire(s => s.removeItem(cle));
+    else sw.ready.then(() => {
+      if (memoire(s => s.getItem(cle))) return erreur("qtpy6 : page toujours non isolée après rechargement");
+      if (memoire(s => (s.setItem(cle, "1"), true))) location.reload();  // sans stockage, pas de garde : pas de rechargement
+      else erreur("qtpy6 : sessionStorage indisponible, page non isolée");
+    }).catch(erreur);
+  }
   return (filtre = () => true) => {
     const urls = performance.getEntriesByType("resource").map(r => r.name).filter(filtre);
     sw.ready.then(r => r.active?.postMessage(urls)).catch(erreur);

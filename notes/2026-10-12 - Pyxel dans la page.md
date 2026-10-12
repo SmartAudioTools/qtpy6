@@ -42,6 +42,7 @@ change pas ; ce qui manque dans la page est une doublure qtpy6.
    SharedArrayBuffer. Deux voies : un miroir par messages (le segment du noyau envoyé à la page à chaque notification de
    la FIFO, les événements de la page renvoyés au noyau) ; ou isoler la page (service worker qui pose COOP/COEP, ce qui
    apporterait aussi l'interruption du noyau, au prix des ressources tierces refusées sans CORP). Choix de l'utilisateur.
+   **Choix de l'utilisateur (11 h 40, « oui on essaye ») : isoler la page** — fait et mesuré, essai 24.
 2. La FIFO de notification (`os.mkfifo`/`os.open`/`os.write` côté noyau) et `QSocketNotifier` sur son descripteur côté
    page — ou un réveil équivalent porté par la même mémoire partagée.
 3. SDL dans un Worker : `pyxel.init` avec `SDL_VIDEODRIVER=offscreen` — à mesurer dès que la roue est là (le port SDL
@@ -216,6 +217,21 @@ running promising task` (Pyodide), avant et après la panique ; à regarder si e
     comme celui du greffon capture `pyxel.flip` au premier instant possible → `qtpy6.web.pyxel_web` ; essai 22 rejoué à
     l'identique. Niveau de preuve : sonde Firefox, une exécution.
 
+24. **Page isolée par le service worker** (11 h 45). Demande : « on aura besoin de ressources d'autres domaines ? » puis
+    « oui on essaye ». Seul domaine tiers chargé par la page : cdn.jsdelivr.net (Pyodide des Workers, roue sqlite3).
+    Fait : `qtpy6/web/js/sw.js`, paramètre `isoler` : COOP `same-origin` et COEP `credentialless` ajoutés à toute
+    réponse de la même origine (type `basic`, ou `default` pour un jumeau rangé décompressé), servie du cache comme du
+    réseau ; `qtpy6web.js`, `service_worker(…, { isoler: true })` : rechargement UNE fois à la première visite (une page
+    chargée ne change pas d'en-têtes), garde sessionStorage contre la boucle, pas de rechargement sans stockage.
+    Branché dans la page d'essai par `essais/spyder/construire_site.py`. Choix : `credentialless` plutôt que
+    `require-corp`, qui exigerait un en-tête CORP de jsdelivr (non vérifié) ; coût accepté : un rechargement à la première
+    visite, et Safari, qui n'a pas `credentialless` (non mesuré). Écarté : le miroir par messages (copie de chaque image
+    vers la page, plus lent, et pas d'interruption du noyau). Résultat : page `crossOriginIsolated` True,
+    `SharedArrayBuffer` présent ; Worker du noyau (True, True) ; jsdelivr toujours chargé (console et Pyxel intacts,
+    61 images en 2,0 s, pixel 11). Bizarrerie non expliquée : un `print` en toute première ligne de la cellule n'est pas
+    apparu dans la console (déplacé après `import pyxel`, il sort). Niveau de preuve : sonde Firefox, deux exécutions ;
+    Chrome non mesuré.
+
 ## Ce que cela change pour le pont
 
 **Forme retenue (essais 20 et 21) : la boucle du greffon tourne telle quelle, qtpy6 ne double que `pyxel.flip` et
@@ -229,5 +245,5 @@ greffon) et interdit à la cellule d'être suspendue pendant les images (essai 1
 
 ## Point ouvert immédiat
 
-- `qtpy6/web/pyxel_web.py` écrit (essai 22). Reste : les doublures 1 et 2 (mémoire partagée, FIFO) pour que le panneau reçoive les images comme en natif.
+- `qtpy6/web/pyxel_web.py` écrit (essai 22). Page isolée (essai 24). Reste : les doublures 1 et 2 (`SharedMemory` sur SharedArrayBuffer, FIFO) pour que le panneau reçoive les images comme en natif.
 - Le son (pas d'AudioContext dans un Worker) et les `SystemError: Cannot enter a promising task…` restent à examiner.
