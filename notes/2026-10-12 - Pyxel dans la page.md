@@ -177,6 +177,9 @@ running promising task` (Pyodide), avant et après la panique ; à regarder si e
     portaient chacun une `uncaught exception: Object { message }` dans le journal du navigateur, absente ici : le
     blocage est réel mais intermittent ou dû à une autre différence non identifiée (point ouvert, à reproduire en
     relançant l'essai 19 tel quel).
+    Reprise à 11 h 23, à l'identique : même résultat (touche vue images 28 à 30, cellule exécutée à l'image 51,
+    aucune `uncaught exception`). Les blocages des essais 15, 17 et 18 restent inexpliqués : le module qtpy6 devra
+    capturer et journaliser toute exception levée dans une image plutôt que de la laisser filer.
 
 ## Ce que cela change pour le pont
 
