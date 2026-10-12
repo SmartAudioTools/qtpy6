@@ -37,6 +37,13 @@ PAQUETS = ("spyder qtpy IPython asttokens chardet colorama decorator diff_match_
            "ipykernel comm cloudpickle matplotlib_inline").split() + list(GREFFONS)  # jalon 8a : le noyau (relevé de sys.modules au démarrage)
 DISTRIBUTIONS = ["qstylizer", "ipython_pygments_lexers", "typing_extensions", "six"]  # modules d'un seul fichier : --paquet prendrait site-packages
 FORK = Path("/DATA/Python/FORKS/SmartPythonEditor")
+# Contournement d'ESSAI (12/10/2026) : le fork a été généré le 11/10 à 16 h 55, avant quatre correctifs de
+# SmartPythonEditor_generator (6791937 onglets ouverts sur leur volet, c2e516e volet qui a le focus : onglet actif en bleu,
+# 264f60c congé de l'onglet actif, 8367c00 croix fines) que l'environnement installé porte déjà. Ces six fichiers sont
+# pris dans l'installé, celui que l'utilisateur compare ; sans objet dès que le fork sera regénéré (comparer avec diff).
+INSTALLE = Path("/DATA/Python/SmartPython/CachyOS/versions/3.12.14/envs/SmartPythonEditor-6.1.5/lib/python3.12/site-packages")
+EN_RETARD = ("widgets/tabs.py", "utils/stylesheet.py", "utils/icon_manager.py", "plugins/editor/widgets/base.py",
+             "plugins/editor/widgets/codeeditor/codeeditor.py", "plugins/ipythonconsole/utils/style.py")
 JUPYTER_CLIENT = next(Path(__import__("jupyter_client").__file__).parent.parent.glob("jupyter_client-*.dist-info"))
 EXCLURE = ["spyder/plugins/help/utils/js/", "qtpy6/web/js/pdfjs/",
            "spyder/locale/spyder.pot", "spyder/locale/fr/LC_MESSAGES/spyder.po",  # jalon 7 : config/base.py liste le
@@ -80,6 +87,7 @@ def assembler(archive, fichiers=(), **k):
                  **{f"{JUPYTER_CLIENT.name}/{n}": JUPYTER_CLIENT / n  # jalon 8a : le point d'entrée local-provisioner ;
                     for n in ("METADATA", "entry_points.txt")},  # sans lui, le repli de jupyter_client rend un module
                  **METADONNEES,
+                 **{f"spyder/{n}": INSTALLE / "spyder" / n for n in EN_RETARD},  # avant le paquet : gagne
                  **{f"{g}.egg-info/{n}": GREFFONS_SOURCES / g / f"{g}.egg-info" / n  # leurs points d'entrée spyder.plugins
                     for g in GREFFONS for n in ("PKG-INFO", "entry_points.txt")},
                  **{f"config-reference/{n}": FORK / "smartos-support/config-reference" / n  # spe.py : la configuration
@@ -88,7 +96,7 @@ def assembler(archive, fichiers=(), **k):
 
     class Zip(original):
         def write(self, chemin, nom=None, *a, **kk):
-            if nom and EXCLURE_TESTS in f"/{nom}":
+            if nom and (EXCLURE_TESTS in f"/{nom}" or nom in self.NameToInfo):  # EN_RETARD : la 1re écriture gagne
                 return
             super().write(chemin, nom, *a, **kk)
 

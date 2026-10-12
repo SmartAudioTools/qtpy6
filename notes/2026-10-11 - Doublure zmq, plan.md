@@ -563,3 +563,21 @@ jour (un second F11 rentre à nouveau).
     repose ses icônes qtawesome (`window_fullscreen` / `window_nofullscreen`) à chaque bascule
     (`_update_fullscreen_action`) ; `spe.py` remet après lui celles du bouton Agrandir des volets (`window_full_screen` /
     `window_collapse`). Vérifié : capture, icône de départ ; la bascule n'est pas vérifiable sans clic réel.
+
+### Contour bleu de l'onglet du volet qui a le focus (12/10/2026, 05 h)
+
+Demande : « les onglet ne prennent pas le contour bleu clair en haut et sur les coté quand fenetre à le focus ».
+Cause : ce n'est pas un défaut de qtpy6. Le fork (`/DATA/Python/FORKS/SmartPythonEditor`, commit 686fd148a du 11/10 à
+16 h 55) a été généré AVANT quatre correctifs de `SmartPythonEditor_generator` : 6791937 (onglets ouverts sur leur
+volet), c2e516e (volet qui a le focus : onglet actif en bleu, éditeur, marges, console éclaircis), 264f60c (congé de
+l'onglet actif) et 8367c00 (croix fines). L'environnement installé `SmartPythonEditor-6.1.5` les porte. L'écart a été
+relevé par `diff -rq` : il touche six fichiers, tous génériques (aucun chemin de la machine).
+Fait : `construire_site.py` prend ces six fichiers (`EN_RETARD`) dans l'installé. La première écriture d'un nom dans le
+zip gagne (`NameToInfo`), ce qui donne zéro doublon (vérifié).
+Écarté :
+  - regénérer ou patcher le fork : interdit ici, c'est le travail de la session du fork ;
+  - reproduire le suivi du focus dans `spe.py` : il aurait dupliqué `patch_spyder_focus_volet.py`, et l'éclaircissement
+    de l'éditeur et de la console aurait manqué.
+Vérifié : capture de la sonde Firefox. L'onglet `temp.py` a le contour bleu en haut et sur les côtés, l'éditeur est
+éclairci et les croix sont fines ; 0 Traceback. Le changement de volet par un clic n'a pas été mesuré (sonde sans clic).
+Point ouvert : `EN_RETARD` est à retirer une fois le fork regénéré.
