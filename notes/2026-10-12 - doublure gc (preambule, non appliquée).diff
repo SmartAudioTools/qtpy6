@@ -1,0 +1,46 @@
+diff --git a/qtpy6/web/preambule.py b/qtpy6/web/preambule.py
+index 6266cc5..37f7407 100644
+--- a/qtpy6/web/preambule.py
++++ b/qtpy6/web/preambule.py
+@@ -88,6 +88,33 @@ def _doubler_sleep() -> None:
+     time.sleep = sleep_
+ 
+ 
++def _doubler_gc(boucle: asyncio.AbstractEventLoop, periode_s: float = 2.0, seuil: int = 20000) -> None:
++    """Les passes AUTOMATIQUES du ramasse-miettes de Python 3.14 tuent le Worker (« index out of bounds » dans le GC)
++    dès que des piles JSPI se sont entrelacées (fils émulés, ``time.sleep``) ; ``gc.collect()``, passe complète, jamais
++    (12/10/2026 : ``gc.set_threshold(1, 1, 1)`` dans le noyau meurt à la première allocation, ``gc.collect()`` après
++    chaque pas passe ; Pyodide nu, sans piles entrelacées, passe les deux). Le GC automatique reste donc coupé, et une
++    passe complète a lieu toutes les ``periode_s`` secondes si plus de ``seuil`` objets sont nés depuis la dernière.
++    ``gc.enable``/``disable``/``isenabled`` ne règlent plus que ces passes (parso réactive le GC sans condition)."""
++    import gc  # noqa: PLC0415
++
++    actif = [gc.isenabled()]
++    gc.disable()
++
++    def enable() -> None:
++        actif[0] = True
++
++    def disable() -> None:
++        actif[0] = False
++
++    def passe() -> None:
++        if actif[0] and gc.get_count()[0] > seuil:
++            gc.collect()
++        boucle.call_later(periode_s, passe)
++
++    gc.enable, gc.disable, gc.isenabled = enable, disable, lambda: actif[0]
++    boucle.call_later(periode_s, passe)
++
++
+ def _poster(destination: Any, message: dict[str, Any]) -> None:
+     """Dans le Worker, la seule destination est la page : ``destination`` n'est pas lue."""
+     import js  # noqa: PLC0415
+@@ -156,6 +183,7 @@ def installer(dossier_web: str, boucle: asyncio.AbstractEventLoop | None = None)
+     boucle = boucle or asyncio.get_event_loop()
+     threading_web.partager_boucle(boucle)  # les boucles qu'ipykernel crée par fil
+     _garde_vie(boucle)
++    _doubler_gc(boucle)
+     _doubler_sleep()
+     _completer_site()
+     js.zmq_pret(create_proxy(recevoir_page))  # la page a pu écrire avant : travailleur.js vide ce qu'il a gardé
