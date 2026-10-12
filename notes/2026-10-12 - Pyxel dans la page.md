@@ -205,6 +205,14 @@ running promising task` (Pyodide), avant et après la panique ; à regarder si e
     affichage) n'est pas gêné par `window` dans le Worker. Niveau de preuve : sonde Firefox, une exécution ; `run` doublé
     et réinitialisation (`init` appelé deux fois) non testés.
 
+23. **Ordre du greffon** (11 h 35) : défaut trouvé à la lecture de `bridge/kernel.py` : le greffon pose ses crochets
+    depuis un `__import__` enveloppé, dès que `pyxel` ENCORE PARTIELLEMENT initialisé a `init`/`run`/`flip`, donc juste
+    après `from .pyxel_binding import *` et avant la fin de `pyxel/__init__.py`. La version de l'essai 22 complétait
+    `pyxel` après son exécution : le greffon aurait capturé le `flip` d'origine. Correctif : le chercheur complète
+    l'extension `pyxel.pyxel_binding` dès son exécution, avant la recopie de ses noms. Essai : un `__import__` enveloppé
+    comme celui du greffon capture `pyxel.flip` au premier instant possible → `qtpy6.web.pyxel_web` ; essai 22 rejoué à
+    l'identique. Niveau de preuve : sonde Firefox, une exécution.
+
 ## Ce que cela change pour le pont
 
 **Forme retenue (essais 20 et 21) : la boucle du greffon tourne telle quelle, qtpy6 ne double que `pyxel.flip` et

@@ -11,7 +11,21 @@ import time
 
 ROUE = "./roues/pyxel-2.9.9-cp311-abi3-emscripten_5_0_3_wasm32.whl"
 ESSAI_CODE = """
-import os, sys, pyxel
+import builtins, os, sys
+# Essai 23 : l'ordre du greffon (bridge/kernel.py) : __import__ enveloppé, flip capturé dès que pyxel, encore
+# partiellement initialisé, a init/run/flip ; la doublure doit être déjà en place à cet instant.
+_capte = {}
+_imp = builtins.__import__
+def _guet(*a, **k):
+    m = _imp(*a, **k)
+    p = sys.modules.get("pyxel")
+    if p is not None and not _capte and all(hasattr(p, n) for n in ("init", "run", "flip")):
+        _capte["flip"] = p.flip.__module__
+    return m
+builtins.__import__ = _guet
+import pyxel
+builtins.__import__ = _imp
+print("RES" "ULTAT capture", _capte, "attendu qtpy6.web.pyxel_web")
 print("pyxel", pyxel.__file__)
 JEU = '''
 import os, pyxel

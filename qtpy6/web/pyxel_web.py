@@ -1,7 +1,9 @@
 """Pyxel dans le Web Worker d'un processus (le noyau de la console de SmartPythonEditor) : la doublure qui laisse le code
 écrit pour le bureau, et le crochet du greffon spyder_pyxel, tourner tels quels. ``installer()`` (appelé par le préambule)
-pose un chercheur d'import : au premier ``import pyxel`` (la roue wasm officielle, chargée à ce moment-là), le module est
-complété AVANT que quiconque capture ses fonctions (le greffon capture ``pyxel.flip`` et ``pyxel.init`` à ``install()``).
+pose un chercheur d'import : au premier ``import pyxel`` (la roue wasm officielle, chargée à ce moment-là), l'extension
+``pyxel.pyxel_binding`` est complétée dès son exécution, donc AVANT que ``pyxel/__init__.py`` en recopie les noms et que
+quiconque les capture : le greffon pose ses crochets depuis un ``__import__`` enveloppé, dès que ``pyxel`` (encore
+partiellement initialisé) a ``init``, ``run`` et ``flip``.
 
 Ce que la roue ne sait pas faire seule dans un Worker, et ce qui est doublé (mesures : notes/2026-10-12 - Pyxel dans la
 page.md, essais 1 à 21) :
@@ -51,7 +53,7 @@ def _canvas(largeur: int, hauteur: int) -> None:
 
 
 def completer(pyxel: Any) -> None:
-    """Remplace ``init``, ``flip`` et ``run`` du module ``pyxel`` importé."""
+    """Remplace ``init``, ``flip`` et ``run`` du module ``pyxel.pyxel_binding`` exécuté."""
     import js  # noqa: PLC0415
     import pyodide_js  # noqa: PLC0415
     from pyodide.ffi import create_once_callable  # noqa: PLC0415
@@ -92,17 +94,17 @@ def completer(pyxel: Any) -> None:
         while True:
             update()
             draw()
-            pyxel.flip()
+            flip_web()
 
     pyxel.init, pyxel.flip, pyxel.run = init_web, flip_web, run_web
 
 
 class _Chercheur:
-    """Au premier ``import pyxel`` : le module trouvé par les autres chercheurs (dont celui qui charge la roue), complété
-    juste après son exécution."""
+    """``pyxel.pyxel_binding`` trouvé par les autres chercheurs (la roue est installée à l'import de ``pyxel``, juste
+    avant), complété juste après son exécution."""
 
     def find_spec(self, nom: str, chemin: Any = None, cible: Any = None) -> Any:
-        if nom != "pyxel":
+        if nom != "pyxel.pyxel_binding":
             return None
         sys.meta_path.remove(self)
         for chercheur in sys.meta_path:
