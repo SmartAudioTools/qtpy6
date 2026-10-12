@@ -68,6 +68,30 @@ def _pyodide_signaler(actif):
 _pompe = []
 
 
+def _hors_tache(f):
+    """Une entrée de la page (rappel de la WebLoop, tour de pompe) part sans tâche asyncio courante. Une tâche dont la
+    pile est suspendue par JSPI (``run_sync``, ou une boucle imbriquée de Qt, ``qtSuspendJs``) reste sinon courante pour
+    asyncio : ni Pyodide ni Qt n'en sortent. Les rappels que la page lance entre-temps la trouvaient courante, et le réveil
+    d'une autre tâche y échouait (« Cannot enter into task … while another task … is being executed » : mesuré au
+    lancement du noyau de Spyder, 12/10/2026, la tâche du client Jupyter en mourait, et la page avec). Elle est mise de
+    côté le temps de l'entrée, et remise après : sa pile la retrouve courante quand elle reprend."""
+    import asyncio  # noqa: PLC0415
+
+    @functools.wraps(f)
+    def f_(*args):
+        try:
+            boucle = asyncio.get_event_loop()
+            tache = asyncio.tasks._swap_current_task(boucle, None)
+        except RuntimeError:  # pas de boucle
+            return f(*args)
+        try:
+            return f(*args)
+        finally:
+            asyncio.tasks._swap_current_task(boucle, tache)
+
+    return f_
+
+
 def _pyodide_pomper(ns, periode=10):
     """Fait tourner la boucle d'événements de Qt : compilé avec JSPI, Qt-WASM n'envoie ni minuteries ni événements postés
     de lui-même, il attend qu'on reprenne SA boucle ``exec()`` suspendue (``onTimer`` : ``if (useAsyncify()) return;``,
@@ -82,7 +106,11 @@ def _pyodide_pomper(ns, periode=10):
     except ImportError:  # tests/test_web.py, qui simule le navigateur sans Pyodide : sa boucle native fait tourner Qt
         return
     QCoreApplication, QEvent = ns["QCoreApplication"], ns["QEvent"]
+    import asyncio.events  # noqa: PLC0415 - les rappels de la WebLoop (run_handle) : l'autre entrée de la page
 
+    asyncio.events.Handle._run = _hors_tache(asyncio.events.Handle._run)
+
+    @_hors_tache
     def tour():
         global _pompe_tourne
         app = QCoreApplication.instance()
@@ -126,8 +154,8 @@ def _peut_suspendre():
 
 def _en_tache():
     """Le code en cours est le pas d'une tâche asyncio : une entrée promettante de la WebLoop, même si une autre pile
-    attend (Pyodide sort de la tâche suspendue et y rentre à la reprise, ``stack_switching/pystate.c`` : un slot appelé
-    par Qt pendant une suspension n'y voit donc aucune tâche)."""
+    attend (``_hors_tache`` : chaque entrée de la page part sans tâche courante, celle d'une pile suspendue est mise de
+    côté le temps de l'entrée ; un slot appelé par Qt pendant une suspension n'y voit donc aucune tâche)."""
     import asyncio  # noqa: PLC0415
 
     try:

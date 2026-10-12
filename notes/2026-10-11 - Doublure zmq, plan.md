@@ -349,3 +349,24 @@ Instrumentation provisoire dans `essais/spyder/gel8c.py` (non commitée, essai) 
   plugins Plots puis Variable Explorer dans jalon8c ; comparer la même séquence sur le bureau.
 - Rappel : le renommage des slots homonymes (fork, 591fdf005) est perdu depuis la reconstruction du 11/10 ;
   contournement d'essai dans `jalon7.py`, correction attendue du générateur du fork (session du fork ou utilisateur).
+
+### Tâche courante laissée par une pile suspendue (12/10/2026, nuit) — corrigé dans `qtpy6/web/bloquant.py`
+
+- **Défaut mesuré** : au lancement du noyau de Spyder, « Cannot enter into task … while another task … is being
+  executed » ; la tâche du client Jupyter en mourait. Cause : une tâche dont la pile est suspendue par JSPI (`run_sync`,
+  ou une boucle imbriquée de Qt, `qtSuspendJs` via `saveState`/`restoreState`) reste la tâche COURANTE pour asyncio ;
+  ni Pyodide ni Qt n'en sortent. Les rappels lancés entre-temps la trouvaient courante.
+- **Correctif** : `_hors_tache`, posé sur les deux entrées de la page (`Handle._run`, rappels de la WebLoop ; `tour`,
+  la pompe Qt) : la tâche courante est mise de côté (`asyncio.tasks._swap_current_task`) le temps de l'entrée, puis
+  remise. Écarté : sortir de la tâche dans `_pyodide_suspendre` seul — mesuré insuffisant, une autre voie de
+  suspension (Qt) laissait la même tâche courante.
+- **Vérifié** : sonde Firefox, plus aucune erreur « Cannot enter », tâche courante None à chaque rappel ;
+  `tests/test_web.py` 56 passés (natif : n'exerce pas ce code Pyodide). Jalon 7 avec le correctif : atteint
+  « fenêtre : MainWindow, visible » puis le gel de 10 s ; même jalon sur un site au `bloquant.py` d'avant
+  (`essais/spyder/site_ref`) : gel AVANT « fenêtre » — le gel n'est donc pas causé par le correctif.
+- **Pièges d'instrumentation** : sous JSPI, `f_trace` et `sys.monitoring.set_events` corrompent le tas (« Pyodide fatal
+  error index out of bounds ») ; `sys.setprofile` ne voit rien ; un relevé de tous les widgets toutes les 20 ms
+  (`post_visible_setup` instrumenté) suffit à figer la page. Les lignes de la console Firefox sont préfixées
+  `console.log: "` : pas de `^` dans les motifs.
+- **Ouvert** : le gel restant après le second démarrage du noyau (deux lancements : à comprendre), qui empêche encore
+  « 8c passe : noyau prêt (In [1]) ».
