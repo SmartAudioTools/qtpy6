@@ -192,11 +192,12 @@ def _coller():
     def coller(evenement):
         champ = QApplication.focusWidget()
         texte = evenement.clipboardData and evenement.clipboardData.getData("text/plain")
-        if not texte or champ is None:
+        if champ is None:
             return
         evenement.preventDefault()
         evenement.stopPropagation()
-        QApplication.clipboard().setText(texte)
+        if texte:  # sans texte, le Ctrl+V part quand même : un filtre qui colle d'un presse-papiers à lui (SmartTeacher,
+            QApplication.clipboard().setText(texte)  # dont Ctrl+C n'écrit rien au système) n'en recevait aucun (12/10/2026)
         for genre in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
             QApplication.sendEvent(champ, QKeyEvent(genre, Qt.Key.Key_V, Qt.KeyboardModifier.ControlModifier, "\x16"))
 

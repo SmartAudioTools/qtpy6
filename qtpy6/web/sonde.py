@@ -21,7 +21,8 @@ sonde pose ``window.etat = "glissé"`` une fois le glissé fait, et attend que l
 qui vérifie le résultat du glissé, et un test automatique qui en dépend. ``--pilote`` : pendant que la page tourne, ses
 demandes de gestes réels, qu'un événement synthétique de Qt ne remplace pas (un slot qu'un vrai clic déclenche est reporté
 par ``bloquant``, pas celui de ``click()``) : ``window.etat = "cliquer"`` (en ``window.clic = [x, y]``, pixels CSS) ou
-``"taper"`` (``window.texte``, au clavier, là où est le focus), ``"fichier"`` (``window.fichier = {nom, texte}``, déposé
+``"taper"`` (``window.texte``, au clavier, là où est le focus), ``"raccourci"`` (Ctrl + ``window.touche``, « c », « x »
+ou « v »), ``"fichier"`` (``window.fichier = {nom, texte}``, déposé
 dans le sélecteur de fichiers que la page vient d'ouvrir par ``QFileDialog.getOpenFileName``) ou ``"recharger"`` (la page
 rechargée, sans réponse : elle repart de zéro et reconnaît un second passage à ce qu'elle retrouve) ; la sonde fait le
 geste et répond ``window.etat`` suivi de ``"_fait"``, puis la page poursuit.
@@ -158,6 +159,23 @@ def taper(navigateur):
     repeint(navigateur)
 
 
+def raccourci(navigateur):
+    """``window.touche`` (« c », « x » ou « v ») avec Ctrl, au vrai clavier, là où le navigateur a le focus. Blink piloté en
+    DevTools ne déclenche pas seul la commande d'édition d'un raccourci : ``commands`` la lui donne, comme le clavier
+    (les événements ``copy``, ``cut`` et ``paste`` de la page)."""
+    c = navigateur.execute_script("return window.touche")
+    if isinstance(navigateur, Blink):
+        touche = dict(key=c, code="Key" + c.upper(), windowsVirtualKeyCode=ord(c.upper()), modifiers=2)
+        navigateur.cdp("Input.dispatchKeyEvent", type="rawKeyDown", commands=[{"c": "copy", "x": "cut", "v": "paste"}[c]], **touche)
+        navigateur.cdp("Input.dispatchKeyEvent", type="keyUp", **touche)
+    else:
+        from selenium.webdriver.common.action_chains import ActionChains  # noqa: PLC0415
+        from selenium.webdriver.common.keys import Keys  # noqa: PLC0415
+
+        ActionChains(navigateur).key_down(Keys.CONTROL).send_keys(c).key_up(Keys.CONTROL).perform()
+    repeint(navigateur)
+
+
 def fichier(navigateur):
     """``window.fichier`` ({nom, texte}) déposé dans le sélecteur de fichiers que la page a ouvert (``bloquant.ELEMENT_FICHIERS``,
     déjà présent : la page ne rend la main qu'une fois suspendue dessus) : ce que l'utilisateur fait en choisissant un fichier
@@ -199,7 +217,7 @@ def recharger(navigateur):
     return False
 
 
-GESTES = {"cliquer": cliquer, "taper": taper, "fichier": fichier, "recharger": recharger}
+GESTES = {"cliquer": cliquer, "taper": taper, "raccourci": raccourci, "fichier": fichier, "recharger": recharger}
 
 
 def repeint(navigateur):
