@@ -299,3 +299,8 @@ greffon sonde son segment (minuterie à 4 ms).
 
 - Images et clavier : faits (essai 28). Reste **le son** (pas d'AudioContext dans un Worker) et les
   `SystemError: Cannot enter a promising task…` à examiner.
+- **Piste pour le son (relevée à 12:44, rien d'écrit)** : la console de l'essai 28 ne montre aucune erreur audio. Le
+  pilote audio emscripten de SDL2 teste `AudioContext`, qui n'existe pas dans un Worker. Piste : une doublure qtpy6, un
+  `AudioContext` minimal dans le Worker dont le `ScriptProcessorNode` est pompé depuis `memoire_partagee.reconcilier()`
+  (le sleep bloquant, comme pour les images), avec des échantillons poussés dans un anneau `SharedArrayBuffer` et joués
+  dans la page par un AudioWorklet. Vérification : la page compte les échantillons non nuls reçus.
