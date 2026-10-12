@@ -36,7 +36,23 @@ try:
         vus.append((m[0], m[63 * 47]))
         time.sleep(1 / 30)
     print("RES" "ULTAT boucle", vus, "duree", round(time.monotonic() - t0, 3), "attendu ~0.333")
-    print("RES" "ULTAT flip OK (sans flip)")
+    print("RES" "ULTAT frame_count", pyxel.frame_count)
+    pyxel.set_btn(pyxel.KEY_SPACE, True)
+    print("RES" "ULTAT btn", pyxel.btn(pyxel.KEY_SPACE), "btnp", pyxel.btnp(pyxel.KEY_SPACE))
+    pyxel.set_btn(pyxel.KEY_SPACE, False)
+    vus_run = []
+    def update():
+        vus_run.append(pyxel.frame_count)
+        if len(vus_run) == 5:
+            print("RES" "ULTAT run images", vus_run, "fin")
+            pyxel.quit()
+    def draw():
+        pyxel.cls(len(vus_run))
+    try:
+        pyxel.run(update, draw)
+        print("RES" "ULTAT run rendu", vus_run, "fin")
+    except BaseException as e:
+        print("RES" "ULTAT run leve", type(e).__name__, str(e)[:200], vus_run)
 except BaseException as e:
     import traceback; traceback.print_exc(); print("RES" "ULTAT KO", type(e).__name__, e)
 '''
@@ -90,7 +106,7 @@ def SUITE(main, rapport):  # noqa: N802
         if not debut:
             debut.append(time.monotonic())
             console.get_current_shellwidget().execute(ESSAI_CODE)
-        if ("RESULTAT flip" in texte or "RESULTAT KO" in texte or "Error" in texte) or time.monotonic() - debut[0] > 90:
+        if (" fin" in texte or "RESULTAT run leve" in texte or "RESULTAT KO" in texte or "Error" in texte) or time.monotonic() - debut[0] > 90:
             js.console.log("CONSOLE >>> " + texte[:8000])
             js.window.etat = "pyxel-fini"
         else:

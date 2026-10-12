@@ -83,6 +83,14 @@ running promising task` (Pyodide), avant et après la panique ; à regarder si e
    dessinées (`(15, 0), (14, 1) … (6, 9)`), et dix `time.sleep(1/30)` durent 0,339 s pour 0,333 attendues. Le tampon
    d'écran est donc à jour dès le dessin, sans passer par le rendu GL. (Premier essai : `memoryview` au format `<B` ne
    s'indexe pas sous Pyodide, `NotImplementedError` ; lu par `bytes(...)`.)
+8. **Mais sans `flip`, `frame_count` n'avance pas, et le `pyxel.run` d'origine tue Pyodide** (même relais, 07 h 35) :
+   après les dix images, `pyxel.frame_count` vaut 0 ; `set_btn(KEY_SPACE, True)` puis `btn`/`btnp` rendent True/True (sur
+   l'image 0 seulement : `btnp` et toute animation qui lit `frame_count` seraient faux tant que le compteur reste figé).
+   `pyxel.run(update, draw)` appelle `emscripten_set_main_loop`, qui lève « unwind » pour quitter la pile C : dans le
+   noyau, c'est une **erreur fatale de Pyodide** (« Pyodide has suffered a fatal error … unwind »), le Worker meurt.
+   L'option « laisser tourner `pyxel.run` » est donc écartée telle quelle, et la doublure de `flip` devra faire avancer
+   `frame_count`, ce que l'API Python publique ne permet pas (rien dans `__init__.pyi`). Source Rust non consultable
+   d'ici : WebFetch rend 404 sur github.com et raw.githubusercontent.com (12/10, 07 h 35), et aucune copie sur le disque.
 
 ## Ce que cela change pour le pont
 
