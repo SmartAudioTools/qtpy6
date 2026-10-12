@@ -16,9 +16,9 @@ import os
 import sys
 from pathlib import Path
 
-GREFFONS = ("spyder_stop_toolbar", "spyder_interpreter_toolbar")  # spe.py : les greffons de SmartPythonEditor qui
+GREFFONS = ("spyder_stop_toolbar", "spyder_interpreter_toolbar", "spyder_pyxel")  # spe.py : les greffons de SmartPythonEditor qui
 # portent ses boutons Stop et Interpréteur (smartos-support/plugins-catalogue.txt), en pur Python ; window_controls dessine
-# des boutons de fenêtre, sans objet dans une page, viztracer et line_profiler ont des extensions C
+# des boutons de fenêtre, sans objet dans une page, viztracer et line_profiler ont des extensions C ; spyder_pyxel : essai 26
 GREFFONS_SOURCES = Path("/DATA/Python/FORKS/SmartPythonEditorPlugins")
 sys.path[:0] = ["/DATA/Python/FORKS/SmartPythonEditor", "/DATA/Python/qtpy6/essais/roues/lib",
                 *(str(GREFFONS_SOURCES / g) for g in GREFFONS)]

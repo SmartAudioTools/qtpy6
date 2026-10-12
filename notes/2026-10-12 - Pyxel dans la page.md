@@ -261,7 +261,41 @@ le stub `_readVirtualGamepadBitmask`. Une doublure de `run` (boucle Python updat
 Écartée : laisser tourner la boucle emscripten de `pyxel.run`, qui demandait de contourner `patched_run` (code du
 greffon) et interdit à la cellule d'être suspendue pendant les images (essai 10).
 
+## Essais 26 et 27 : le greffon embarqué (12/10/2026, 12:00 → 12:27)
+
+Demande de l'utilisateur (12:01, dictée) : « tu ne vas pas attaquer les notifications, je veux l'intégration de pixels
+complètes dans l'éditeur. Donc tu vas jusqu'au bout, quitte à monter jusqu'à 93% ». Donc pas de FIFO : le pont du
+greffon sonde son segment (minuterie à 4 ms).
+
+- **Essai 26** (`spyder_pyxel` ajouté à `GREFFONS` de `essais/spyder/construire_site.py`) : `PONT page canaux []`.
+  Cause, trouvée sous node : **`os.mkfifo` n'existe pas dans Pyodide** → `AttributeError` dans `PyxelChannel.create()`,
+  qui ne rattrape que `OSError`, et `attach_console` l'avale sans rien dire. Puis plantage `drop_gil: GIL is not locked`
+  pendant la suspension du fil de jupyter_client.
+- **Correctif (non commité)** : `qtpy6/web/memoire_partagee.py`, `installer()` pose `os.mkfifo` = `_mkfifo`, qui lève
+  `OSError(ENOSYS)` (ce que rend une plateforme sans FIFO) ; le greffon retombe sur son sondage. Écarté : une vraie
+  FIFO (refusé par l'utilisateur), modifier le greffon (interdit).
+- **Essai 27b/c** : canal créé (`('spyder_pyxel_42_…', None)`), **plus de plantage du GIL** (sans doute dû à l'échec
+  précédent, non démontré), le jeu tourne 150 images, le greffon est accroché (`patched: True` après le jeu). Mais
+  le panneau reçoit 0 image : l'en-tête vu par la page a MAGIC et le pid (écrits par le constructeur du publieur),
+  `seq` = 0 → `publish()` sort avant le verrou de séquence : soit la largeur, soit `pyxel.screen.data_ptr()` (ctypes
+  sur une adresse wasm ?) lève, et c'est avalé.
+- **Essai 27d** : `data_ptr()` marche (`c_ubyte_Array_3072`), taille 64×48 ; le segment vu par la page a `seq` = 300
+  et la bonne image, mais seulement **en fin de cellule**, et le jeu est lent (150 images en ~18 s).
+- **Essai 27e** (mesure dans `update`, image 10) : **`can_run_sync()` est faux dans le noyau IPython** ; le `time.sleep`
+  doublé retombe sur le sleep bloquant (50 ms tenues, jeu à 30 i/s : 150 images en 4,98 s), mais un Worker bloqué ne
+  passe jamais la minuterie JS de `memoire_partagee` : la page ne voit rien (segment à zéro). Cause pas cherchée plus
+  loin (pourquoi le contexte d'exécution du noyau n'est pas JSPI) : le correctif ne l'exige pas.
+- **Correctif (qtpy6)** : `memoire_partagee.reconcilier()` (le moteur JS gagne `passer()`, une passe immédiate sur
+  tous les segments) ; `preambule._doubler_sleep`, dans sa branche bloquante, l'appelle avant et après l'attente : avant
+  pousse l'image que le jeu vient d'écrire, après tire les touches écrites par la page pendant l'attente (l'anneau
+  d'entrée du greffon est dans le même segment). Écartés : rendre le noyau JSPI (cause non localisée, et touche à
+  l'exécution de toutes les cellules) ; réconcilier depuis le greffon ou `pyxel_web` (le premier est interdit, le
+  second ne couvrirait pas un autre utilisateur de `SharedMemory` qui attend par `time.sleep`).
+- **Essai 28 — VÉRIFIÉ** (sonde Firefox, 12:43) : le panneau reçoit **148 images sur 150, en direct** (17,18 s → 22,11 s,
+  soit 30 i/s) ; Espace, envoyée par la page en `QKeyEvent` réel à l'écran du panneau vers l'image 40, est **vue par le
+  jeu à l'image 42**, et l'effet (carré qui change de couleur, pixel 8 → 7) revient au panneau aux images 43-82.
+
 ## Point ouvert immédiat
 
-- `qtpy6/web/pyxel_web.py` écrit (essai 22). Page isolée (essai 24), `SharedMemory` doublée (essai 25). Reste : la doublure 2 (FIFO et `QSocketNotifier`, ou le sondage de secours du panneau) pour que le panneau reçoive les images comme en natif.
-- Le son (pas d'AudioContext dans un Worker) et les `SystemError: Cannot enter a promising task…` restent à examiner.
+- Images et clavier : faits (essai 28). Reste **le son** (pas d'AudioContext dans un Worker) et les
+  `SystemError: Cannot enter a promising task…` à examiner.

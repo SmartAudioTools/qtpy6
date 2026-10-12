@@ -72,13 +72,17 @@ def _doubler_sleep() -> None:
     pendant l'attente, et les signaux reçus sont livrés au réveil (une boucle ``while True: time.sleep(…)`` s'interrompt)."""
     from pyodide.ffi import can_run_sync, run_sync  # noqa: PLC0415
 
+    from qtpy6.web import memoire_partagee  # noqa: PLC0415
+
     sleep = time.sleep
 
     def sleep_(secs: float) -> None:
         if can_run_sync():
             run_sync(asyncio.sleep(secs))
-        else:
+        else:  # sans JSPI, la minuterie de memoire_partagee ne passe pas : les segments se réconcilient ici
+            memoire_partagee.reconcilier()
             sleep(secs)
+            memoire_partagee.reconcilier()
         _livrer_signaux()
 
     time.sleep = sleep_

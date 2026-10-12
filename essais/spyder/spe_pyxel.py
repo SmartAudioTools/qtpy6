@@ -11,72 +11,46 @@ import time
 
 ROUE = "./roues/pyxel-2.9.9-cp311-abi3-emscripten_5_0_3_wasm32.whl"
 ESSAI_CODE = """
-import builtins, os, sys
-import js
-# Essai 24 : la page isolée par sw.js (COOP/COEP) : le Worker du noyau a-t-il SharedArrayBuffer ?
-_isole = (js.self.crossOriginIsolated, hasattr(js, "SharedArrayBuffer"))
-# Essai 25 : SharedMemory créée par la page (SUITE), attachée ici par son nom, comme bridge/kernel.py
-import struct, time
-from multiprocessing import shared_memory
-try:
-    _shm = shared_memory.SharedMemory(name="qtpy6_essai25")
-    _lu = (hex(struct.unpack_from("<I", _shm.buf, 0)[0]), bytes(_shm.buf[4095:4099]), _shm.size)
-    _shm.buf[8:12] = b"noya"
-    struct.pack_into("<I", _shm.buf, 12, 0xBEEF)
-    time.sleep(0.05)
-except BaseException as e:
-    _lu = repr(e)
-print("RES" "ULTAT shm worker", _lu, "attendu ('0xcafe', b'page', 4099)")
-# Essai 23 : l'ordre du greffon (bridge/kernel.py) : __import__ enveloppé, flip capturé dès que pyxel, encore
-# partiellement initialisé, a init/run/flip ; la doublure doit être déjà en place à cet instant.
-_capte = {}
-_imp = builtins.__import__
-def _guet(*a, **k):
-    m = _imp(*a, **k)
-    p = sys.modules.get("pyxel")
-    if p is not None and not _capte and all(hasattr(p, n) for n in ("init", "run", "flip")):
-        _capte["flip"] = p.flip.__module__
-    return m
-builtins.__import__ = _guet
-import pyxel
-builtins.__import__ = _imp
-print("RES" "ULTAT capture", _capte, "attendu qtpy6.web.pyxel_web")
-print("RES" "ULTAT isolation worker", _isole, "attendu (True, True)")
-print("pyxel", pyxel.__file__)
+# Essai 26 : le greffon spyder_pyxel embarqué ; son amorce (reader.kernel_bootstrap_code), injectée par le panneau dans
+# ce noyau, a-t-elle installé le pont ? Puis un jeu ordinaire (pyxel.run), vu par le panneau, avec la touche Espace
+# envoyée par la page à l'écran du panneau (QKeyEvent réel).
+import os, sys
+import spyder_pyxel.bridge.kernel as k
+print("RES" "ULTAT pont", k.status(), sys.modules.get("_spyder_pyxel_error"))
 JEU = '''
-import os, pyxel
-import time
+import pyxel
+pyxel.init(64, 48)
+vu = []
+import time, pyodide.ffi
+mesure = {"t0": time.monotonic()}
+def update():
+    if pyxel.frame_count == 10:
+        mesure["sync"] = pyodide.ffi.can_run_sync(); mesure["sleep"] = time.sleep.__qualname__
+        t = time.monotonic(); time.sleep(0.05); mesure["sleep50ms"] = round(time.monotonic() - t, 3)
+    if pyxel.btn(pyxel.KEY_SPACE) and not vu:
+        vu.append(pyxel.frame_count)
+    if pyxel.frame_count >= 150:
+        pyxel.quit()
+def draw():
+    pyxel.cls(1)
+    pyxel.rect(8, 8, 16, 16, 7 if pyxel.btn(pyxel.KEY_SPACE) else 8)
+pyxel.run(update, draw)
+print("RES" "ULTAT jeu fini", pyxel.frame_count, "espace vue à l'image", vu)
+print("RES" "ULTAT taille", pyxel.width, pyxel.height)
+print("RES" "ULTAT mesure", mesure, "durée", round(time.monotonic() - mesure["t0"], 2))
 try:
-    # Essai 22 : le code du bureau tel quel, servi par la doublure qtpy6/web/pyxel_web.py (installée par le préambule).
-    os.environ["SDL_VIDEODRIVER"] = "offscreen"  # ce que pose le greffon : la doublure doit le retirer
-    pyxel.init(64, 48)
-    print("RES" "ULTAT init OK", pyxel.width, pyxel.height, pyxel.flip.__module__)
-    journal = []
-    t0 = time.monotonic()
-    for k in range(60):  # la boucle de patched_run : entrées (pump), update, draw, flip
-        if k in (30, 45):
-            pyxel.set_btn(pyxel.KEY_SPACE, k == 30)
-        if k < 3 or k % 10 == 0 or 29 <= k <= 31 or 44 <= k <= 46:
-            journal.append(f"k={k} fc={pyxel.frame_count} t={time.monotonic() - t0:.2f} btn={pyxel.btn(pyxel.KEY_SPACE)} btnp={pyxel.btnp(pyxel.KEY_SPACE)}")
-        pyxel.cls(k % 16)
-        pyxel.flip()
-    m = bytes(memoryview(pyxel.screen.data_ptr()))
-    print("RES" "ULTAT flip", journal, "frame_count", pyxel.frame_count, "duree", round(time.monotonic() - t0, 2), "attendu ~2.0", "pixel", m[0], "attendu 11")
+    d = pyxel.screen.data_ptr(); print("RES" "ULTAT data_ptr", type(d), len(d), bytes(memoryview(d)[:4]))
 except BaseException as e:
-    import traceback; traceback.print_exc(); print("RES" "ULTAT KO", type(e).__name__, e)
+    import traceback; print("RES" "ULTAT data_ptr KO", traceback.format_exc().replace(chr(10), " | "))
 '''
 os.makedirs("/home/pyodide/jeux", exist_ok=True)
 open("/home/pyodide/jeux/jeu.py", "w").write(JEU)
-exec(compile(JEU, "/home/pyodide/jeux/jeu.py", "exec"), {"__name__": "__main__"})
+try:
+    exec(compile(JEU, "/home/pyodide/jeux/jeu.py", "exec"), {"__name__": "__main__"})
+except BaseException as e:
+    import traceback; traceback.print_exc(); print("RES" "ULTAT KO", type(e).__name__, e)
+print("RES" "ULTAT pont après", k.status())
 """
-
-# Essai 12 ter : l'état de la boucle principale d'emscripten (Module.MainLoop), et un compteur requestAnimationFrame en
-# JS pur, pour séparer « rAF ne bat pas dans ce Worker » de « la boucle bat mais n'entre pas dans Python ».
-CELLULE_2 = """import pyxel, js, pyodide_js
-M = pyodide_js._module.MainLoop
-print('RES' 'ULTAT mainloop', 'running', M.running, 'image', M.currentFrameNumber, 'frame_count', pyxel.frame_count, 'setTimeout JS', js.self.__s, 'journal', list(js.self.__log), ' f' 'in')
-"""
-CELLULE_3 = ""
 
 _ICI = os.path.dirname(os.path.abspath(__file__))
 _source = open(os.path.join(_ICI, "spe.py"), encoding="utf-8").read()
@@ -99,13 +73,19 @@ def SUITE(main, rapport):  # noqa: N802
     except BaseException:
         import traceback
         js.console.log("SUITE spe " + traceback.format_exc())
-    global _SHM
-    import struct
-    from multiprocessing import shared_memory
-    _SHM = shared_memory.SharedMemory(name="qtpy6_essai25", create=True, size=4099)
-    struct.pack_into("<I", _SHM.buf, 0, 0xCAFE)
-    _SHM.buf[4095:4099] = b"page"
-    js.console.log("SHM page " + repr(_SHM))
+    from spyder_pyxel.spyder.bridge_manager import get_bridge
+    from qtpy6.QtCore import QEvent, Qt
+    from qtpy6.QtGui import QKeyEvent
+    from qtpy6.QtWidgets import QApplication
+    pont, images = get_bridge(), []
+
+    def image(kind, frame, canal):  # instrumentation : chaque image reçue par le panneau ; Espace envoyée à son écran
+        images.append((frame.number, round(time.monotonic(), 2), frame.pixels[0], frame.pixels[8 * frame.width + 8]))
+        ecran = main.get_plugin("pyxel_game").get_widget()._screens.get(canal)
+        for n, type_ in ((40, QEvent.KeyPress), (80, QEvent.KeyRelease)):
+            if len(images) == n and ecran is not None:
+                QApplication.sendEvent(ecran, QKeyEvent(type_, Qt.Key_Space, Qt.NoModifier, " "))
+    pont.sig_frame.connect(image)
     js.console.log("SUITE pyxel : minuterie armée")
     from qtpy6.QtCore import QTimer
     import js
@@ -121,19 +101,19 @@ def SUITE(main, rapport):  # noqa: N802
             js.console.log("RELEVER " + traceback.format_exc())
             js.window.etat = "pyxel-fini"
 
-    def relever_():  # instrumentation : le texte de la console, jusqu'au verdict ou 90 s
+    def relever_():  # instrumentation : le texte de la console, jusqu'au verdict ou 120 s
         texte = console.get_current_shellwidget()._control.toPlainText()
         if not debut:
             debut.append(time.monotonic())
+            js.console.log("PONT page canaux " + repr([(c.name, c.notify_fd) for c in pont.channels().values()])
+                           + " minuterie " + str(pont._timer.interval()) + " active " + str(pont._timer.isActive()))
             console.get_current_shellwidget().execute(ESSAI_CODE)
-        if False:  # essai 12 : la cellule est rendue ; les images avancent-elles ?
-            debut.append(time.monotonic())
-            QTimer.singleShot(3000, lambda: console.get_current_shellwidget().execute(CELLULE_2))
-        if "RESULTAT mainloop" in texte and len(debut) == 2:
-            debut.append(time.monotonic())
-            QTimer.singleShot(2000, lambda: console.get_current_shellwidget().execute(CELLULE_3))
-        if ("RESULTAT flip" in texte or "RESULTAT run leve" in texte or "RESULTAT KO" in texte or "Error" in texte) or time.monotonic() - debut[0] > 90:
-            js.console.log("RES" "ULTAT shm page " + repr((bytes(_SHM.buf[8:12]), hex(struct.unpack_from("<I", _SHM.buf, 12)[0]))) + " attendu (b'noya', '0xbeef')")
+        if "RESULTAT pont après" in texte or "RESULTAT KO" in texte or "Error" in texte or time.monotonic() - debut[0] > 120:
+            js.console.log("RES" "ULTAT images " + str(len(images)) + " " + repr(images[:3] + images[38:44] + images[78:84] + images[-3:]))
+            if len(images) > 1:
+                js.console.log("RES" "ULTAT cadence " + str(round((len(images) - 1) / (images[-1][1] - images[0][1] + 1e-9), 1)) + " images/s")
+            for c in pont.channels().values():
+                js.console.log("SEGMENT page " + c.name + " " + bytes(c._shm.buf[:32]).hex())
             js.console.log("CONSOLE >>> " + texte[:8000])
             js.window.etat = "pyxel-fini"
         else:

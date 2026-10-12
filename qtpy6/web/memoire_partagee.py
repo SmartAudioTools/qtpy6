@@ -17,6 +17,8 @@ naissance, puis à chaque création). Un segment créé dans un Worker ne sort p
 
 from __future__ import annotations
 
+import errno
+import os
 import secrets
 import sys
 import time
@@ -40,6 +42,7 @@ _MOTEUR = """
   return self.qtpy6_memoire = {
     ajouter: (module, l, s, sab, n) => { const m = { module, l, s, sab, n }; passe(m); liste.add(m); return m; },
     retirer: m => liste.delete(m),
+    passer: () => liste.forEach(passe),
     envoyer: (w, nom, sab) => w.postMessage({ memoire: { nom, sab } }),
   };
 })()
@@ -65,6 +68,16 @@ def enregistrer_worker(worker: Any) -> None:
         moteur = _moteur()
         for nom, sab in _SEGMENTS.items():
             moteur.envoyer(worker, nom, sab)
+
+
+def reconcilier() -> None:
+    """Une passe tout de suite, hors minuterie : un Worker dont ``time.sleep`` ne peut pas suspendre Python (contexte sans
+    JSPI : ``can_run_sync()`` faux, constaté dans le noyau IPython, essai 27e du 12/10/2026) bloque, et la minuterie ne
+    passe jamais ; ``time.sleep`` appelle donc ceci avant et après son attente bloquante."""
+    import js  # noqa: PLC0415
+    moteur = getattr(js.self, "qtpy6_memoire", None)
+    if moteur is not None:
+        moteur.passer()
 
 
 def _adresse(tampon: bytearray) -> int:
@@ -159,3 +172,11 @@ def installer() -> None:
         sys.modules[shared_memory.__name__] = shared_memory
         multiprocessing.shared_memory = shared_memory
     shared_memory.SharedMemory = SharedMemory
+    if not hasattr(os, "mkfifo"):  # absent sous emscripten : AttributeError là où le code POSIX attend OSError
+        os.mkfifo = _mkfifo
+
+
+def _mkfifo(path, mode=0o666, *, dir_fd=None) -> None:
+    """Pas de tube nommé dans le navigateur : l'échec qu'une plateforme sans FIFO rend, que l'appelant sait rattraper
+    (spyder_pyxel retombe alors sur son sondage, 12/10/2026)."""
+    raise OSError(errno.ENOSYS, os.strerror(errno.ENOSYS), path)
