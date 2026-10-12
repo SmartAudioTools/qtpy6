@@ -27,7 +27,16 @@ print("canvas", pyodide_js.canvas.getCanvas2D())
 try:
     pyxel.init(64, 48)
     print("RES" "ULTAT init OK", pyxel.width, pyxel.height, os.getcwd())
-    pyxel.cls(8); pyxel.flip(); print("RES" "ULTAT flip OK", bytes(memoryview(pyxel.screen.data_ptr())[:4]))
+    import time
+    vus = []
+    t0 = time.monotonic()
+    for i in range(10):  # images sans flip (interdit en web) : dessin seul, cadence par sleep
+        pyxel.cls(i); pyxel.rect(0, 0, 8, 8, 15 - i)
+        m = bytes(memoryview(pyxel.screen.data_ptr()))
+        vus.append((m[0], m[63 * 47]))
+        time.sleep(1 / 30)
+    print("RES" "ULTAT boucle", vus, "duree", round(time.monotonic() - t0, 3), "attendu ~0.333")
+    print("RES" "ULTAT flip OK (sans flip)")
 except BaseException as e:
     import traceback; traceback.print_exc(); print("RES" "ULTAT KO", type(e).__name__, e)
 '''

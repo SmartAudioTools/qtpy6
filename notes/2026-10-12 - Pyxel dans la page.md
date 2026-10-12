@@ -78,6 +78,12 @@ running promising task` (Pyodide), avant et après la panique ; à regarder si e
    (`platform_sdl2.rs:544`). C'est un refus délibéré de Pyxel, pas un manque de doublure. Relevés :
    `essais/spyder/sonde_pyxel_hors.log`, `capture_pyxel_hors.console.log`.
 
+7. **Sans `flip`, le dessin marche et `time.sleep` cadence** (même relais, 12/10/2026 07 h 30) : dix images `cls(i)` +
+   `rect(…, 15 - i)` sans aucun `flip` ; `pyxel.screen.data_ptr()` relu à chaque image donne exactement les valeurs
+   dessinées (`(15, 0), (14, 1) … (6, 9)`), et dix `time.sleep(1/30)` durent 0,339 s pour 0,333 attendues. Le tampon
+   d'écran est donc à jour dès le dessin, sans passer par le rendu GL. (Premier essai : `memoryview` au format `<B` ne
+   s'indexe pas sous Pyodide, `NotImplementedError` ; lu par `bytes(...)`.)
+
 ## Ce que cela change pour le pont
 
 La boucle du greffon (`patched_run` : update, draw, `original_flip`, publish) ne peut pas tourner telle quelle en web,
@@ -85,6 +91,12 @@ puisque `flip` y est interdit. En web, Pyxel cadence lui-même par `pyxel.run` (
 `requestAnimationFrame`, présent dans un Worker dédié). La piste : laisser le `pyxel.run` d'origine tourner dans le Worker
 et publier l'image depuis le `draw` (ou après lui), sans `flip`. Cela touche au crochet du greffon, qui ne doit pas changer :
 la doublure devra donc vivre côté qtpy6, et sa forme reste à choisir (de jour).
+
+Depuis la mesure 7, une forme plus simple apparaît : garder la boucle du greffon telle quelle et ne doubler que `flip`. Une
+doublure qtpy6, posée dans le Worker avant le crochet du greffon (qui capture `original_flip` à l'import), remplacerait
+`pyxel.flip` par une cadence à `fps` sans rendu, et `pyxel.init` par un init sans `SDL_VIDEODRIVER=offscreen`, avec les
+objets factices du point 4. Le greffon publierait et lirait les entrées comme en natif. Alternative : laisser tourner le
+`pyxel.run` d'origine, ce qui demande de contourner le `patched_run` du greffon. Le choix revient à l'utilisateur.
 
 ## Point ouvert immédiat
 
