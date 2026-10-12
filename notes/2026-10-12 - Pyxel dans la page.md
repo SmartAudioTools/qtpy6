@@ -304,3 +304,22 @@ greffon sonde son segment (minuterie à 4 ms).
   `AudioContext` minimal dans le Worker dont le `ScriptProcessorNode` est pompé depuis `memoire_partagee.reconcilier()`
   (le sleep bloquant, comme pour les images), avec des échantillons poussés dans un anneau `SharedArrayBuffer` et joués
   dans la page par un AudioWorklet. Vérification : la page compte les échantillons non nuls reçus.
+
+## Un vrai jeu d'élève : `essais/spyder/spe_monkey.py` (12/10/2026, 16:35)
+
+Demande de l'utilisateur : « peux tu me donner une commande pour tester "…/Projet Monkey/Correction/
+projet_monkey_correction_exercice_33_tilemaps_images.py" avec SmartPythonEditor dans le navigateur ? ».
+
+- **Fait** : `spe_monkey.py` reprend `spe.py` (roue pyxel, comme `spe_pyxel.py`, sans instrumentation). Le jeu vient de
+  `index.html?script=spe_monkey.py&jeu=<fichier>` ; le lien `site/monkey` (ignoré, à recréer à la main :
+  `ln -s ".../Projet Monkey/Correction" essais/spyder/site/monkey`) sert le `.py` et `projet_monkey.pyxres`. Le fichier est
+  ouvert dans l'éditeur (fetch suspendu par `run_sync` dans un slot), et copié avec le `.pyxres` dans le système de
+  fichiers du noyau (XHR synchrone dans le Worker), puis lancé par `exec(compile(...))` dans la console.
+- **Vérifié par l'utilisateur** (Firefox avec WebGL) : « le jeu fonctionne, malgré une fenêtre d'erreur qui s'est
+  ouverte momentanément » — erreur non identifiée, rien dans la console de la page.
+- **Écarté** : `pyodide.http.open_url` côté page (XHR synchrone) plante Pyodide (`TypeError: exc must be an exception`).
+- **Défaut trouvé : le triangle « Exécuter » (et F5) plante le noyau.** `%runfile` → `_exec_code` → `ast.parse` →
+  `SystemError: Cannot enter a promising task from inside another running promising task` (fatal). Isolé dans le noyau :
+  `compile(src, "x", "exec")` et `gc.collect()` passent, `ast.parse` plante (reproduit sans affichage dans mon Firefox).
+  Hypothèse non vérifiée : la vérification de pile C d'ast2obj sous la commutation de pile JSPI. C'est pourquoi l'essai
+  lance le jeu par `exec(compile(...))`. À corriger dans qtpy6 (doublure dans le Worker) : TODO du son.
