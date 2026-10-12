@@ -92,8 +92,14 @@ def SUITE(main, rapport):  # noqa: N802, ARG001 - jalon7.py l'appelle après pos
     # À la place des boutons de fenêtre : le bouton Plein écran de Spyder (Affichage, F11), qui dans la page passe le
     # navigateur en plein écran (qtpy6.web.application).
     from spyder.plugins.layout.container import LayoutContainerActions
-    plein = main.get_plugin("layout").get_action(LayoutContainerActions.Fullscreen)
-    plein.setIcon(main.get_plugin("layout").create_icon("window_full_screen"))
+    layout = main.get_plugin("layout")
+    plein = layout.get_action(LayoutContainerActions.Fullscreen)
+
+    def icone():  # celles du bouton Agrandir des volets ; Spyder pose les siennes (qtawesome) à chaque bascule
+        plein.setIcon(layout.create_icon("window_collapse" if layout._fullscreen_flag else "window_full_screen"))
+
+    icone()
+    plein.triggered.connect(icone)  # branché après toggle_fullscreen : passe après lui
     barre.addAction(plein)
 
 

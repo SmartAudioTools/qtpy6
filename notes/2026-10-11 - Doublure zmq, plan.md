@@ -559,3 +559,7 @@ VÉRIFIÉ : sonde Firefox, capture : bouton à droite, « Python 3.13 » dans la
 passage réel en plein écran (une sonde sans tête n'a pas de geste utilisateur) — à essayer dans Chromium. Limite
 connue : sortir par Échap laisse l'état « plein écran » de Spyder ; le F11 suivant ne fait alors que le remettre à
 jour (un second F11 rentre à nouveau).
+  - Suite (05 h) : « il faut utilise les deux meme icone que pour mes dock pour le plein ecran / reduction ». Spyder
+    repose ses icônes qtawesome (`window_fullscreen` / `window_nofullscreen`) à chaque bascule
+    (`_update_fullscreen_action`) ; `spe.py` remet après lui celles du bouton Agrandir des volets (`window_full_screen` /
+    `window_collapse`). Vérifié : capture, icône de départ ; la bascule n'est pas vérifiable sans clic réel.
