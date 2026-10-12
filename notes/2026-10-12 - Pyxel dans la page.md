@@ -91,6 +91,92 @@ running promising task` (Pyodide), avant et après la panique ; à regarder si e
    L'option « laisser tourner `pyxel.run` » est donc écartée telle quelle, et la doublure de `flip` devra faire avancer
    `frame_count`, ce que l'API Python publique ne permet pas (rien dans `__init__.pyi`). Source Rust non consultable
    d'ici : WebFetch rend 404 sur github.com et raw.githubusercontent.com (12/10, 07 h 35), et aucune copie sur le disque.
+9. **Le `flip` d'origine ne se rattrape pas** (même relais, 07 h 45) : appelé sous `try/except BaseException`, sa panique
+   Rust (`platform_sdl2.rs:544`) n'arrive jamais en Python : « Aborted(Assertion failed: handback_tstate == NULL …
+   restoreThreadState) », « Pyodide has suffered a fatal error », « RuntimeError: unreachable executed ». Le Worker
+   meurt. `flip` est donc inutilisable sous toute forme en web ; `frame_count` ne peut avancer que par la boucle de Pyxel.
+   Piste suivante, celle de Pyxel Studio (`pyxel.js`, lu par WebFetch sur cdn.jsdelivr.net) : il pose
+   `pyodide._api._skip_unwind_fatal_error = true` (« Keep Pyodide from treating Emscripten's main-loop unwind as a fatal
+   error ») et laisse `pyxel.run` tourner dans la boucle principale d'emscripten. Essai 10 : même drapeau, `pyxel.run`
+   lancé depuis une pile JS neuve (`setTimeout`), la cellule dormant à côté.
+10. **Échec** (07 h 44) : en 1,5 s, `frame_count` reste à 0 et `update` n'est jamais appelé. Quatre `SystemError: Cannot
+    enter a promising task from inside another running promising task` : les rappels de `requestAnimationFrame` tentent
+    d'entrer dans Python pendant que la cellule est suspendue par JSPI dans `time.sleep`. Le `set_btn` suivant panique
+    (« RefCell already borrowed », `pyxel-core/src/pyxel.rs:47`) : le `run` interrompu par l'unwind garde l'instance
+    Pyxel empruntée. Puis abandon fatal. Conclusion : la boucle de Pyxel ne peut pas tourner À CÔTÉ d'une cellule
+    suspendue, et seuls `update`/`draw` peuvent toucher Pyxel une fois `run` lancé. Essai 11 : `pyxel.run` appelé dans la
+    cellule elle-même, exactement comme pyxel.js, entrées posées depuis `update`.
+11. **Encore fatal** (10 h 31) : « Pyodide has suffered a fatal error … Error: unwind », bien que le drapeau soit posé.
+    Lecture de `pyodide.asm.mjs` (314.0.7) : seul l'appel SYNCHRONE d'un PyProxy (`__pyproxy_apply`, chemin de
+    `runPython`, celui de pyxel.js) passe l'exception par `API.maybe_fatal_error`, qui épargne « unwind » sous le drapeau.
+    L'appel PROMETTEUR (`promisingApply`, JSPI, celui du noyau qui exécute la cellule) appelle `API.fatal_error` sans
+    condition. Le drapeau de Pyxel Studio ne vaut donc que hors JSPI. Essai 12 : faire appeler `pyxel.run` par un
+    trampoline JS synchrone (une fonction JS qui appelle un PyProxy), pour que l'unwind s'arrête dans
+    `maybe_fatal_error`, puis laisser la cellule finir et les images arriver par `requestAnimationFrame`.
+12. **Plus d'erreur fatale** (10 h 34) : `pyxel.run` lancé par le trampoline rend la main (« RESULTAT run rendu »), la
+    cellule se termine et le noyau reste vivant (invite `In [2]:`). En revanche, aucune trace de `update` (journal
+    `js.console.log` dans la console du Worker) : soit la boucle ne tourne pas, soit ses traces n'ont pas été capturées.
+    Essai 12 bis : une seconde cellule, 3 s plus tard, relève `frame_count`.
+    **Résultat : `frame_count` vaut toujours 0 après 3 s** ; la boucle ne bat pas, ou n'entre pas dans Python. Essai 12
+    ter : relever `Module.MainLoop` (exporté par emscripten : `running`, `func`, `timingMode`, `currentFrameNumber`) et
+    deux compteurs en JS pur (`requestAnimationFrame` et `setTimeout` de 16 ms), 2 s d'écart.
+    **Résultat de 12 ter : aucune mesure, la PAGE est morte pendant la cellule 1** (identique à celle de 12 bis, qui
+    passait) : erreur fatale Pyodide côté page (`pyodide-qt/pyodide.asm.js`, « A value of type undefined … was thrown as
+    an error »), pile Python `jupyter_client/channels.py:145 _async_run` → `threading_web.py:129 wait` →
+    `fils.py:32 _attendre` → `bloquant.py:45 _pyodide_suspendre` (suspension JSPI dans un `run_handle` de la webloop),
+    suivie de deux « uncaught exception: undefined ». Hypothèse non vérifiée : un `throw undefined` venu du Worker (fin
+    de l'unwind du trampoline ?) ou une course dans l'attente du canal ; à départager en relançant la même sonde
+    (intermittent ou non).
+    **Cause trouvée à la relance (même chute) : un faux arrêt de l'essai.** L'écho de la cellule dans la console contient
+    `"ULTAT run fin"`, qui satisfait la condition d'arrêt ` fin` du relevé : la sonde se ferme aussitôt l'écho affiché,
+    et la page, coupée en pleine attente JSPI, meurt (« Script terminated by timeout », `throw undefined`). Ce n'est pas un
+    défaut de qtpy6. Corrigé (`"run f" "in"`), site reconstruit, 12 ter relancé.
+    **Résultat de 12 ter (11 h 00)** : `MainLoop.running` vrai, `func` posée, mode 1 (requestAnimationFrame), mais
+    `currentFrameNumber` reste à 1 pendant que, dans le même Worker, un `requestAnimationFrame` JS pur bat 180 fois en 2 s
+    (et un `setTimeout` de 16 ms 183 fois). `frame_count` reste à 0. La boucle s'arrête donc à la première image : le
+    `runner` d'emscripten n'appelle `scheduler()` qu'après un `runIter` qui rend normalement, et `callUserCallback` avale
+    l'exception. Essai 13 : remplacer `MainLoop.runIter` par une version qui capture l'exception, puis `MainLoop.resume()`.
+13. **L'exception est une panique Rust de l'essai lui-même** (11 h 03) : « RefCell already mutably borrowed »
+    (`pyxel-core/src/platform/facade.rs:24`), rendue en « RuntimeError: unreachable executed ». C'est le `pyxel.set_btn`
+    que l'`update` de l'essai appelait : en web, `update`/`draw` tournent DANS la boucle de Pyxel, qui tient déjà
+    l'emprunt de la plateforme. La boucle elle-même n'y est pour rien. (Le source Rust de 2.9.9 reste illisible d'ici :
+    jsDelivr liste `crates/pyxel-core/src/platform/facade.rs` mais rend 404 sur le fichier ; diagnostic par la chaîne
+    du message, présente dans le `.so` de la roue.) Conséquence pour le pont : les entrées (`set_btn`,
+    `set_mouse_pos`) doivent être posées ENTRE deux images, jamais depuis `update`/`draw`. Essai 14 : `update` sans
+    `set_btn` (relève `frame_count`, `btn`, `btnp` dans un journal JS), `set_btn` posé depuis la cellule 2.
+14. **Correction du 13 : la vraie première erreur est JS** (11 h 06). Même panique d'emprunt, mais `runIter` capture
+    d'abord « ReferenceError: _readVirtualGamepadBitmask is not defined » : à chaque image, le Rust évalue
+    `_readVirtualGamepadBitmask();` (`emscripten_run_script_int`). C'est la manette virtuelle tactile de `pyxel.js`, une
+    fonction globale de sa page. L'exception JS traverse le Rust sans libérer l'emprunt, d'où la panique à l'image
+    suivante. Le 13 accusait donc à tort le `set_btn` de l'essai (hypothèse retirée ; qu'un `set_btn` depuis `update`
+    soit sûr reste à mesurer). Les noms JS que la roue évalue (`strings` du `.so`) : `_readVirtualGamepadBitmask()`,
+    `resetPyxel()`, `_savePyxelFile(…)`. Essai 15 : `self._readVirtualGamepadBitmask = () => 0` dans le Worker.
+15. **Plus d'erreur, mais plus rien après la cellule 1** (11 h 10) : « run rendu », invite `In [2]:`, puis la cellule 2
+    n'apparaît jamais et le relevé finit sans elle. Soit la boucle tourne et le noyau ne traite plus ses messages, soit
+    autre chose ; les `console.log` du Worker ne sont pas capturés par la sonde. Essai 16 : `update` arrête la boucle à
+    l'image 60 par `_emscripten_cancel_main_loop()` (l'arrêt de `pyxel.js`) ; si le noyau reprend, la cellule 3 rend le
+    journal des images.
+16. **La boucle tourne, et le noyau reprend à son arrêt** (11 h 13) : la cellule 2 s'exécute après l'arrêt, avec
+    `frame_count 61`, `MainLoop` à l'image 115 (rAF à 60 Hz, Pyxel à 30 images/s). Pendant la boucle, la cellule 2
+    n'est pas traitée (essai 15). Le `resume()` de la cellule 2, reste de l'essai 13, lève `MainLoop.scheduler is not a
+    function` (planificateur effacé par l'arrêt), et la mise en forme de cette exception finit en erreur fatale : défaut
+    de l'essai, pas de Pyxel. Essai 17 : touche posée depuis un `setTimeout` JS à 1 s (relâchée à 1,5 s), compteur
+    `setTimeout` pour savoir si les tâches JS passent pendant la boucle, cellule 2 en simple lecture.
+17. **Avec la touche posée à 1 s, la boucle ne s'arrête plus à l'image 60** (11 h 17) : « run rendu », puis plus rien
+    pendant 90 s (plafond du relevé), avec la même `uncaught exception: Object { message }`. Le noyau restant bloqué,
+    le journal est illisible. Essai 18 : la touche est posée dans un `try` JS qui écrit l'erreur au journal, et un
+    `setTimeout` JS pur arrête la boucle à 3 s, sans passer par Python, pour que la cellule 2 puisse lire le journal.
+18. **Même blocage malgré l'arrêt JS à 3 s** (11 h 20) : l'arrêt ne s'est pas produit. Hypothèse : pendant la boucle de
+    Pyxel, les `setTimeout` du Worker ne passent plus (ce qui expliquerait aussi le noyau sourd de l'essai 15), et la
+    touche posée à 1 s n'y est pour rien. Essai 19 : l'arrêt revient dans `update` (image 90, le moyen qui a marché à
+    l'essai 16), et chaque ligne du journal porte le compteur `setTimeout`.
+19. **Tout marche, l'hypothèse de l'essai 18 est fausse** (11 h 22) : pendant la boucle, les `setTimeout` du Worker
+    passent (88 en 1,5 s), la touche posée depuis JS entre deux images est vue (`btn=True btnp=True` à l'image 27, puis
+    `btnp=False` à l'image 30, relâchée ensuite), et **le noyau exécute la cellule 2 pendant que la boucle tourne**
+    (`running True`, `frame_count 43`). Le jeu et la console coexistent donc. Les essais 15, 17 et 18, bloqués,
+    portaient chacun une `uncaught exception: Object { message }` dans le journal du navigateur, absente ici : le
+    blocage est réel mais intermittent ou dû à une autre différence non identifiée (point ouvert, à reproduire en
+    relançant l'essai 19 tel quel).
 
 ## Ce que cela change pour le pont
 

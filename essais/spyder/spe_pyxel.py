@@ -22,7 +22,7 @@ print('RES' 'ULTAT webgl', [str(js.OffscreenCanvas.new(8, 8).getContext(k)) for 
 _c.getBoundingClientRect = lambda: js.Object.fromEntries(js.Object.entries(js.JSON.parse('{"left":0,"top":0,"width":64,"height":48,"right":64,"bottom":48}')))
 pyodide_js.canvas.setCanvas2D(_c)
 from pyodide.code import run_js
-run_js("self.screen ??= {width: 1280, height: 720, availWidth: 1280, availHeight: 720, colorDepth: 24}; self.navigator.getGamepads ??= () => []; const _n = () => {}; self.document ??= {addEventListener: _n, removeEventListener: _n, querySelector: () => null, getElementById: () => null, title: '', body: {style: {}, addEventListener: _n, removeEventListener: _n}, documentElement: {style: {}}, fullscreenElement: null, pointerLockElement: null, hidden: false, visibilityState: 'visible', hasFocus: () => true};")
+run_js("self.screen ??= {width: 1280, height: 720, availWidth: 1280, availHeight: 720, colorDepth: 24}; self.navigator.getGamepads ??= () => []; self._readVirtualGamepadBitmask ??= () => 0; const _n = () => {}; self.document ??= {addEventListener: _n, removeEventListener: _n, querySelector: () => null, getElementById: () => null, title: '', body: {style: {}, addEventListener: _n, removeEventListener: _n}, documentElement: {style: {}}, fullscreenElement: null, pointerLockElement: null, hidden: false, visibilityState: 'visible', hasFocus: () => true};")
 print("canvas", pyodide_js.canvas.getCanvas2D())
 try:
     pyxel.init(64, 48)
@@ -36,23 +36,34 @@ try:
         vus.append((m[0], m[63 * 47]))
         time.sleep(1 / 30)
     print("RES" "ULTAT boucle", vus, "duree", round(time.monotonic() - t0, 3), "attendu ~0.333")
-    print("RES" "ULTAT frame_count", pyxel.frame_count)
-    pyxel.set_btn(pyxel.KEY_SPACE, True)
-    print("RES" "ULTAT btn", pyxel.btn(pyxel.KEY_SPACE), "btnp", pyxel.btnp(pyxel.KEY_SPACE))
-    pyxel.set_btn(pyxel.KEY_SPACE, False)
-    vus_run = []
-    def update():
-        vus_run.append(pyxel.frame_count)
-        if len(vus_run) == 5:
-            print("RES" "ULTAT run images", vus_run, "fin")
-            pyxel.quit()
-    def draw():
-        pyxel.cls(len(vus_run))
+    # Essai 12 : drapeau posé, puis pyxel.run appelé par un trampoline JS synchrone (hors JSPI) ; l'« unwind » quitte la
+    # cellule, et les images arrivent ensuite par requestAnimationFrame, sans tâche Python suspendue à côté.
+    pyodide_js._api._skip_unwind_fatal_error = True
+    js.self.__log = js.Array.new()
+    t0 = time.monotonic()
+    def u():  # essai 14 : sans set_btn (emprunt de la plateforme déjà tenu par la boucle de Pyxel, essai 13)
+        n = pyxel.frame_count
+        if n < 3 or n % 15 == 0 or pyxel.btnp(pyxel.KEY_SPACE):
+            js.self.__log.push(f"image {n} t={time.monotonic() - t0:.2f} btn={pyxel.btn(pyxel.KEY_SPACE)} btnp={pyxel.btnp(pyxel.KEY_SPACE)} pixel={bytes(memoryview(pyxel.screen.data_ptr()))[0]} setTimeout={js.self.__s}")
+        if n == 90:  # essai 16 : arrêt comme pyxel.js, pour rendre la main au noyau
+            js.self.__log.push(f"arret a {time.monotonic() - t0:.2f}")
+            pyodide_js._module._emscripten_cancel_main_loop()
+    def d():
+        pyxel.cls(pyxel.frame_count % 16)
+    from pyodide.ffi import create_once_callable
+    trampoline = js.Function.new("f", "f()")  # appel synchrone d'un PyProxy : l'unwind s'arrête dans maybe_fatal_error
+    # Essai 17 : la touche posée depuis JS entre deux images (ce que fera le pont clavier), et un compteur setTimeout pour
+    # savoir si les tâches JS (donc les messages du noyau) passent pendant la boucle.
+    from pyodide.ffi import create_proxy
+    js.self.__touche = create_proxy(lambda v: pyxel.set_btn(pyxel.KEY_SPACE, v))
+    js.self.__module = pyodide_js._module
+    from pyodide.code import run_js
+    run_js("self.__s = 0; (function u(){ self.__s++; if (self.__s < 400) setTimeout(u, 16); })(); const t = (v) => { try { self.__touche(v); self.__log.push('touche ' + v + ' posee') } catch (e) { self.__log.push('touche ' + v + ' : ' + String(e).slice(0, 300)) } }; setTimeout(() => t(true), 1000); setTimeout(() => t(false), 1500); setTimeout(() => { self.__log.push('arret JS a 3 s'); self.__module._emscripten_cancel_main_loop() }, 3000);")
     try:
-        pyxel.run(update, draw)
-        print("RES" "ULTAT run rendu", vus_run, "fin")
+        trampoline(create_once_callable(lambda: pyxel.run(u, d)))
+        print("RES" "ULTAT run rendu")
     except BaseException as e:
-        print("RES" "ULTAT run leve", type(e).__name__, str(e)[:200], vus_run)
+        print("RES" "ULTAT run leve", type(e).__name__, str(e)[:100])
 except BaseException as e:
     import traceback; traceback.print_exc(); print("RES" "ULTAT KO", type(e).__name__, e)
 '''
@@ -60,6 +71,14 @@ os.makedirs("/home/pyodide/jeux", exist_ok=True)
 open("/home/pyodide/jeux/jeu.py", "w").write(JEU)
 exec(compile(JEU, "/home/pyodide/jeux/jeu.py", "exec"), {"__name__": "__main__"})
 """
+
+# Essai 12 ter : l'état de la boucle principale d'emscripten (Module.MainLoop), et un compteur requestAnimationFrame en
+# JS pur, pour séparer « rAF ne bat pas dans ce Worker » de « la boucle bat mais n'entre pas dans Python ».
+CELLULE_2 = """import pyxel, js, pyodide_js
+M = pyodide_js._module.MainLoop
+print('RES' 'ULTAT mainloop', 'running', M.running, 'image', M.currentFrameNumber, 'frame_count', pyxel.frame_count, 'setTimeout JS', js.self.__s, 'journal', list(js.self.__log), ' f' 'in')
+"""
+CELLULE_3 = ""
 
 _ICI = os.path.dirname(os.path.abspath(__file__))
 _source = open(os.path.join(_ICI, "spe.py"), encoding="utf-8").read()
@@ -106,6 +125,12 @@ def SUITE(main, rapport):  # noqa: N802
         if not debut:
             debut.append(time.monotonic())
             console.get_current_shellwidget().execute(ESSAI_CODE)
+        if "run rendu" in texte and len(debut) == 1:  # essai 12 : la cellule est rendue ; les images avancent-elles ?
+            debut.append(time.monotonic())
+            QTimer.singleShot(3000, lambda: console.get_current_shellwidget().execute(CELLULE_2))
+        if "RESULTAT mainloop" in texte and len(debut) == 2:
+            debut.append(time.monotonic())
+            QTimer.singleShot(2000, lambda: console.get_current_shellwidget().execute(CELLULE_3))
         if (" fin" in texte or "RESULTAT run leve" in texte or "RESULTAT KO" in texte or "Error" in texte) or time.monotonic() - debut[0] > 90:
             js.console.log("CONSOLE >>> " + texte[:8000])
             js.window.etat = "pyxel-fini"
