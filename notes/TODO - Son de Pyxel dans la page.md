@@ -57,8 +57,34 @@ essais et pièges : `notes/2026-10-12 - Pyxel dans la page.md`.
      officiel ne le fait pas, tout est à recompiler (Python, Pyodide, Qt, PySide, roues dont Pyxel en Rust avec
      `build-std`/atomics), le chargement dynamique de modules avec pthreads est expérimental chez Emscripten, et la
      couche JS de Pyodide suppose un seul fil (un thread = un Worker qui ne voit pas les objets JS des autres).
+     Recherche du 12/10 au soir (WebSearch/WebFetch) : PEP 776 — Pyodide standardise une version SANS pthreads parce
+     que pthreads + chargeur dynamique est « expérimental », peut planter, « may require WebAssembly standards work » ;
+     une version pthreads sans chargeur dynamique « could be added later ». Emscripten (doc Dynamic Linking) : toujours
+     expérimental ; l'édition de liens AU CHARGEMENT marche, c'est `dlopen` à l'exécution qui demande de synchroniser
+     la table des pointeurs de fonction entre fils. Seul essai public trouvé (yosefk.com, 25/12/2025) : Pyodide recompilé
+     `-pthread`, threads C seulement (aucun thread Python), correctifs et interblocages autour de `dlopen`.
+     Ordre décidé par l'utilisateur (12/10, 19 h 25) : vrais threads à partir de jeudi ; pistes, de la moins coûteuse au
+     démarrage à la plus sûre : (a) pthreads + modules chargés à l'édition de liens du démarrage (dynamique, mais pas de
+     `dlopen` tardif), (b) pthreads + `dlopen` expérimental d'Emscripten sur un prototype minimal, (c) tout statique
+     (sûr selon le PEP, démarrage plus lourd, perd le chargement à la demande des modules Qt).
+     Idée de l'utilisateur (19 h 27) : « mettre les threads en pause pendant le chargement dynamique puis les reprendre,
+     un mutex ». C'est le principe même d'Emscripten (chaque fil, un Worker avec sa propre instance wasm et sa table de
+     fonctions, doit charger à son tour le module ; il le fait à des points de synchronisation) ; l'interblocage vient
+     d'un fil qui calcule sans jamais atteindre un tel point. Piste propre à Python, NON vérifiée : faire ce rattrapage
+     à chaque relâchement du GIL (les fils Python le relâchent régulièrement), plus un fil C long qui reste à surveiller.
      Explication donnée à l'utilisateur : la doublure `threading_web` simule les fils en suspendant des piles (JSPI de
      Pyodide) ; c'est cette simulation, pas la compilation, qui heurte le GC.
+  **Suite du 12/10, 19 h 45 — essai de l'utilisateur, Firefox visible, patch du GC dans le site d'essai** : le triangle
+  PASSE (`%runfile` ne plante plus, `pyxel.init` passe : « Failed to initialize audio device », attendu sans le son ;
+  la page voit la zone SDL, aucun `Aborted()`). Le jeu ne tourne pas : `load("projet_monkey.pyxres")` →
+  `Exception: Failed to open file 'projet_monkey.pyxres'` (via `spyder_pyxel/bridge/hooks.py` `_resolve`), deux fois.
+  Premier essai : la copie du `.pyxres` côté noyau partait à 5 s, console pas prête → corrigé dans `spe_monkey.py`
+  (`injecter` réessaie chaque seconde ; console : « MONKEY injecté » vu), site `app.zip` mis à jour sans reconstruire
+  (le patch du GC y reste). Deuxième essai : même erreur alors que l'injection a eu lieu. NON vérifié, à faire jeudi :
+  (1) le fichier est-il dans le FS du noyau (`os.listdir('/home/pyodide/monkey')` dans la console, et l'XHR synchrone
+  du Worker a-t-il levé ?) ; (2) le cwd au moment d'`init` (`state["cwd_at_init"]` de `_resolve`) avec `--wdir` ;
+  (3) `pyxel.load` en WASM résout-il par `exec_path`/`orig_argv` comme en natif (cf. docstring de `_resolve`) — essayer
+  `load` avec le chemin absolu depuis la console. `sonde_tri.sh` : délai porté à 1200 s.
 - [ ] La fenêtre d'erreur fugitive au lancement de `spe_monkey.py` (console interne, relevée par l'utilisateur) :
   `fsmodel.directoryLoaded` → `resizeColumnToContents(0)` (relayé par `bloquant.py`) → `initStyleOption` du délégué de
   l'explorateur reçoit un index sans modèle (`index.model()` vaut None → `'NoneType' object has no attribute 'isDir'`).

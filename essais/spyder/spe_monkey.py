@@ -63,7 +63,18 @@ os.chdir({dossier!r})
 """
     from qtpy6.QtCore import QTimer
     console = main.get_plugin("ipython_console")
-    QTimer.singleShot(5000, lambda: console.get_current_shellwidget().execute(code))
+
+    def injecter():  # la console n'est pas toujours prête à 5 s : réessayer chaque seconde jusqu'à ce qu'elle le soit
+        try:
+            sw = console.get_current_shellwidget()
+            if sw is None or not getattr(sw, "spyder_kernel_ready", True) or sw._executing:
+                raise RuntimeError("console pas prête")
+            sw.execute(code)
+            js.console.log("MONKEY injecté")
+        except BaseException as e:
+            js.console.log("MONKEY injection en attente : " + repr(e))
+            QTimer.singleShot(1000, injecter)
+    QTimer.singleShot(5000, injecter)
     js.window.etat = "monkey"
 ''' + _fin)
 __file__ = os.path.join(_ICI, "spe.py")
