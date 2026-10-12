@@ -130,10 +130,36 @@ def _plein_ecran(app):
     (``show_full_screen()``, web.md), donc une branche propre au navigateur : c'est ici que cela se fait. Un filtre
     d'événements de l'application remet en plein écran la première QMainWindow sans parent chaque fois qu'elle est
     montrée ou change d'état (Spyder passe par ``show``, ``showMaximized``, ``setWindowState`` et ``showNormal`` selon
-    sa configuration) ; les dialogues et les autres fenêtres gardent leur cadre."""
+    sa configuration) ; les dialogues et les autres fenêtres gardent leur cadre.
+
+    Le mode plein écran que l'application propose (F11 de Spyder : ``showFullScreen``, puis ``showNormal`` ou
+    ``showMaximized`` pour en sortir) devient celui du NAVIGATEUR pour cette fenêtre : barres d'onglets, d'adresse et
+    d'outils masquées (« un bouton pour passer le navigateur en plein ecran », 12/10/2026). Le navigateur ne l'accorde
+    que pendant un geste de l'utilisateur (clic, touche) : demandé hors geste, il est refusé sans bruit. En sortie, la
+    fenêtre garde toute la page."""
+    import js  # noqa: PLC0415
+
     from qtpy6.QtCore import QEvent, QObject, Qt, QTimer  # noqa: PLC0415
+    from qtpy6.QtWidgets import QWidget  # noqa: PLC0415
 
     principale = []
+    navigateur_plein = js.Function.new("entrer", """const d = document;
+        if (entrer) { if (!d.fullscreenElement) d.documentElement.requestFullscreen().catch(() => {}); }
+        else if (d.fullscreenElement) d.exitFullscreen().catch(() => {});""")
+    remplir = QWidget.showFullScreen
+
+    def doublure(origine, entrer):
+        def montrer(self):
+            if principale and self is principale[0]:
+                navigateur_plein(entrer)
+                if not entrer:
+                    return
+            origine(self)
+        return montrer
+
+    QWidget.showFullScreen = doublure(QWidget.showFullScreen, True)
+    QWidget.showNormal = doublure(QWidget.showNormal, False)
+    QWidget.showMaximized = doublure(QWidget.showMaximized, False)
 
     class PleinEcran(QObject):
         def eventFilter(self, objet, evenement):  # noqa: N802
@@ -142,7 +168,7 @@ def _plein_ecran(app):
                 if not principale:
                     principale.append(objet)
                 if objet is principale[0] and not objet.windowState() & Qt.WindowState.WindowFullScreen:
-                    QTimer.singleShot(0, objet.showFullScreen)  # hors de l'événement en cours de traitement
+                    QTimer.singleShot(0, lambda: remplir(objet))  # hors de l'événement en cours de traitement
             return False
 
     app._qtpy6_plein_ecran = PleinEcran(app)

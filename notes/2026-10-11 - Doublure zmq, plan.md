@@ -539,3 +539,23 @@ sur les coté quand fenetre à le focus. il manque les outils pour Pyxel ».
     statique de l'onglet actif (stylesheet.py 685-708) est gris. Aucun de ces greffons n'est dans le site. À confirmer
     sur le natif : quels onglets bleuissent réellement.
   - Pyxel : spyder_pyxel dépend de `pyxel>=2.9` (moteur Rust, extension native), absent de Pyodide-Qt ; non évalué.
+
+### Plein écran du navigateur et Interpréteur rempli (12/10/2026, 05 h)
+
+Demandes : « il est possible de rajouter un bouton pour passer le navigateur en plein ecran , ou que spyder prenne tout
+la fenetre du navigaeur en cachant ses barres de titre, outils , adresse ? », puis « avance sur tout ce qu'il manque ! ».
+FAIT :
+  - `qtpy6/web/__init__.py`, `_plein_ecran` : doublure de `showFullScreen` / `showNormal` / `showMaximized` pour la
+    fenêtre principale. Le premier demande en plus le plein écran du NAVIGATEUR (`requestFullscreen`), les deux autres
+    le quittent et laissent la fenêtre à la taille de la page. C'est le chemin du F11 de Spyder (`toggle_fullscreen`),
+    donc rien dans l'application. Le filtre de démarrage appelle l'original (pas de demande hors geste).
+  - `spe.py` : le bouton Plein écran de Spyder (action `Fullscreen` du greffon Layout) posé dans la barre de droite, à
+    la place des boutons de fenêtre ; la liste Interpréteur reçoit `/pyodide/3.13/bin/python` (étiquette « Python
+    3.13 »), un fichier vide créé dans la mémoire de la page parce que MainInterpreter retire de la liste tout chemin
+    qui n'est pas un fichier. `custom` reste faux : le noyau ne lit pas ce chemin.
+ÉCARTÉ : le manifeste d'application (installation par l'élève, sans barres) : utile, mais demande une action de
+l'élève ; à ajouter à l'hébergement. Pyxel : pas commencé (moteur natif, voir plus haut).
+VÉRIFIÉ : sonde Firefox, capture : bouton à droite, « Python 3.13 » dans la liste, aucun Traceback. NON VÉRIFIÉ : le
+passage réel en plein écran (une sonde sans tête n'a pas de geste utilisateur) — à essayer dans Chromium. Limite
+connue : sortir par Échap laisse l'état « plein écran » de Spyder ; le F11 suivant ne fait alors que le remettre à
+jour (un second F11 rentre à nouveau).
