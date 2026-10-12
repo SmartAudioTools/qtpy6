@@ -180,23 +180,36 @@ running promising task` (Pyodide), avant et après la panique ; à regarder si e
     Reprise à 11 h 23, à l'identique : même résultat (touche vue images 28 à 30, cellule exécutée à l'image 51,
     aucune `uncaught exception`). Les blocages des essais 15, 17 et 18 restent inexpliqués : le module qtpy6 devra
     capturer et journaliser toute exception levée dans une image plutôt que de la laisser filer.
+20. **Doublure de `flip` seule** (11 h 26) : la boucle du greffon (`patched_run`) ne peut pas tourner à côté de
+    la boucle emscripten (essai 10 : une cellule suspendue interdit aux images d'entrer dans Python). Idée : lancer une
+    fois le `pyxel.run` d'origine par le trampoline avec des rappels vides, mettre aussitôt sa boucle en pause
+    (`MainLoop.pause()`), et faire de `flip` « cadence par `sleep`, puis UNE image » : appel synchrone de
+    `MainLoop.func`, la fonction d'itération posée par emscripten. La boucle reste celle de l'appelant, donc le greffon
+    tourne tel quel, et `frame_count`/`btnp`/rendu avancent par Pyxel lui-même. Essai : 60 tours `cls` + `flip_web`,
+    touche posée par `setTimeout` JS à 1 s (le `sleep` JSPI laisse passer les tâches JS).
+    **Résultat : la doublure fonctionne.** `fc` 0 → 1 → 3 (un saut au démarrage), puis +1 par `flip` (k=50 → 51), 61
+    images en 2,0 s pour 2,0 attendues, `MainLoop.running` reste vrai (la pause n'efface que le planificateur). La touche du
+    `setTimeout` n'est PAS vue (btn False à 1,0–1,67 s), avec « uncaught exception: undefined » : le rappel JS entre dans
+    Python pendant que la cellule est suspendue dans le `sleep` (même cause que l'essai 10). Chemin sans objet pour le
+    greffon, qui pose ses entrées depuis Python (`InputConsumer.pump`) : essai 21.
+21. **Entrées posées dans la boucle** (11 h 28) : `set_btn(KEY_SPACE, True)` à k=30, `False` à k=45, avant `flip_web`,
+    comme `pump` du greffon. **Résultat conforme** : k=30 btn True btnp True ; k=31 à 44 btn True btnp False ; k=45 et
+    au-delà btn False. Cadence et `frame_count` identiques à l'essai 20. Niveau de preuve : sonde Firefox lancée par
+    l'utilisateur (WebGL), une exécution.
 
 ## Ce que cela change pour le pont
 
-La boucle du greffon (`patched_run` : update, draw, `original_flip`, publish) ne peut pas tourner telle quelle en web,
-puisque `flip` y est interdit. En web, Pyxel cadence lui-même par `pyxel.run` (boucle principale d'emscripten, donc
-`requestAnimationFrame`, présent dans un Worker dédié). La piste : laisser le `pyxel.run` d'origine tourner dans le Worker
-et publier l'image depuis le `draw` (ou après lui), sans `flip`. Cela touche au crochet du greffon, qui ne doit pas changer :
-la doublure devra donc vivre côté qtpy6, et sa forme reste à choisir (de jour).
-
-Depuis la mesure 7, une forme plus simple apparaît : garder la boucle du greffon telle quelle et ne doubler que `flip`. Une
-doublure qtpy6, posée dans le Worker avant le crochet du greffon (qui capture `original_flip` à l'import), remplacerait
-`pyxel.flip` par une cadence à `fps` sans rendu, et `pyxel.init` par un init sans `SDL_VIDEODRIVER=offscreen`, avec les
-objets factices du point 4. Le greffon publierait et lirait les entrées comme en natif. Alternative : laisser tourner le
-`pyxel.run` d'origine, ce qui demande de contourner le `patched_run` du greffon. Le choix revient à l'utilisateur.
+**Forme retenue (essais 20 et 21) : la boucle du greffon tourne telle quelle, qtpy6 ne double que `pyxel.flip` et
+`pyxel.init`**, posés dans le Worker AVANT le crochet du greffon (qui capture `original_flip` et `original_init` à
+`install()`). `flip` web : au premier appel, `pyxel.run` d'origine lancé par le trampoline avec des rappels vides puis
+`MainLoop.pause()` ; ensuite cadence à `fps` par `time.sleep` (JSPI) et `MainLoop.func()` synchrone, qui déroule une
+image (rendu, `frame_count`, `btnp`). `init` web : sans `SDL_VIDEODRIVER=offscreen`, avec les objets factices du DOM et
+le stub `_readVirtualGamepadBitmask`. Une doublure de `run` (boucle Python update/draw/flip) sert le code hors greffon.
+Écartée : laisser tourner la boucle emscripten de `pyxel.run`, qui demandait de contourner `patched_run` (code du
+greffon) et interdit à la cellule d'être suspendue pendant les images (essai 10).
 
 ## Point ouvert immédiat
 
-- Choisir la forme de la doublure du pont (ci-dessus), puis écrire les doublures 1 et 2 (mémoire partagée, FIFO) pour que le
-  panneau reçoive les images comme en natif.
+- Écrire `qtpy6/web/pyxel_web.py` (init, flip, run, stubs DOM, exceptions d'une image journalisées), installé par le
+  préambule ; puis les doublures 1 et 2 (mémoire partagée, FIFO) pour que le panneau reçoive les images comme en natif.
 - Le son (pas d'AudioContext dans un Worker) et les `SystemError: Cannot enter a promising task…` restent à examiner.

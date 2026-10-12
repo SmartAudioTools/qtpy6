@@ -36,34 +36,40 @@ try:
         vus.append((m[0], m[63 * 47]))
         time.sleep(1 / 30)
     print("RES" "ULTAT boucle", vus, "duree", round(time.monotonic() - t0, 3), "attendu ~0.333")
-    # Essai 12 : drapeau posé, puis pyxel.run appelé par un trampoline JS synchrone (hors JSPI) ; l'« unwind » quitte la
-    # cellule, et les images arrivent ensuite par requestAnimationFrame, sans tâche Python suspendue à côté.
+    # Essai 20 : doublure de flip. pyxel.run d'origine est lancé une fois par le trampoline (essai 12) avec des rappels
+    # vides, sa boucle emscripten aussitôt mise en pause ; flip cadence par sleep puis déroule UNE image de Pyxel en
+    # appelant de façon synchrone la fonction d'itération posée par emscripten (MainLoop.func). La boucle reste celle de
+    # l'appelant (patched_run du greffon), frame_count et btnp avancent par Pyxel lui-même.
     pyodide_js._api._skip_unwind_fatal_error = True
-    js.self.__log = js.Array.new()
+    from pyodide.ffi import create_once_callable, create_proxy
+    trampoline = js.Function.new("f", "f()")
+    M = pyodide_js._module.MainLoop
+    original_run = pyxel.run
+    etat = {"pret": False, "t": None}
+    def flip_web():
+        if not etat["pret"]:
+            trampoline(create_once_callable(lambda: original_run(lambda: None, lambda: None)))
+            M.pause()
+            etat["pret"] = True
+            etat["t"] = time.monotonic()
+        etat["t"] += 1 / 30
+        attente = etat["t"] - time.monotonic()
+        if attente > 0:
+            time.sleep(attente)
+        else:
+            etat["t"] = time.monotonic()
+        M.func()
+    journal = []
     t0 = time.monotonic()
-    def u():  # essai 14 : sans set_btn (emprunt de la plateforme déjà tenu par la boucle de Pyxel, essai 13)
+    for k in range(60):  # la boucle de patched_run : update, draw, flip
+        if k in (30, 45):  # essai 21 : la touche posée dans la boucle, comme InputConsumer.pump du greffon
+            pyxel.set_btn(pyxel.KEY_SPACE, k == 30)
         n = pyxel.frame_count
-        if n < 3 or n % 15 == 0 or pyxel.btnp(pyxel.KEY_SPACE):
-            js.self.__log.push(f"image {n} t={time.monotonic() - t0:.2f} btn={pyxel.btn(pyxel.KEY_SPACE)} btnp={pyxel.btnp(pyxel.KEY_SPACE)} pixel={bytes(memoryview(pyxel.screen.data_ptr()))[0]} setTimeout={js.self.__s}")
-        if n == 90:  # essai 16 : arrêt comme pyxel.js, pour rendre la main au noyau
-            js.self.__log.push(f"arret a {time.monotonic() - t0:.2f}")
-            pyodide_js._module._emscripten_cancel_main_loop()
-    def d():
-        pyxel.cls(pyxel.frame_count % 16)
-    from pyodide.ffi import create_once_callable
-    trampoline = js.Function.new("f", "f()")  # appel synchrone d'un PyProxy : l'unwind s'arrête dans maybe_fatal_error
-    # Essai 17 : la touche posée depuis JS entre deux images (ce que fera le pont clavier), et un compteur setTimeout pour
-    # savoir si les tâches JS (donc les messages du noyau) passent pendant la boucle.
-    from pyodide.ffi import create_proxy
-    js.self.__touche = create_proxy(lambda v: pyxel.set_btn(pyxel.KEY_SPACE, v))
-    js.self.__module = pyodide_js._module
-    from pyodide.code import run_js
-    run_js("self.__s = 0; (function u(){ self.__s++; if (self.__s < 400) setTimeout(u, 16); })(); const t = (v) => { try { self.__touche(v); self.__log.push('touche ' + v + ' posee') } catch (e) { self.__log.push('touche ' + v + ' : ' + String(e).slice(0, 300)) } }; setTimeout(() => t(true), 1000); setTimeout(() => t(false), 1500); setTimeout(() => { self.__log.push('arret JS a 3 s'); self.__module._emscripten_cancel_main_loop() }, 3000);")
-    try:
-        trampoline(create_once_callable(lambda: pyxel.run(u, d)))
-        print("RES" "ULTAT run rendu")
-    except BaseException as e:
-        print("RES" "ULTAT run leve", type(e).__name__, str(e)[:100])
+        if k < 3 or k % 10 == 0 or 29 <= k <= 32 or 44 <= k <= 47:
+            journal.append(f"k={k} fc={n} t={time.monotonic() - t0:.2f} btn={pyxel.btn(pyxel.KEY_SPACE)} btnp={pyxel.btnp(pyxel.KEY_SPACE)}")
+        pyxel.cls(k % 16)
+        flip_web()
+    print("RES" "ULTAT flip", journal, "running", M.running, "frame_count", pyxel.frame_count, "duree", round(time.monotonic() - t0, 2), "attendu ~2.0")
 except BaseException as e:
     import traceback; traceback.print_exc(); print("RES" "ULTAT KO", type(e).__name__, e)
 '''
@@ -125,13 +131,13 @@ def SUITE(main, rapport):  # noqa: N802
         if not debut:
             debut.append(time.monotonic())
             console.get_current_shellwidget().execute(ESSAI_CODE)
-        if "run rendu" in texte and len(debut) == 1:  # essai 12 : la cellule est rendue ; les images avancent-elles ?
+        if False:  # essai 12 : la cellule est rendue ; les images avancent-elles ?
             debut.append(time.monotonic())
             QTimer.singleShot(3000, lambda: console.get_current_shellwidget().execute(CELLULE_2))
         if "RESULTAT mainloop" in texte and len(debut) == 2:
             debut.append(time.monotonic())
             QTimer.singleShot(2000, lambda: console.get_current_shellwidget().execute(CELLULE_3))
-        if (" fin" in texte or "RESULTAT run leve" in texte or "RESULTAT KO" in texte or "Error" in texte) or time.monotonic() - debut[0] > 90:
+        if ("RESULTAT flip" in texte or "RESULTAT run leve" in texte or "RESULTAT KO" in texte or "Error" in texte) or time.monotonic() - debut[0] > 90:
             js.console.log("CONSOLE >>> " + texte[:8000])
             js.window.etat = "pyxel-fini"
         else:
