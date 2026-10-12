@@ -14,5 +14,9 @@ essais et pièges : `notes/2026-10-12 - Pyxel dans la page.md`.
   (`notes/2026-10-12 - Pyxel dans la page.md`, essai `spe_monkey.py`). Le 12/10 à 17 h : c'est en fait le ramasse-miettes
   (fonction wasm 4219, voisine de `PyGC_Collect`) qui plante sur un objet corrompu ; trouver qui le crée (`gc.collect()`
   après chaque étape du noyau). Essai : `spe_monkey.py?…&bouton=1`.
-- [ ] La fenêtre d'erreur fugitive vue par l'utilisateur au lancement de `spe_monkey.py` : à identifier.
+- [ ] La fenêtre d'erreur fugitive au lancement de `spe_monkey.py` (console interne, relevée par l'utilisateur) :
+  `fsmodel.directoryLoaded` → `resizeColumnToContents(0)` (relayé par `bloquant.py`) → `initStyleOption` du délégué de
+  l'explorateur reçoit un index sans modèle (`index.model()` vaut None → `'NoneType' object has no attribute 'isDir'`).
+  Sans conséquence sur le jeu. Natif : jamais vu. Piste : `QFileSystemModel` sans fils en WASM émet `directoryLoaded`
+  avant que ses lignes soient valides ; à corriger côté qtpy6 (doublure), pas dans Spyder.
 - Les sondes se donnent en bloc NON vert à coller dans une Konsole tant que le relais `!` sudo est bloqué.
