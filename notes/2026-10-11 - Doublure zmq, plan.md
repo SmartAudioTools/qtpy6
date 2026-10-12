@@ -319,3 +319,33 @@ instrumentation provisoire retirée de l'essai depuis :
 - Inutilisables pour situer la boucle : `sys.setprofile`/`_setprofileallthreads` (aucun échantillon) et les piles wasm
   (`pyodide.asm.wasm` sans section `name`).
 - Prochain essai : neutraliser StdThread, puis tracer les `paintEvent`/`resizeEvent` de `ControlWidget`.
+
+### Suite de la bissection du gel 8c (12/10/2026, nuit, arrêtée à 80 % du quota)
+
+Instrumentation provisoire dans `essais/spyder/gel8c.py` (non commitée, essai) ; sondes dans le scratchpad de la session.
+
+- **Écarté** (en plus de la liste ci-dessus, mesuré dans la page) : les suspensions JSPI de Qt (refus forcé : le gel
+  reste), un déluge de microtâches (≤ 8 `tourner` consécutifs), stdin et les alertes, `Calque._synchroniser` (appels
+  réguliers, jamais > 50 ms), `HBChannel` (gel identique avec `_async_run` neutralisé : sa reprise avant le gel n'était
+  qu'une coïncidence), les pauses de fils qui ne suspendent pas (aucune « PAUSE courte » ; une seule attente,
+  `Event.wait(25000)`, par le crochet de fils), une insertion de texte géante dans la console (AUCUNE insertion avant le gel).
+- **Le résultat qui compte** : le gel est UNE macrotâche d'environ 10 s. Pendant ce temps, aucun événement Qt ne passe le
+  filtre global de l'application, aucun Python instrumenté ne tourne, les `setInterval` JS sont affamés. Un
+  échantillon antérieur montrait `prom=true gil=0` : la pompe promettante exécute du C++ sans Python. Dernière activité
+  Python avant le gel, d'un run à l'autre : les `eventFilter` de `FigureViewer` (×3) puis `ThumbnailScrollBar` sur un
+  `Resize` (plugin Plots), ou des tâches throttler/`show_time`.
+- **Piles nommées** (variables d'un run à l'autre) : dessin des enfants de MainWindow (fillRect, bézier) ;
+  `Shiboken::getConverter` (copie de map à la recherche paresseuse) ; QTimer → slot Python → `JsProxy` getattr ;
+  `run_sync`. Chaîne de cadres réentrante dans plusieurs piles.
+- **Hypothèse de tête** : une longue boucle C++ dans `processEvents` (pompe) qui ne livre aucun événement par `notify`,
+  probablement mise en page/dessin après le redimensionnement des docks Plots/console.
+- **Outils** : traces T/R/O/EV, PILESUSP, setters SUSP/REFUS, MICRO, crochets DIALOGUE/STDIN ; anneau JS
+  (`globalThis.anneau`, 600 entrées, compteur `NOTER`) — mais le `dismiss` de l'alerte de script lent par Selenium
+  RECHARGE la page : l'anneau lu après vient d'un run neuf, inutilisable ; `wasmnoms.py` (scratchpad) nomme les cadres
+  wasm par l'export le plus proche, candidat à un outil qtpy6.
+- **Limites** : `sys.monitoring`/`settrace` inutilisables ; la limite de 10 s de Firefox ne se lève ni par
+  `dom.max_script_run_time` (0 ou 600), ni par `dom.ipc.reportProcessHangs`, ni par `set_script_timeout(600)`.
+- **Pistes suivantes** : compter en JS les `LayoutRequest`/`updateGeometry` (côté wasm) ; bissecter en désactivant les
+  plugins Plots puis Variable Explorer dans jalon8c ; comparer la même séquence sur le bureau.
+- Rappel : le renommage des slots homonymes (fork, 591fdf005) est perdu depuis la reconstruction du 11/10 ;
+  contournement d'essai dans `jalon7.py`, correction attendue du générateur du fork (session du fork ou utilisateur).
