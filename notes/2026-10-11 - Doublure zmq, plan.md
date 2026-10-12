@@ -322,7 +322,7 @@ instrumentation provisoire retirée de l'essai depuis :
 
 ### Suite de la bissection du gel 8c (12/10/2026, nuit, arrêtée à 80 % du quota)
 
-Instrumentation provisoire dans `essais/spyder/gel8c.py` (non commitée, essai) ; sondes dans le scratchpad de la session.
+Instrumentation provisoire dans `essais/spyder/gel8c.py` (commitée le 12/10 pour être rejouée) ; sondes dans le scratchpad de la session.
 
 - **Écarté** (en plus de la liste ci-dessus, mesuré dans la page) : les suspensions JSPI de Qt (refus forcé : le gel
   reste), un déluge de microtâches (≤ 8 `tourner` consécutifs), stdin et les alertes, `Calque._synchroniser` (appels
@@ -370,3 +370,93 @@ Instrumentation provisoire dans `essais/spyder/gel8c.py` (non commitée, essai) 
   `console.log: "` : pas de `^` dans les motifs.
 - **Ouvert** : le gel restant après le second démarrage du noyau (deux lancements : à comprendre), qui empêche encore
   « 8c passe : noyau prêt (In [1]) ».
+
+## Le gel au démarrage : les widgets web de Spyder (12/10/2026, nuit)
+
+Demande de l'utilisateur, 12/10 : « Je n'utilise pas le panneau Plot. Peux-tu pour l'instant réussir à faire tourner
+SmartPython Editor ? Avec les panneaux que j'affiche moi par défaut et laisser les panneaux potentiellement
+problématiques que je n'utilise pas pour un peu plus tard. »
+
+- **Le second noyau n'est pas un défaut** : `CachedKernelMixin.get_cached_kernel` (fork, `widgets/mixins.py`) démarre
+  un noyau de réserve pour la console suivante. Forcer `cache=False` (essai `panneaux.py`) n'en laisse qu'un, le gel reste.
+- **Le gel n'est pas côté Worker ni zmq** : il persiste avec le Worker du noyau terminé (`ProcessusWeb.start` enveloppé).
+  `show_kernel_error` n'est jamais appelée.
+- **Cause : la page de chargement de la console** (`ClientWidget._create_loading_page`, `FrameWebView`, donc la doublure
+  `QWebEngineView` de qtpy6). Avec l'option de Spyder `--no-web-widgets` (`main_widget.py` l.311 :
+  `enable_infowidget = False`), jalon8c passe 5 sur 5 avec les panneaux de l'utilisateur (Plots, Help, OnlineHelp,
+  History, Profiler, Pylint, Completions désactivés) : noyau prêt `In [1]` en 3,6 s, `1+1` → `Out[1]: 2`, `a` dans
+  l'explorateur de variables, redémarrage en 3,8 s, `a` oubliée. Testé dans Firefox (sonde), essai
+  `essais/spyder/panneaux.py`, variable `PANNEAUX_WEB=1` pour rétablir les widgets web.
+- **Correctif propre, à décider** : soit rendre la doublure `QWebEngineView` assez légère pour une page de chargement,
+  soit faire que qtpy6 annonce l'absence de WebEngine (le `WEBENGINE` de Spyder devient False, comme sur un bureau PyQt6
+  sans PyQt6-WebEngine). En attendant, `--no-web-widgets` est un réglage de configuration, pas une branche dans le code.
+- **Reste ouvert : la fermeture, non mesurée jusqu'au bout.** La sonde finit sur « état : fini » (posé par `rapport()`
+  de jalon7.py AVANT `main.closing`), donc les cinq étapes et le rapport sont acquis. La ligne `fenêtre :` du rapport
+  part sur `sys.__stdout__`, absent de la capture console : son absence ne prouve rien. Pendant la fermeture, à 14,32 s,
+  le chien de garde de `panneaux.py` (appel Python de plus de 3 s sans que la page respire) imprime :
+  `KernelHandler._thread_shutdown_kernel` (kernel_handler.py:602) dans une doublure de fil (`fils._executer`) →
+  `jupyter_core.utils.run` → `threading_web` `Future.result` → `fils._attendre` → `_pause`. C'est vraisemblablement
+  l'attente normale de `shutdown_kernel` (jupyter_client attend la mort du noyau, jusqu'à `shutdown_wait_time`), mais
+  la sonde s'arrête à « fini » : ni la durée réelle, ni un éventuel blocage de `wait_all_shutdown_threads`
+  (`thread.wait()` depuis la page) ne sont mesurés. Un `InvalidStateError` de superqt (`_throttler._set_future_result`,
+  futur déjà résolu) apparaît à 14,07 s, juste avant : bénin a priori (défaut de superqt ou de la doublure de
+  `concurrent.futures` qui résout deux fois ?), non examiné.
+
+### Relevé des essais de la nuit du 12/10 (pour les rejouer et les revérifier)
+
+Tous dans `essais/spyder/panneaux.py`, qui ajoute des blocs avant d'exécuter `jalon8c.py`. Lancement (site construit
+par `construire_site.py`, Firefox par la sonde ; capture dans `capture_p.console.log`, verdicts dans `sonde_p.log`) :
+
+    cd /DATA/Python/qtpy6/essais/spyder
+    P=/DATA/Python/SmartPython/CachyOS/versions/SmartPython/bin/python
+    $P -m qtpy6.web.sonde 'site/index.html?script=panneaux.py' capture_p.png --racine site --delai 800 > sonde_p.log 2>&1
+
+Variables d'environnement lues par l'essai (dans la page elles valent leur défaut : la page ne lit pas l'env, on change
+le défaut dans le fichier) :
+
+| Variable | Défaut | Ce qu'elle bascule |
+|---|---|---|
+| `PANNEAUX_SANS` | plots help onlinehelp historylog profiler pylint completions | panneaux désactivés (`<section>/enable`) |
+| `PANNEAUX_STD` | 0 | 1 : les `StdThread` (stdout/stderr du noyau) tournent |
+| `PANNEAUX_SPIN` | 0 | 1 : le spinner à 3 ms d'`EmptyMessageWidget` tourne |
+| `PANNEAUX_RAYON` | 0 | 1 : peinture arrondie d'`EmptyMessageWidget` gardée |
+| `PANNEAUX_FILTRE` | 1 | zip du noyau allégé pour le Worker |
+| `PANNEAUX_WEB` | 0 | 1 : widgets web de Spyder gardés (le gel revient) |
+
+Chaque bloc « Bissection » du fichier, dans l'ordre, et ce qu'il a montré :
+
+| Hypothèse testée | Moyen | Résultat |
+|---|---|---|
+| Lecture de fichier bloquante (lseek dans la pile) | `StdThread.run` neutralisé | gel inchangé |
+| Spinner d'`EmptyMessageWidget` à 3 ms | spinner coupé | gel inchangé |
+| Widget de taille démesurée | trace des `resize` | gel inchangé (*) |
+| `processEvents` imbriqué sans fin | compteur de profondeur | gel inchangé (*) |
+| Page qui ne respire plus | battement JS + chien de garde Python (pile après 3 s) | c'est lui qui a donné les piles |
+| Attente qui revient tout de suite, en boucle | compteur sur les attentes | gel inchangé (*) |
+| Lecture de stdin (window.prompt) | trace | gel inchangé (*) |
+| Report qui se reporte sans fin | compteur | gel inchangé (*) |
+| Peinture arrondie, widget qui peint sans fin (`H2`/`PAINT`) | traces de peinture | gel inchangé (*) |
+| Dialogue modal JS (alert/confirm/prompt) | trace | gel inchangé (*) |
+| Qui lance le second noyau (`KM`/`KH`) | piles de `_async_start_kernel`, `new_from_spec` | noyau de réserve de Spyder |
+| Sans noyau de réserve | `get_cached_kernel(cache=False)` | un seul noyau, gel inchangé |
+| Où dans la connexion (`KH3`/`KC`) | traces de `connect_std_pipes`, `connect_`, `start_channels` | toutes rendent la main |
+| Quel appel du widget console ne rend pas la main (`W>`/`W<`) | traceur des méthodes de `ShellWidget` et `ClientWidget` | dernière entrée : page de chargement |
+| Messages du Worker (`RM>`/`RM<`) | chronométrage de `ProcessusWeb._recevoir` | rapides, pas en cause |
+| Ce que la console interne reçoit | capture d'`InternalShell.write` | seulement les traces de l'essai |
+| Erreur de noyau affichée | `show_kernel_error` | jamais appelée |
+| Le Worker est-il en cause | Worker terminé dès son lancement (bloc gardé, neutralisé par `pass`) | gel inchangé SANS Worker |
+| Widgets web | `--no-web-widgets` ajouté aux options | **plus de gel, 5/5** |
+
+(*) Le relevé détaillé de ces premiers essais est resté dans une partie de la conversation résumée depuis : seul
+« le gel a persisté » est sûr. Les blocs sont dans le fichier, à rejouer pour le détail.
+
+Niveau de preuve : chaque ligne est un passage Firefox 155 par la sonde, une passe chacune (pas de répétition) ; le
+dernier essai (`--no-web-widgets`) une passe, verdict « fini ». Non essayé : Chrome ; le bureau avec
+`--no-web-widgets` (sans objet, le bureau n'a pas de gel) ; quel appel PRÉCIS de la doublure `QWebEngineView` coûte
+(chargement de la page HTML de Spyder, `setHtml`, polices, iframe ?) — c'est la première chose à mesurer pour choisir le
+correctif propre.
+
+Pistes pour un relecteur : (1) mesurer la doublure `QWebEngineView` seule avec la page de chargement de Spyder
+(`spyder/plugins/ipythonconsole/widgets/client.py`, `_create_loading_page`) ; (2) décider entre doublure légère et
+« pas de WebEngine » (Help et OnlineHelp en dépendent aussi) ; (3) mesurer la fermeture jusqu'au bout (attendre un
+autre état que « fini », ou poser l'état après `closing`) ; (4) l'`InvalidStateError` de superqt.
