@@ -49,6 +49,8 @@ if sys.platform == 'emscripten':
     bloquant.doubler_qtcore(globals())
     fils.doubler_sleep()
     fils.doubler_futures()  # ThreadPoolExecutor : des tâches coopératives, leurs sous-processus en parallèle
+    from .web import messages
+    messages.doubler(globals())  # les avertissements que Qt-WASM émet par construction (pas d'ICU)
 
 __version__ = _QT_VERSION
 __version_info__ = tuple(int(part) for part in _QT_VERSION.split('.'))

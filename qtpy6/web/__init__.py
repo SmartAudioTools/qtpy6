@@ -89,6 +89,7 @@ def application(polices: str | os.PathLike[str] | None = None, defaut: QFont | t
                 app.setFont(defaut if isinstance(defaut, QFont) else QFont(*defaut))
             _coller()
             _dessiner_aussitot()
+            _plein_ecran(app)
     if persistant is not None and str(persistant) not in stockage._montes:
         if navigateur():
             stockage.monter(persistant)
@@ -119,6 +120,33 @@ def _ramasser(app):
     minuterie = QTimer(app)
     minuterie.timeout.connect(passer)
     minuterie.start(500)
+
+
+def _plein_ecran(app):
+    """La fenêtre principale occupe toute la page, sans cadre, ni titre, ni boutons. Une fenêtre Qt-WASM ordinaire est
+    dessinée par Qt DANS le canevas, avec une barre de titre qui permet de la réduire ou de la déplacer dans la page
+    (SmartPythonEditor dans Chromium, 12/10/2026 : « il faut qu'il utilise toute la page du navigateur sans cadre ni
+    titre ni boutons de fenêtre ») ; seul l'état plein écran l'en dispense. L'application le demandait elle-même
+    (``show_full_screen()``, web.md), donc une branche propre au navigateur : c'est ici que cela se fait. Un filtre
+    d'événements de l'application remet en plein écran la première QMainWindow sans parent chaque fois qu'elle est
+    montrée ou change d'état (Spyder passe par ``show``, ``showMaximized``, ``setWindowState`` et ``showNormal`` selon
+    sa configuration) ; les dialogues et les autres fenêtres gardent leur cadre."""
+    from qtpy6.QtCore import QEvent, QObject, Qt, QTimer  # noqa: PLC0415
+
+    principale = []
+
+    class PleinEcran(QObject):
+        def eventFilter(self, objet, evenement):  # noqa: N802
+            if (evenement.type() in (QEvent.Type.Show, QEvent.Type.WindowStateChange) and objet.isWidgetType()
+                    and objet.inherits("QMainWindow") and objet.parent() is None):
+                if not principale:
+                    principale.append(objet)
+                if objet is principale[0] and not objet.windowState() & Qt.WindowState.WindowFullScreen:
+                    QTimer.singleShot(0, objet.showFullScreen)  # hors de l'événement en cours de traitement
+            return False
+
+    app._qtpy6_plein_ecran = PleinEcran(app)
+    app.installEventFilter(app._qtpy6_plein_ecran)
 
 
 def _coller():

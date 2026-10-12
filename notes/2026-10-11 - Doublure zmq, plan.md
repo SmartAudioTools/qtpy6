@@ -460,3 +460,43 @@ Pistes pour un relecteur : (1) mesurer la doublure `QWebEngineView` seule avec l
 (`spyder/plugins/ipythonconsole/widgets/client.py`, `_create_loading_page`) ; (2) décider entre doublure légère et
 « pas de WebEngine » (Help et OnlineHelp en dépendent aussi) ; (3) mesurer la fermeture jusqu'au bout (attendre un
 autre état que « fini », ou poser l'état après `closing`) ; (4) l'`InvalidStateError` de superqt.
+
+## SmartPythonEditor pour les élèves : config de référence, plein page, print (12/10/2026, nuit)
+
+Demandes : « un lien vers SmartPythonEditor pour les élèves » ; « tu peux me faire essayer sous chromium ? » ;
+« l'editeur ne resemble pas du tout aux disposition de SmartPythonEditor, et un simple print("bonjour") dans le code
+génère : » (TypeError dans `spyder_kernels` `path_is_library`) ; « il faut qu'il utilise tout la page du navigateur sans
+cadre ni titre ni boutons de fenetre ».
+
+FAIT :
+- `essais/spyder/spe.py` (l'essai « tel qu'un élève l'ouvrirait », `index.html?script=spe.py`) : pose le `spyder.ini` et le
+  `transient.ini` de référence du fork (`smartos-support/config-reference`, `__HOME__` substitué) et les réglages de
+  `installation_SmartPythonEditor.sh` ; c'est de la CONFIGURATION, le code du fork n'est pas touché. `construire_site.py`
+  embarque ces deux fichiers et les `METADATA` des distributions (sans eux, superqt rendait la version « unknown » et le
+  contrôle de dépendances de Spyder levait `InvalidVersion`). `essai_chromium.sh` : serveur + Chromium en une commande
+  courte (une longue ligne collée se coupait dans zsh).
+- `qtpy6/web/preambule.py` `_completer_site` : sous emscripten CPython rend `None` pour `site.getuserbase()` ; le noyau
+  (Worker, qui exécute ce préambule) en faisait un `in None` au premier `runfile`. Posé à `~/.local`, comme ailleurs.
+- `qtpy6/web/messages.py` (branché dans `QtCore.py`) : filtre les deux avertissements de QCollator que Qt-WASM émet par
+  construction (pas d'ICU, repli POSIX, déclenchés par QFileSystemModel) ; Spyder envoie tout message Qt non listé à
+  son rapporteur d'erreurs, qui ouvrait une boîte. La doublure est posée aussi sur le module du binding, que `qtpy` lit
+  directement.
+- `qtpy6/web/__init__.py` `_plein_ecran` (dans `application()`, navigateur seulement) : un filtre d'événements remet en
+  plein écran la première QMainWindow sans parent à chaque Show / WindowStateChange. `web.md` point 8 mis à jour.
+
+POURQUOI CES CHOIX :
+- Plein écran par filtre plutôt qu'en doublant `show`/`showMaximized`/`setWindowState`/`showNormal` : Spyder passe par
+  les quatre selon sa configuration (layout/plugin.py, mainwindow.py), et `qtpy` lit les classes PySide6 directement,
+  donc une doublure de méthode qtpy6 ne les verrait pas ; le filtre de l'application voit tout. La première QMainWindow
+  seulement : les fenêtres de plugins détachées et les dialogues gardent leur cadre. Écarté : `show_full_screen()` dans
+  l'application (règle de web.md jusque-là) — une branche propre au navigateur dans le code de l'application.
+- Filtre de messages par texte EXACT : un avertissement Qt réel continue de remonter.
+- Config de référence dans l'essai, pas dans qtpy6 : c'est ce que l'installation pose sur le bureau, propre à l'application.
+
+VÉRIFIÉ : sonde Firefox 155, une passe : capture plein page sans titre, disposition SmartPythonEditor (Projets/Fichiers
+à gauche, éditeur, variables et console à droite ; pas de barre de menus, voulu par le fork : Ctrl+M), pas de boîte
+d'erreur. Chromium (l'utilisateur, 04:30) : `print("coucou")` exécuté, « coucou » dans la console. Non vérifié : plein
+écran sous Chromium vu par l'utilisateur (il ne l'a pas signalé), mobile.
+
+Points ouverts : la boîte des dépendances manquantes est coupée dans `spe.py` (contournement d'essai) ; le lien élèves
+(hébergement) reste à faire ; avertissement « Duplicate name six…METADATA » à la construction (six listé deux fois).

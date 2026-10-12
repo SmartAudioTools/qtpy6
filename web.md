@@ -229,8 +229,11 @@ Le plus souvent rien : `construire` et le script tel quel. Ce qui reste différe
    Symbols 2 font 134 Kio).
 7. **Le doigt** : `tactile.activer_au_doigt()` avant les widgets (`activer()` si `detecte()`, sinon au lever du premier doigt), `defiler_au_doigt` sur les zones défilantes, `Rangee` là où
    une barre de boutons imposerait sa largeur à la fenêtre.
-8. **La fenêtre principale en `show_full_screen()`** dans le navigateur : tout le conteneur, sans barre de titre (une
-   fenêtre Qt-WASM ordinaire a une barre de titre dessinée par Qt, que l'utilisateur peut déplacer et fermer).
+8. **La fenêtre principale occupe toute la page, sans rien à écrire** : `application()` y remet en plein écran la première
+   QMainWindow sans parent, à chaque `show`/changement d'état (`_plein_ecran`, 12/10/2026) — une fenêtre Qt-WASM
+   ordinaire a une barre de titre dessinée par Qt, que l'utilisateur peut déplacer, réduire et fermer. Un
+   `show_full_screen()` explicite reste sans dommage ; une application dont la fenêtre principale n'est pas une
+   QMainWindow l'appelle encore elle-même.
 9. **PyQt6 sous le capot** : qtpy6 traduit l'API, mais pas ce que PyQt6 ne fait pas. Pas d'arguments nommés de propriétés
    dans les constructeurs (`QPlainTextEdit(read_only=True)` échoue : setters), et une méthode redéfinie en Python se
    teste en camelCase (`heightForWidth`) — l'appel snake_case tombe sur la méthode de base C++.

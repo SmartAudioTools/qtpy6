@@ -48,13 +48,35 @@ MESURE = ('  await rendu();\n'
           ' + (py._module.HEAPU8.length / 1048576).toFixed(0) + " Mio");\n')
 
 
+def _metadonnees():
+    """Le METADATA de chaque distribution embarquée (12/10/2026) : sans lui, importlib.metadata ne trouve pas sa version,
+    et superqt annonce « unknown », que le contrôle des dépendances de Spyder ne sait pas comparer (InvalidVersion, fenêtre
+    « problème interne » au démarrage de SmartPythonEditor)."""
+    from importlib import metadata
+    distributions = metadata.packages_distributions()
+    resultat = {}
+    for paquet in [*PAQUETS, *DISTRIBUTIONS]:
+        for nom in distributions.get(paquet, ()):
+            d = metadata.distribution(nom)
+            if paquet == "spyder" or d._path.name.endswith(".egg-info"):  # spyder : son egg-info du fork, déjà ajouté
+                continue
+            resultat[f"{d._path.name}/METADATA"] = d._path / "METADATA"
+    return resultat
+
+
+METADONNEES = _metadonnees()
+
+
 def assembler(archive, fichiers=(), **k):
     """L'assembleur de qtpy6, avec les exclusions d'ici en plus (dont tout dossier tests/)."""
     k["exclure"] = [*k.get("exclure", ()), *EXCLURE]
     fichiers = {**dict(fichiers), **{f"spyder.egg-info/{n}": FORK / "spyder.egg-info" / n  # jalon 7 : les points d'entrée
                                      for n in ("PKG-INFO", "entry_points.txt")},  # spyder.plugins, que MainWindow.setup lit
                  **{f"{JUPYTER_CLIENT.name}/{n}": JUPYTER_CLIENT / n  # jalon 8a : le point d'entrée local-provisioner ;
-                    for n in ("METADATA", "entry_points.txt")}}  # sans lui, le repli de jupyter_client rend un module
+                    for n in ("METADATA", "entry_points.txt")},  # sans lui, le repli de jupyter_client rend un module
+                 **METADONNEES,
+                 **{f"config-reference/{n}": FORK / "smartos-support/config-reference" / n  # spe.py : la configuration
+                    for n in ("spyder.ini", "transient.ini")}}  # que l'installation de SmartPythonEditor pose
     original = _assembler.zipfile.ZipFile
 
     class Zip(original):

@@ -117,6 +117,18 @@ def _garde_vie(boucle: asyncio.AbstractEventLoop) -> None:
     boucle.run_forever, boucle.stop = run_forever, stop
 
 
+def _completer_site() -> None:
+    """CPython rend ``None`` pour ``site.getuserbase()`` et ``getusersitepackages()`` sous emscripten (pas de dossier
+    personnel), là où toute autre plateforme rend un chemin : spyder_kernels (``create_pathlist``) le range parmi les
+    chemins de bibliothèque et ``in`` lève TypeError au premier ``runfile`` (12/10/2026). Les chemins du schéma POSIX,
+    qui n'existent pas : rien n'y est installé, comme un ``~/.local`` vide."""
+    import site  # noqa: PLC0415
+    if site.getuserbase() is None:
+        site.USER_BASE = os.path.expanduser("~/.local")
+        site.USER_SITE = os.path.join(site.USER_BASE, "lib", f"python{sys.version_info[0]}.{sys.version_info[1]}",
+                                      "site-packages")
+
+
 def installer(dossier_web: str, boucle: asyncio.AbstractEventLoop | None = None) -> None:
     """``dossier_web`` : le dossier ``qtpy6/web`` dépaqueté dans le Worker ; ``boucle`` : celle du Worker (par défaut la
     courante)."""
@@ -139,4 +151,5 @@ def installer(dossier_web: str, boucle: asyncio.AbstractEventLoop | None = None)
     threading_web.partager_boucle(boucle)  # les boucles qu'ipykernel crée par fil
     _garde_vie(boucle)
     _doubler_sleep()
+    _completer_site()
     js.zmq_pret(create_proxy(recevoir_page))  # la page a pu écrire avant : travailleur.js vide ce qu'il a gardé
