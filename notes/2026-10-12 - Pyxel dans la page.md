@@ -71,11 +71,23 @@ Chaque ligne est un essai, dans l'ordre ; le mur suivant n'apparaît qu'une fois
 Également vu dans la console, non expliqué : plusieurs `SystemError: Cannot enter a promising task from inside another
 running promising task` (Pyodide), avant et après la panique ; à regarder si elles survivent à un init réussi.
 
+6. **Hors bac à sable (sonde lancée par l'utilisateur, Firefox 155 avec WebGL, 12/10/2026)** : `getContext("webgl2")`
+   rend un contexte dans le Worker, et **`pyxel.init(64, 48)` réussit** (« RESULTAT init OK 64 48 /home/pyodide/jeux »).
+   « Failed to initialize audio device » est écrit mais n'arrête rien : un Worker n'a pas d'AudioContext, le son est à
+   traiter à part. `pyxel.flip()` panique ensuite : « **pyxel.flip is not supported on Pyxel Web** »
+   (`platform_sdl2.rs:544`). C'est un refus délibéré de Pyxel, pas un manque de doublure. Relevés :
+   `essais/spyder/sonde_pyxel_hors.log`, `capture_pyxel_hors.console.log`.
+
+## Ce que cela change pour le pont
+
+La boucle du greffon (`patched_run` : update, draw, `original_flip`, publish) ne peut pas tourner telle quelle en web,
+puisque `flip` y est interdit. En web, Pyxel cadence lui-même par `pyxel.run` (boucle principale d'emscripten, donc
+`requestAnimationFrame`, présent dans un Worker dédié). La piste : laisser le `pyxel.run` d'origine tourner dans le Worker
+et publier l'image depuis le `draw` (ou après lui), sans `flip`. Cela touche au crochet du greffon, qui ne doit pas changer :
+la doublure devra donc vivre côté qtpy6, et sa forme reste à choisir (de jour).
+
 ## Point ouvert immédiat
 
-- La même sonde lancée par l'utilisateur hors bac à sable (seul endroit avec WebGL) : `essais/spyder/sonde_pyxel_hors.log`
-  et `capture_pyxel_hors.console.log` diront si `init` puis `cls`/`flip` passent dans le Worker sur un OffscreenCanvas
-  WebGL. *Non mesuré.*
-- Si oui, la forme des doublures se précise : dans le Worker, l'OffscreenCanvas et les objets DOM factices (qtpy6, pas le
-  greffon) ; le crochet `SDL_VIDEODRIVER=offscreen` du greffon à neutraliser ; puis les doublures 1 et 2 (mémoire partagée,
-  FIFO) pour que le panneau Pyxel reçoive les images comme en natif.
+- Choisir la forme de la doublure du pont (ci-dessus), puis écrire les doublures 1 et 2 (mémoire partagée, FIFO) pour que le
+  panneau reçoive les images comme en natif.
+- Le son (pas d'AudioContext dans un Worker) et les `SystemError: Cannot enter a promising task…` restent à examiner.
