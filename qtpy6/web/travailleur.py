@@ -47,7 +47,7 @@ from qtpy6.web.preambule import _vers_python
 
 REGLAGES = {}  # configurer() : indexURL, roues, filtre
 _URL_WORKER = None
-_FICHIERS_WORKER = ("preambule.py", "zmq_web.py", "threading_web.py", "psutil_web.py")  # de qtpy6/web, ce que le préambule du worker importe
+_FICHIERS_WORKER = ("preambule.py", "zmq_web.py", "threading_web.py", "psutil_web.py", "pyxel_web.py")  # de qtpy6/web, ce que le préambule du worker importe
 _RESERVE = None  # prechauffer() : (worker, indexURL) — un worker neuf dont le Pyodide charge, consommé par le prochain start()
 
 
