@@ -197,6 +197,14 @@ running promising task` (Pyodide), avant et après la panique ; à regarder si e
     au-delà btn False. Cadence et `frame_count` identiques à l'essai 20. Niveau de preuve : sonde Firefox lancée par
     l'utilisateur (WebGL), une exécution.
 
+22. **La doublure dans qtpy6** (11 h 33) : `qtpy6/web/pyxel_web.py`, installé par `preambule.installer`, et
+    `window ??= globalThis` posé en tête de `js/travailleur.js` (avant `loadPyodide`). L'essai ne porte plus aucune
+    instrumentation : `SDL_VIDEODRIVER=offscreen` posé comme le greffon, `pyxel.init`, puis 60 tours `set_btn`/`cls`/
+    `pyxel.flip`. **Résultat identique à l'essai 21** : `pyxel.flip.__module__` = `qtpy6.web.pyxel_web`, 61 images en
+    2,0 s, btn/btnp conformes, dernier pixel 11 (le `cls(11)` de la dernière image). Le reste de la console (zmq,
+    affichage) n'est pas gêné par `window` dans le Worker. Niveau de preuve : sonde Firefox, une exécution ; `run` doublé
+    et réinitialisation (`init` appelé deux fois) non testés.
+
 ## Ce que cela change pour le pont
 
 **Forme retenue (essais 20 et 21) : la boucle du greffon tourne telle quelle, qtpy6 ne double que `pyxel.flip` et
@@ -210,6 +218,5 @@ greffon) et interdit à la cellule d'être suspendue pendant les images (essai 1
 
 ## Point ouvert immédiat
 
-- Écrire `qtpy6/web/pyxel_web.py` (init, flip, run, stubs DOM, exceptions d'une image journalisées), installé par le
-  préambule ; puis les doublures 1 et 2 (mémoire partagée, FIFO) pour que le panneau reçoive les images comme en natif.
+- `qtpy6/web/pyxel_web.py` écrit (essai 22). Reste : les doublures 1 et 2 (mémoire partagée, FIFO) pour que le panneau reçoive les images comme en natif.
 - Le son (pas d'AudioContext dans un Worker) et les `SystemError: Cannot enter a promising task…` restent à examiner.

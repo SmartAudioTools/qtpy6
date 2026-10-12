@@ -15,6 +15,7 @@
 //           le zip porte ses chemins depuis la racine du système de fichiers, où il est dépaqueté ; roues :
 //           {module: url de .whl}, chacune chargée au premier import de son module (rien sinon : ni octets ni délai)
 //   émis :  {sortie} (stdout), {sortie_erreur} (stderr), {fin: code}, {erreur} (Pyodide injoignable, JSPI absent)
+globalThis.window ??= globalThis;  // AVANT loadPyodide : SDL (pyxel_web.py) fige window/document au chargement
 let py, module, appeler, courant = 0, file = Promise.resolve();  // courant : le numéro de l'appel en cours, 0 hors de tout appel (l'import du module)
 let prechauffe = null;  // {indexURL, py: Promise, roues: Set} : le Pyodide lancé par {prechauffer}, qu'un {lancer} du même
                         // indexURL reprend, et les URL des roues qui y sont installées

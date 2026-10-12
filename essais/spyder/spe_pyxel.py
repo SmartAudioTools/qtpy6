@@ -15,61 +15,23 @@ import os, sys, pyxel
 print("pyxel", pyxel.__file__)
 JEU = '''
 import os, pyxel
-import js, pyodide_js
-_c = js.OffscreenCanvas.new(64, 48)
-_c.style = js.Object.new()
-print('RES' 'ULTAT webgl', [str(js.OffscreenCanvas.new(8, 8).getContext(k)) for k in ('webgl2', 'webgl', '2d')], str(js.navigator.userAgent))
-_c.getBoundingClientRect = lambda: js.Object.fromEntries(js.Object.entries(js.JSON.parse('{"left":0,"top":0,"width":64,"height":48,"right":64,"bottom":48}')))
-pyodide_js.canvas.setCanvas2D(_c)
-from pyodide.code import run_js
-run_js("self.screen ??= {width: 1280, height: 720, availWidth: 1280, availHeight: 720, colorDepth: 24}; self.navigator.getGamepads ??= () => []; self._readVirtualGamepadBitmask ??= () => 0; const _n = () => {}; self.document ??= {addEventListener: _n, removeEventListener: _n, querySelector: () => null, getElementById: () => null, title: '', body: {style: {}, addEventListener: _n, removeEventListener: _n}, documentElement: {style: {}}, fullscreenElement: null, pointerLockElement: null, hidden: false, visibilityState: 'visible', hasFocus: () => true};")
-print("canvas", pyodide_js.canvas.getCanvas2D())
+import time
 try:
+    # Essai 22 : le code du bureau tel quel, servi par la doublure qtpy6/web/pyxel_web.py (installée par le préambule).
+    os.environ["SDL_VIDEODRIVER"] = "offscreen"  # ce que pose le greffon : la doublure doit le retirer
     pyxel.init(64, 48)
-    print("RES" "ULTAT init OK", pyxel.width, pyxel.height, os.getcwd())
-    import time
-    vus = []
-    t0 = time.monotonic()
-    for i in range(10):  # images sans flip (interdit en web) : dessin seul, cadence par sleep
-        pyxel.cls(i); pyxel.rect(0, 0, 8, 8, 15 - i)
-        m = bytes(memoryview(pyxel.screen.data_ptr()))
-        vus.append((m[0], m[63 * 47]))
-        time.sleep(1 / 30)
-    print("RES" "ULTAT boucle", vus, "duree", round(time.monotonic() - t0, 3), "attendu ~0.333")
-    # Essai 20 : doublure de flip. pyxel.run d'origine est lancé une fois par le trampoline (essai 12) avec des rappels
-    # vides, sa boucle emscripten aussitôt mise en pause ; flip cadence par sleep puis déroule UNE image de Pyxel en
-    # appelant de façon synchrone la fonction d'itération posée par emscripten (MainLoop.func). La boucle reste celle de
-    # l'appelant (patched_run du greffon), frame_count et btnp avancent par Pyxel lui-même.
-    pyodide_js._api._skip_unwind_fatal_error = True
-    from pyodide.ffi import create_once_callable, create_proxy
-    trampoline = js.Function.new("f", "f()")
-    M = pyodide_js._module.MainLoop
-    original_run = pyxel.run
-    etat = {"pret": False, "t": None}
-    def flip_web():
-        if not etat["pret"]:
-            trampoline(create_once_callable(lambda: original_run(lambda: None, lambda: None)))
-            M.pause()
-            etat["pret"] = True
-            etat["t"] = time.monotonic()
-        etat["t"] += 1 / 30
-        attente = etat["t"] - time.monotonic()
-        if attente > 0:
-            time.sleep(attente)
-        else:
-            etat["t"] = time.monotonic()
-        M.func()
+    print("RES" "ULTAT init OK", pyxel.width, pyxel.height, pyxel.flip.__module__)
     journal = []
     t0 = time.monotonic()
-    for k in range(60):  # la boucle de patched_run : update, draw, flip
-        if k in (30, 45):  # essai 21 : la touche posée dans la boucle, comme InputConsumer.pump du greffon
+    for k in range(60):  # la boucle de patched_run : entrées (pump), update, draw, flip
+        if k in (30, 45):
             pyxel.set_btn(pyxel.KEY_SPACE, k == 30)
-        n = pyxel.frame_count
-        if k < 3 or k % 10 == 0 or 29 <= k <= 32 or 44 <= k <= 47:
-            journal.append(f"k={k} fc={n} t={time.monotonic() - t0:.2f} btn={pyxel.btn(pyxel.KEY_SPACE)} btnp={pyxel.btnp(pyxel.KEY_SPACE)}")
+        if k < 3 or k % 10 == 0 or 29 <= k <= 31 or 44 <= k <= 46:
+            journal.append(f"k={k} fc={pyxel.frame_count} t={time.monotonic() - t0:.2f} btn={pyxel.btn(pyxel.KEY_SPACE)} btnp={pyxel.btnp(pyxel.KEY_SPACE)}")
         pyxel.cls(k % 16)
-        flip_web()
-    print("RES" "ULTAT flip", journal, "running", M.running, "frame_count", pyxel.frame_count, "duree", round(time.monotonic() - t0, 2), "attendu ~2.0")
+        pyxel.flip()
+    m = bytes(memoryview(pyxel.screen.data_ptr()))
+    print("RES" "ULTAT flip", journal, "frame_count", pyxel.frame_count, "duree", round(time.monotonic() - t0, 2), "attendu ~2.0", "pixel", m[0], "attendu 11")
 except BaseException as e:
     import traceback; traceback.print_exc(); print("RES" "ULTAT KO", type(e).__name__, e)
 '''
@@ -91,13 +53,8 @@ _source = open(os.path.join(_ICI, "spe.py"), encoding="utf-8").read()
 _avant = 'travailleur.configurer("./pyodide-qt/")'
 _fin = "\n\nexec(compile(open(os.path.join(os.path.dirname"
 assert _source.count(_avant) == 1 and _source.count(_fin) == 1
-# window = le Worker, AVANT loadPyodide : SDL (emscripten) fige window/document au chargement (specialHTMLTargets), et
-# sans window, SDL_Init échoue sur « Could not set gamepad connect callback ».
-_source = _source.replace(_avant, f'travailleur.configurer("./pyodide/", roues=[{ROUE!r}])' + '''
-    import importlib.resources, js
-    _js = importlib.resources.files("qtpy6.web").joinpath("js/travailleur.js").read_text(encoding="utf-8")
-    travailleur._URL_WORKER = js.URL.createObjectURL(js.Blob.new(["globalThis.window ??= globalThis;\\n" + _js],
-                                                                 type="text/javascript"))''')
+# window = le Worker avant loadPyodide : posé désormais par qtpy6/web/js/travailleur.js lui-même.
+_source = _source.replace(_avant, f'travailleur.configurer("./pyodide/", roues=[{ROUE!r}])')
 _source = _source.replace(_fin, """
 _SUITE_SPE = SUITE
 
