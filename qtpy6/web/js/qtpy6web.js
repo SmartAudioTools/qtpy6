@@ -364,6 +364,19 @@ function glisser_rejoue(conteneur) {
     screenX: x, screenY: y, buttons: type === "drop" || type === "dragend" ? 0 : 1, bubbles: true, cancelable: true, composed: true }));
   const sous = (x, y) => e.racine.elementFromPoint(x, y) || e.el;
   const avaler = ev => { ev.stopImmediatePropagation(); ev.preventDefault(); };
+  // « &sonde_glisser » dans l'adresse : chaque événement, authentique ou rejoué, dit dans la console avant qu'on y touche
+  // (diagnostic sous la vraie souris, que la sonde de SmartTeacher ne simule pas, 13/10/2026).
+  if (new URLSearchParams(location.search).has("sonde_glisser")) {
+    let n = 0;
+    for (const t of ["pointerdown", "pointermove", "pointerup", "pointercancel", "dragstart", "dragenter", "dragover",
+                     "dragleave", "drop", "dragend", "mousedown", "mouseup"])
+      addEventListener(t, ev => {
+        if ((t === "pointermove" || t === "dragover") && n++ % 10) return;
+        console.log(`SONDE ${t} ${ev.isTrusted ? "vrai" : "rejoué"} ${ev.clientX},${ev.clientY} boutons=${ev.buttons} ` +
+                    `cible=${ev.composedPath()[0]?.tagName} suspendu=${suspension.suspendu} pris=${!!(e && e.pris)} ` +
+                    `dt=${!!(e && e.dt)} effet=${ev.dataTransfer?.dropEffect ?? ""}`);
+      }, true);
+  }
   addEventListener("pointerdown", ev => {
     e = null;
     effacer();
