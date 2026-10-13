@@ -410,7 +410,13 @@ function glisser_rejoue(conteneur) {
     e = null;
     effacer();
   }, true);
-  addEventListener("dragstart", ev => { if (ev.isTrusted && e && !e.dt) e = null; }, true);
+  // Le glisser rejoué déjà lancé, celui du navigateur est refusé : Chrome le lance quand même un peu plus loin, et son
+  // pointercancel, en (0, 0), terminait le nôtre en haut de la fenêtre (la dernière étiquette d'un Ordre allait toujours
+  // en tête, la première ne bougeait plus, sous la vraie souris seulement, 13/10/2026).
+  addEventListener("dragstart", ev => {
+    if (!ev.isTrusted || !e) return;
+    if (e.dt) avaler(ev); else e = null;
+  }, true);
 }
 
 export async function preparer(conteneur, { indexURL, archives = [], roues = [], env = {}, sur_ligne, progres = () => {},
