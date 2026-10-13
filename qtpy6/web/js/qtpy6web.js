@@ -360,8 +360,16 @@ function glisser_rejoue(conteneur) {
     document.body.appendChild(el);
     image = { el, hx: +hx || 0, hy: +hy || 0 };
   };
-  const drag = (type, el, x, y) => el.dispatchEvent(new DragEvent(type, { dataTransfer: e.dt, clientX: x, clientY: y,
-    screenX: x, screenY: y, buttons: type === "drop" || type === "dragend" ? 0 : 1, bubbles: true, cancelable: true, composed: true }));
+  const drag = (type, el, x, y) => {
+    const ev = new DragEvent(type, { dataTransfer: e.dt, clientX: x, clientY: y, screenX: x, screenY: y,
+      buttons: type === "drop" || type === "dragend" ? 0 : 1, bubbles: true, cancelable: true, composed: true });
+    // Qt place le dépôt par offsetX/offsetY (le survol, lui, par pageX/pageY) : Chrome les calcule faux sur un événement
+    // construit, le dépôt tombait 300 px trop haut, en tête de liste (Ordre sous la vraie souris, 13/10/2026). Firefox les
+    // calcule juste, d'où une sonde verte. Ils sont donc posés ici, relatifs à la cible.
+    const r = el.getBoundingClientRect ? el.getBoundingClientRect() : { left: 0, top: 0 };
+    Object.defineProperties(ev, { offsetX: { value: x - r.left }, offsetY: { value: y - r.top } });
+    return el.dispatchEvent(ev);
+  };
   const sous = (x, y) => e.racine.elementFromPoint(x, y) || e.el;
   const avaler = ev => { ev.stopImmediatePropagation(); ev.preventDefault(); };
   // « &sonde_glisser » dans l'adresse : chaque événement, authentique ou rejoué, dit dans la console avant qu'on y touche
