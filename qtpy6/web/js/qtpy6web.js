@@ -477,7 +477,7 @@ export async function preparer(conteneur, { indexURL, archives = [], roues = [],
   window.qtpy6Conteneur = conteneur;  // ce que qtpy6.web.pdf lit pour caler ses <div> sur les widgets
   window.qtpy6Js = import.meta.url;  // d'où qtpy6.web.pdf charge pdf.js quand l'archive ne l'a pas (assembler, exclure)
   py.runPython(`import json, os, sys
-os.environ.update(json.loads(${JSON.stringify(JSON.stringify({ ...env, ...(new URLSearchParams(location.search).has("sonde_glisser") ? { SONDE_GLISSER: "1" } : {}) }))}))
+os.environ.update(json.loads(${JSON.stringify(JSON.stringify(env))}))
 sys.path[:0] = json.loads(${JSON.stringify(JSON.stringify(archives.map(a => a.dossier)))})`);
   // La version attendue : versions.json de qtpy6.web, lu dans l'archive (find_spec n'importe rien). Un fetch relatif au
   // chargeur ne la trouvait qu'en développement (js/ sous qtpy6/web/) : publié, qtpy6web.js est à la racine du site, 404.
