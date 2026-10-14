@@ -1,10 +1,11 @@
 """The binding's QtGui, with PySide6's `mode=` keyword on QTextCursor.move_position
-- and, in the browser, a fixed system font that Qt-WASM lacks."""
+- and, in the browser, a fixed system font that Qt-WASM lacks, and the data of a drag inside the application
+before its drop."""
 import sys
 
 from . import PYSIDE6, _binding
 
-_binding.load(globals(), 'QtGui', 'QTextCursor', 'QFontDatabase', 'QFont', 'QGuiApplication')  # names this code uses
+_binding.load(globals(), 'QtGui', 'QTextCursor', 'QFontDatabase', 'QFont', 'QGuiApplication', 'QDropEvent', 'QDrag')  # names this code uses
 
 if PYSIDE6:
     # PySide calls movePosition's `mode` parameter `arg__2` (PYSIDE-185).
@@ -41,6 +42,18 @@ if sys.platform == 'emscripten':
 
     QFontDatabase.addApplicationFont = staticmethod(addApplicationFont)  # noqa: F821
     QFontDatabase.systemFont = staticmethod(systemFont)  # noqa: F821
+
+    # Before the drop, Qt-WASM gives a drag event only the formats of the data (the browser protects dataTransfer
+    # until the drop): hasFormat is true, data() is empty. A drag from this application still has its QDrag,
+    # a child of its source widget, whose mimeData is the one the source wrote.
+    _mime_data = QDropEvent.mimeData  # noqa: F821
+
+    def mimeData(self):
+        source = self.source()
+        drags = source.findChildren(QDrag) if source is not None else []  # noqa: F821
+        return drags[-1].mimeData() if drags else _mime_data(self)
+
+    QDropEvent.mimeData = mimeData  # noqa: F821
 
     from .web.bloquant import doubler_exec_application
     doubler_exec_application(QGuiApplication)  # noqa: F821
