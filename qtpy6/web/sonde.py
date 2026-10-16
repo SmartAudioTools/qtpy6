@@ -22,7 +22,8 @@ qui vérifie le résultat du glissé, et un test automatique qui en dépend. ``-
 demandes de gestes réels, qu'un événement synthétique de Qt ne remplace pas (un slot qu'un vrai clic déclenche est reporté
 par ``bloquant``, pas celui de ``click()``) : ``window.etat = "cliquer"`` (en ``window.clic = [x, y]``, pixels CSS) ou
 ``"taper"`` (``window.texte``, au clavier, là où est le focus), ``"raccourci"`` (Ctrl + ``window.touche``, « c », « x »
-ou « v »), ``"fichier"`` (``window.fichier = {nom, texte}``, déposé
+ou « v »), ``"glisser"`` (un glissé souris réel de ``window.glisser = [x1, y1, x2, y2]``, une sélection de texte à la
+souris par exemple), ``"fichier"`` (``window.fichier = {nom, texte}``, déposé
 dans le sélecteur de fichiers que la page vient d'ouvrir par ``QFileDialog.getOpenFileName``) ou ``"recharger"`` (la page
 rechargée, sans réponse : elle repart de zéro et reconnaît un second passage à ce qu'elle retrouve) ; la sonde fait le
 geste et répond ``window.etat`` suivi de ``"_fait"``, puis la page poursuit.
@@ -176,6 +177,11 @@ def raccourci(navigateur):
     repeint(navigateur)
 
 
+def glisse(navigateur):
+    """Le glissé de ``window.glisser`` (``[x1, y1, x2, y2]``, pixels CSS), demandé en chemin par la page."""
+    glisser(navigateur, *map(float, navigateur.execute_script("return window.glisser")))
+
+
 def fichier(navigateur):
     """``window.fichier`` ({nom, texte}) déposé dans le sélecteur de fichiers que la page a ouvert (``bloquant.ELEMENT_FICHIERS``,
     déjà présent : la page ne rend la main qu'une fois suspendue dessus) : ce que l'utilisateur fait en choisissant un fichier
@@ -217,7 +223,7 @@ def recharger(navigateur):
     return False
 
 
-GESTES = {"cliquer": cliquer, "taper": taper, "raccourci": raccourci, "fichier": fichier, "recharger": recharger}
+GESTES = {"cliquer": cliquer, "taper": taper, "raccourci": raccourci, "glisser": glisse, "fichier": fichier, "recharger": recharger}
 
 
 def repeint(navigateur):
