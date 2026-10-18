@@ -20,3 +20,16 @@ essais/**/*.log
 essais/spyder/jalon5_dossier/
 wasm/telecharger_sources.log
 essais/spyder/roues/
+# liens vers le site Qt construit (outils_wasm) : un par essai, recréé à la demande
+essais/*/pyodide-qt
+exemple/*.console.log
+# sondes jetables du portage de Spyder (jalons 7-8, 11-12/10/2026), gardées sur le disque, jamais commitées
+essais/spyder/diag8b.py
+essais/spyder/jspi10.py
+essais/spyder/noyau_pas.py
+essais/spyder/pile7.py
+essais/spyder/sonde_boucle.py
+essais/spyder/sonde_noyau.py
+essais/spyder/spe_m3.py
+essais/spyder/spe_m4.py
+essais/spyder/texte7.py
