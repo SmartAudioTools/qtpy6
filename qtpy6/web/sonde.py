@@ -308,8 +308,13 @@ class Blink:
                    QTWEBENGINE_CHROMIUM_FLAGS="--no-zygote --in-process-gpu --ignore-gpu-blocklist --use-gl=angle "
                                               "--use-angle=swiftshader --enable-unsafe-swiftshader",
                    QTWEBENGINE_REMOTE_DEBUGGING=f"127.0.0.1:{port}")
+        import tempfile  # noqa: PLC0415
+
+        # stderr dans un fichier (un tube plein bloquerait Chromium, bavard) : sa fin dit pourquoi l'hôte est mort,
+        # cause invisible du seul échec vu (0,9 s, suite complète du 20/10/2026), jamais reproduit depuis
+        erreurs = tempfile.TemporaryFile()
         self.processus = subprocess.Popen([python, "-c", HOTE, url, str(largeur), str(hauteur)], env=env,
-                                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                          stdout=subprocess.DEVNULL, stderr=erreurs)
         sans_mandataire = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         for _ in range(120):
             try:
@@ -318,7 +323,10 @@ class Blink:
                 break
             except (OSError, StopIteration):
                 if self.processus.poll() is not None:
-                    raise RuntimeError(f"{python} : QtWebEngine n'a pas démarré (PyQt6-WebEngine installé ?)") from None
+                    erreurs.seek(0)
+                    fin = erreurs.read().decode(errors="replace").strip().splitlines()[-5:]
+                    raise RuntimeError(f"{python} : QtWebEngine n'a pas démarré (code {self.processus.returncode}) :\n"
+                                       + "\n".join(fin)) from None
                 time.sleep(0.5)
         else:
             raise RuntimeError("QtWebEngine : pas de page DevTools en 60 s")
