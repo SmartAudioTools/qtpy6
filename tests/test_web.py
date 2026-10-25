@@ -1259,6 +1259,42 @@ def test_accept_du_selecteur_de_fichiers():
     assert _accept("*.tar.gz") == ".tar.gz"
 
 
+
+def test_fichier_choisi_relu_a_chaque_ouverture(tmp_path, monkeypatch):
+    """Un fichier choisi ou déposé se relit de sa source à chaque ``open`` en lecture (la version que l'élève vient
+    d'enregistrer) ; une source illisible retire la copie (``FileNotFoundError``, l'application redemande) ; une écriture
+    de l'application détache la copie de sa source. La relecture JS est remplacée ici par un dictionnaire."""
+    import builtins
+
+    from qtpy6.web import fichiers
+    disque = {"src": "v1"}
+
+    def relire(chemin, source):
+        if disque.get(source) is None:
+            return False
+        with builtins.open(chemin, "w") as f:
+            f.write(disque[source])
+        return True
+    monkeypatch.setattr(fichiers, "_open", [builtins.open])
+    monkeypatch.setattr(fichiers, "_sources", {})
+    monkeypatch.setattr(fichiers, "_relire", relire)
+    copie = tmp_path / "tp.py"
+    copie.write_text("v1")
+    fichiers.retenir(copie, "src")
+    disque["src"] = "v2"
+    with fichiers._ouvrir(copie) as f:
+        assert f.read() == "v2"
+    disque["src"] = None
+    with pytest.raises(FileNotFoundError):
+        fichiers._ouvrir(str(copie), "rb")
+    assert not copie.exists() and not fichiers._sources
+    copie.write_text("x")
+    fichiers.retenir(copie, "src")
+    with fichiers._ouvrir(copie, "w") as f:
+        f.write("de l'application")
+    assert not fichiers._sources and copie.read_text() == "de l'application"
+
+
 @pytest.mark.skipif(not (RACINE / "exemple" / "pyodide-qt").exists(), reason="Pyodide-Qt (hebergement/telecharger.sh) requis")
 @pytest.mark.parametrize("moteur", MOTEURS)
 def test_boucle_de_qt_ouverte_par_une_minuterie(moteur):

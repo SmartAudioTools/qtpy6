@@ -194,9 +194,18 @@ def fichier(navigateur):
     chemin = os.path.join(tempfile.mkdtemp(prefix="sonde-"), f["nom"])
     Path(chemin).write_text(f["texte"], encoding="utf-8")
     if isinstance(navigateur, Blink):
-        racine = navigateur.cdp("DOM.getDocument")["root"]["nodeId"]
-        noeud = navigateur.cdp("DOM.querySelector", nodeId=racine, selector="#" + ELEMENT_FICHIERS)["nodeId"]
-        navigateur.cdp("DOM.setFileInputFiles", files=[chemin], nodeId=noeud)
+        # deux sélecteurs possibles : showOpenFilePicker (appel dans l'activation d'un clic), auquel l'hôte répond par
+        # ``choix`` (``chooseFiles``, qui le consomme), ou le <input> de repli, qui n'apparaît qu'après le refus du premier
+        Path(navigateur.choix).write_text(chemin, encoding="utf-8")
+        fin = time.time() + 30
+        while os.path.exists(navigateur.choix) and time.time() < fin:
+            racine = navigateur.cdp("DOM.getDocument")["root"]["nodeId"]
+            noeud = navigateur.cdp("DOM.querySelector", nodeId=racine, selector="#" + ELEMENT_FICHIERS)["nodeId"]
+            if noeud:
+                os.remove(navigateur.choix)
+                navigateur.cdp("DOM.setFileInputFiles", files=[chemin], nodeId=noeud)
+                break
+            time.sleep(0.1)
     else:
         from selenium.webdriver.common.by import By  # noqa: PLC0415
 
@@ -278,12 +287,27 @@ def glisser(navigateur, x1, y1, x2, y2, pas=10):
 
 
 HOTE = """
-import sys
-from PyQt6.QtCore import QUrl
+import os, sys, time
+from PyQt6.QtCore import QEventLoop, QUrl
+from PyQt6.QtWebEngineCore import QWebEnginePage
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtWebEngineWidgets import QWebEngineView
+
+class Page(QWebEnginePage):
+    def chooseFiles(self, mode, anciens, types):  # showOpenFilePicker : le fichier du geste « fichier » (sys.argv[4])
+        boucle, fin = QEventLoop(), time.time() + 30
+        while not os.path.exists(sys.argv[4]) and time.time() < fin:
+            boucle.processEvents(QEventLoop.ProcessEventsFlag.AllEvents, 100)
+        if not os.path.exists(sys.argv[4]):
+            return []
+        with open(sys.argv[4], encoding="utf-8") as f:
+            chemin = f.read()
+        os.remove(sys.argv[4])
+        return [chemin]
+
 app = QApplication(sys.argv[:1])
 vue = QWebEngineView()
+vue.setPage(Page(vue))
 vue.resize(int(sys.argv[2]), int(sys.argv[3]))
 vue.setUrl(QUrl(sys.argv[1]))
 vue.show()
@@ -313,7 +337,8 @@ class Blink:
         # stderr dans un fichier (un tube plein bloquerait Chromium, bavard) : sa fin dit pourquoi l'hôte est mort,
         # cause invisible du seul échec vu (0,9 s, suite complète du 20/10/2026), jamais reproduit depuis
         erreurs = tempfile.TemporaryFile()
-        self.processus = subprocess.Popen([python, "-c", HOTE, url, str(largeur), str(hauteur)], env=env,
+        self.choix = os.path.join(tempfile.mkdtemp(prefix="sonde-choix-"), "choix")  # le geste « fichier » -> l'hôte
+        self.processus = subprocess.Popen([python, "-c", HOTE, url, str(largeur), str(hauteur), self.choix], env=env,
                                           stdout=subprocess.DEVNULL, stderr=erreurs)
         sans_mandataire = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         for _ in range(120):

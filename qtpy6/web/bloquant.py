@@ -747,6 +747,9 @@ def doubler_qtwidgets(ns):
         d.setOption(QFileDialog.Option.ShowDirsOnly)
         return d.selectedFiles()[0] if d.exec() == 1 and d.selectedFiles() else ""
 
+    from . import fichiers  # noqa: PLC0415
+
+    fichiers.installer()  # un fichier choisi ou déposé se relit du disque de l'utilisateur à chaque ouverture
     for nom, f in (("getOpenFileName", get_open_file_name), ("getOpenFileNames", get_open_file_names),
                    ("getSaveFileName", get_save_file_name), ("getExistingDirectory", get_existing_directory)):
         setattr(QFileDialog, nom, staticmethod(f))
@@ -784,6 +787,11 @@ def _televerser(directory, filtre, multiple):
     import js  # noqa: PLC0415
     from pyodide.ffi import create_once_callable  # noqa: PLC0415
 
+    dossier = _dossier(directory)
+    if hasattr(js.window, "showOpenFilePicker"):  # Chrome : des poignées, que ``fichiers`` relit à chaque ouverture
+        chemins = _choisir_poignees(dossier, filtre, multiple)
+        if chemins is not None:
+            return chemins
     champ = js.document.createElement("input")
     champ.type, champ.id, champ.multiple, champ.hidden = "file", ELEMENT_FICHIERS, multiple, True
     champ.accept = _accept(filtre)
@@ -795,17 +803,44 @@ def _televerser(directory, filtre, multiple):
             champ.click()
         if not _suspendre(brancher):
             return []
-        chemins = []
-        dossier = _dossier(directory)
-        for f in champ.files:
-            chemin = os.path.join(dossier, f.name)
-            contenu = _suspendre(lambda resoudre, f=f: f.arrayBuffer().then(resoudre))
-            with open(chemin, "wb") as sortie:
-                sortie.write(js.Uint8Array.new(contenu).to_bytes())
-            chemins.append(chemin)
-        return chemins
+        return [_copier(dossier, f, f) for f in champ.files]
     finally:
         champ.remove()
+
+
+def _copier(dossier, f, source):
+    """Le ``File`` ``f`` copié dans ``dossier`` ; son chemin, qui se relira depuis ``source`` (``fichiers``)."""
+    import js  # noqa: PLC0415
+
+    from . import fichiers  # noqa: PLC0415
+
+    chemin = os.path.join(dossier, f.name)
+    contenu = _suspendre(lambda resoudre: f.arrayBuffer().then(resoudre))
+    fichiers.oublier(chemin)  # l'écriture qui suit est la nôtre, pas celle de l'application
+    with open(chemin, "wb") as sortie:
+        sortie.write(js.Uint8Array.new(contenu).to_bytes())
+    fichiers.retenir(chemin, source)
+    return chemin
+
+
+def _choisir_poignees(dossier, filtre, multiple):
+    """``showOpenFilePicker`` : les fichiers choisis copiés dans ``dossier``, leurs poignées retenues. [] si annulé ;
+    None si le sélecteur refuse de s'ouvrir hors d'un geste de l'utilisateur (``SecurityError`` : un appel sans clic, celui
+    de la sonde), et le ``<input>`` le remplace."""
+    import js  # noqa: PLC0415
+    from pyodide.ffi import to_js  # noqa: PLC0415
+
+    options = {"multiple": multiple}
+    extensions = [e for e in _accept(filtre).split(",") if e]
+    if extensions:
+        options["types"] = [{"description": filtre.split("(")[0].strip() or "Fichiers",
+                             "accept": {"application/octet-stream": extensions}}]
+    choisir = js.Function.new("o", "return showOpenFilePicker(o).catch(e => { if (e.name === 'AbortError') return [];"
+                                   " if (e.name === 'SecurityError') return 'sans geste'; throw e; })")
+    poignees = _suspendre(lambda resoudre: choisir(to_js(options, dict_converter=js.Object.fromEntries)).then(resoudre))
+    if isinstance(poignees, str):
+        return None
+    return [_copier(dossier, _suspendre(lambda resoudre, p=p: p.getFile().then(resoudre)), p) for p in poignees]
 
 
 def _telecharger_quand_ecrit(chemin, QTimer, delai=120):
