@@ -280,6 +280,10 @@ En natif, tout s'importe et est inerte ; les doublures sont vérifiées dans un 
 suspendent et reprennent dans n'importe quel ordre) et son mensonge de `can_run_sync()` ; sans PyQt6 ou greenlet, ces
 tests sont sautés.
 
+Un test natif d'APPLICATION qui doit importer un module écrit pour la page (qui importe `js` ou `pyodide.ffi`) le fait
+dans `with qtpy6.doublures.navigateur_double():` : `js`, `pyodide` et `pyodide.ffi` y sont doublés, inertes, puis
+`sys.modules` est rendu tel quel. Le test ne nomme ainsi aucun module du navigateur (`tests/test_doublures.py`).
+
 Ce que le navigateur fait vraiment se mesure avec la sonde sur `exemple/` (section précédente) : c'est le test
 d'intégration, il demande Firefox, geckodriver et selenium.
 
