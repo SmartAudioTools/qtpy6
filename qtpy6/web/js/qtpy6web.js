@@ -193,6 +193,10 @@ function molette(conteneur) {
   const rejoues = new WeakSet();
   addEventListener("wheel", e => {
     if (rejoues.has(e) || e.deltaMode === WheelEvent.DOM_DELTA_PAGE || !e.composedPath().includes(conteneur)) return;
+    // Ctrl + molette (et le pincement du pavé tactile, que le navigateur envoie ainsi) : le zoom du navigateur, que Qt-WASM
+    // suit (devicePixelRatio). Ni rejouée ni laissée à Qt, qui l'empêchait (preventDefault) : le zoom était impossible à la
+    // molette sur le lecteur de SmartTeacher (remarque d'un professeur, 06/11/2026) ; Ctrl + plus / moins passait déjà.
+    if (e.ctrlKey) { e.stopImmediatePropagation(); return; }
     const k = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? 40 : 2;
     const copie = new WheelEvent("wheel", { deltaX: e.deltaX * k, deltaY: e.deltaY * k, deltaMode: WheelEvent.DOM_DELTA_PIXEL,
       clientX: e.clientX, clientY: e.clientY, screenX: e.screenX, screenY: e.screenY, buttons: e.buttons, ctrlKey: e.ctrlKey,
