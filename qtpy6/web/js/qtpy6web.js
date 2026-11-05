@@ -86,6 +86,69 @@ if (new URLSearchParams(location.search).get("lecture") !== "0") {
 export function print(m) {
   const l = `${((performance.now() - t0) / 1000).toFixed(2)}s ${m}`;
   journal.push(l); console.log(l); ecouter(l);
+  noter(String(m));
+}
+
+// La boîte noire : ce que la page a vécu, gardé dans localStorage à chaque seconde, pour diagnostiquer après coup un gel
+// qu'on n'a pu quitter qu'en rechargeant la page (demande de l'utilisateur, 06/11/2026 : « des gels réguliers sur les
+// navigateurs des élèves […] serait-il possible d'avoir un log ou autre pour pouvoir diagnostiquer et débuguer ? »). Elle
+// note les lignes du journal (print), les erreurs JS et promesses rejetées, l'onglet caché ou montré, le plein écran,
+// la page sans main rendue plus de SEUIL_GEL (le fil de la page bloqué : l'intervalle n'a pas pu tourner), et la boucle de
+// Qt arrêtée alors que la page tourne (`battement_qt`, qu'un QTimer de qtpy6.web.boite_noire appelle), avec l'état des
+// suspensions de `boucles_qt`. La visite suivante de la même page la lit (`boite_noire_precedente`) : `fin` nul et
+// `vivant` ancien disent une page tuée sans pagehide, un fil bloqué jusqu'au bout. L'application décide où l'envoyer.
+const BOITE = "qtpy6.boite_noire:" + location.pathname, SEUIL_GEL = 3000, LIGNES = 400;
+const boite = { debut: Date.now(), vivant: Date.now(), qt: null, fin: null, agent: navigator.userAgent, lignes: [] };
+let boite_avant = null, boite_ouverte = false;
+function noter(m) {
+  boite.lignes.push(`${new Date().toLocaleTimeString("fr-FR")} ${m.length > 300 ? m.slice(0, 300) + "…" : m}`);
+  if (boite.lignes.length > LIGNES) boite.lignes.splice(0, boite.lignes.length - LIGNES);
+}
+function sceller() {
+  try { localStorage.setItem(BOITE, JSON.stringify(boite)); } catch { /* stockage plein ou refusé : la boîte reste en mémoire */ }
+}
+function ouvrir_boite_noire() {
+  if (boite_ouverte) return;
+  boite_ouverte = true;
+  try { boite_avant = JSON.parse(localStorage.getItem(BOITE)); } catch { boite_avant = null; }
+  let tic = performance.now(), visible = document.visibilityState === "visible", qt_muet = false;
+  setInterval(() => {
+    const t = performance.now(), ecart = t - tic, vu = document.visibilityState === "visible";
+    tic = t;
+    if (ecart > SEUIL_GEL && vu && visible)  // un onglet caché ralentit ses intervalles : ce n'est pas un gel
+      noter(`gel de la page : ${(ecart / 1000).toFixed(1)} s sans main rendue`);
+    const muet = vu && boite.qt !== null && Date.now() - boite.qt > SEUIL_GEL;
+    if (muet && !qt_muet) {
+      const s = suspension;
+      noter(`la boucle de Qt ne tourne plus depuis ${((Date.now() - boite.qt) / 1000).toFixed(1)} s (page vivante ; ` +
+            `suspendu=${s.suspendu} promettant=${s.promettant} tache=${s.tache} suspensions=${s.suspensions} refus=${s.refus})`);
+    } else if (!muet && qt_muet) noter("la boucle de Qt tourne de nouveau");
+    qt_muet = muet; visible = vu;
+    boite.vivant = Date.now();
+    sceller();
+  }, 1000);
+  window.addEventListener("error", e => noter(`erreur JS : ${e.message} (${e.filename}:${e.lineno})`));
+  window.addEventListener("unhandledrejection", e => noter(`promesse rejetée : ${e.reason}`));
+  document.addEventListener("visibilitychange", () => noter(`onglet ${document.visibilityState === "visible" ? "montré" : "caché"}`));
+  document.addEventListener("fullscreenchange", () => noter(document.fullscreenElement ? "plein écran" : "plein écran quitté"));
+  window.addEventListener("blur", () => noter("page sans le focus"));
+  window.addEventListener("focus", () => noter("page avec le focus"));
+  window.addEventListener("pagehide", () => { boite.fin = Date.now(); noter("page quittée"); sceller(); });
+  window.qtpy6BoiteNoire = { battement_qt, precedente: boite_noire_precedente, noter };  // ce que qtpy6.web.boite_noire appelle
+}
+
+// Un battement de la boucle de Qt (un QTimer de qtpy6.web.boite_noire) : la boîte sait que Qt tourne encore.
+export function battement_qt() { boite.qt = Date.now(); }
+
+// La boîte de la visite précédente de cette page, en texte (null s'il n'y en a pas) : en tête, si la page a été quittée
+// proprement (pagehide) ou tuée, fil bloqué, et la dernière seconde où elle vivait.
+export function boite_noire_precedente() {
+  const b = boite_avant;
+  if (!b || !Array.isArray(b.lignes)) return null;
+  const h = t => t ? new Date(t).toLocaleString("fr-FR") : "?";
+  return [`visite du ${h(b.debut)}, dernier signe de vie ${h(b.vivant)}, ` +
+          (b.fin ? `page quittée ${h(b.fin)}` : "page tuée sans être quittée (fil bloqué, onglet fermé de force ou plantage)"),
+          `dernier battement de Qt : ${h(b.qt)}`, `navigateur : ${b.agent}`, "", ...b.lignes].join("\n");
 }
 
 function telecharger(url) {
@@ -453,6 +516,7 @@ export async function preparer(conteneur, { indexURL, archives = [], roues = [],
     if (f >= 1) avance.debut("moteur");
   });
   window.journal = journal;
+  ouvrir_boite_noire();
   indexURL = new URL(indexURL.endsWith("/") ? indexURL : indexURL + "/", location.href).href;
   // Les gros fichiers demandés dès maintenant : sinon le moteur attendait pyodide.mjs puis pyodide.asm.js (1,2 Mo), deux
   // allers-retours de plus, et chaque roue le démarrage entier de Pyodide. Pyodide et loadPackage les reçoivent ensuite.
