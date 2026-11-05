@@ -90,6 +90,9 @@ def application(polices: str | os.PathLike[str] | None = None, defaut: QFont | t
             _coller()
             _dessiner_aussitot()
             _plein_ecran(app)
+            from . import boite_noire  # noqa: PLC0415
+
+            boite_noire.demarrer(app)  # le battement de la boucle de Qt dans la boîte noire de la page
     if persistant is not None and str(persistant) not in stockage._montes:
         if navigateur():
             stockage.monter(persistant)

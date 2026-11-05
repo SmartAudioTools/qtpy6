@@ -2,9 +2,9 @@
 localStorage à chaque seconde, pour diagnostiquer après coup un gel qu'on n'a pu quitter qu'en rechargeant la page
 (demande de l'utilisateur, 06/11/2026, gels du lecteur de SmartTeacher chez les élèves).
 
-La page la tient seule (journal, erreurs JS, onglet, plein écran, fil bloqué) ; ``demarrer`` y ajoute le battement de la
-boucle de Qt, qui distingue une page bloquée d'une boucle de Qt arrêtée dans une page vivante. ``precedente`` rend ce
-qu'a vécu la visite précédente de la même page, que l'application envoie où elle veut. En natif, rien de tout cela n'a
+La page la tient seule (journal, erreurs JS, onglet, plein écran, fil bloqué) ; ``demarrer`` (appelé par ``qtpy6.web.application``
+dans le navigateur) y ajoute le battement de la boucle de Qt, qui distingue une page bloquée d'une boucle de Qt arrêtée dans une page vivante. ``precedente`` rend ce
+qu'a vécu la visite précédente de la même page, que l'application envoie où elle veut. La page l'expose aussi, sans import : ``window.qtpy6BoiteNoire.precedente()``. En natif, rien de tout cela n'a
 de sens : ``demarrer`` ne fait rien, ``precedente`` rend None, ``noter`` ne fait rien. Chaque fonction importe ``js`` à
 l'appel : le module s'importe en natif.
 """
