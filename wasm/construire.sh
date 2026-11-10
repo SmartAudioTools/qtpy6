@@ -136,6 +136,10 @@ phase_qt() {
     cmake --build . --parallel
     cmake --install .
   fi
+  # Correctifs de qtbase (10/11/2026 : qtbase-wasm-defilement, le scroll() absent du backing store wasm, qui faisait
+  # repeindre tout le viewport à chaque pas de défilement) : appliqués une fois, puis ninja ne recompile que ce qui a changé.
+  patcher qtbase "$RACINE/src/qtbase"
+  (cd "$RACINE/build/qtbase-wasm" && cmake --build . --parallel && cmake --install . > /dev/null)
   qt_wasm qtsvg lib/libQt6Svg.a
   qt_wasm qtshadertools lib/libQt6ShaderTools.a
   qt_wasm qtdeclarative lib/libQt6Quick.a
@@ -388,7 +392,7 @@ phase_paquet() {
   local pyc="$RACINE/build/paquet"
   dossier "$pyc"; cp "$RACINE/build/dynamique/dist/python_stdlib.zip" "$pyc/"
   /DATA/Python/outils_wasm/venv-pyodide/bin/pyodide py-compile --silent --compression-level 9 "$pyc/python_stdlib.zip"
-  "$HOTEPY" - "$RACINE/build/dynamique/dist" "$pyc/python_stdlib.zip" "$DEP/hebergement/LICENSE-Pyodide-PySide6.txt" "$RACINE/pyodide-pyside6-0.29.3.6.zip" <<'PY'
+  "$HOTEPY" - "$RACINE/build/dynamique/dist" "$pyc/python_stdlib.zip" "$DEP/hebergement/LICENSE-Pyodide-PySide6.txt" "$RACINE/pyodide-pyside6-0.29.3.7.zip" <<'PY'
 import hashlib, sys, zipfile
 from pathlib import Path
 dist, stdlib, licence, sortie = map(Path, sys.argv[1:])

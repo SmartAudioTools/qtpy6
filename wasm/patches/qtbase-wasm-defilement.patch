@@ -1,0 +1,38 @@
+diff --color -ru a/src/plugins/platforms/wasm/qwasmbackingstore.cpp b/src/plugins/platforms/wasm/qwasmbackingstore.cpp
+--- a/src/plugins/platforms/wasm/qwasmbackingstore.cpp	2026-11-10 01:28:24.074628634 +0100
++++ b/src/plugins/platforms/wasm/qwasmbackingstore.cpp	2026-11-10 01:28:24.075357518 +0100
+@@ -111,6 +111,23 @@
+     m_webImageDataArray = emscripten::val::undefined();
+ }
+ 
++// Scrolling moves the already painted pixels inside m_image (as QRasterBackingStore does) so that
++// QWidgetRepaintManager only repaints the newly exposed strip instead of the whole scrolled area.
++// The moved area is then flushed by the repaint manager, which marks it dirty for updateTexture().
++bool QWasmBackingStore::scroll(const QRegion &area, int dx, int dy)
++{
++    if (m_image.isNull() || !QPlatformSurface::isRasterSurface(window()))
++        return false;
++
++    extern void qt_scrollRectInImage(QImage &, const QRect &, const QPoint &);
++
++    const qreal dpr = m_image.devicePixelRatio();
++    const QPoint delta(qRound(dx * dpr), qRound(dy * dpr));
++    const QRect rect = area.boundingRect();
++    qt_scrollRectInImage(m_image, QRect(rect.topLeft() * dpr, rect.size() * dpr), delta);
++    return true;
++}
++
+ QImage QWasmBackingStore::toImage() const
+ {
+     // used by QPlatformBackingStore::rhiFlush
+diff --color -ru a/src/plugins/platforms/wasm/qwasmbackingstore.h b/src/plugins/platforms/wasm/qwasmbackingstore.h
+--- a/src/plugins/platforms/wasm/qwasmbackingstore.h	2026-11-10 01:28:24.073839130 +0100
++++ b/src/plugins/platforms/wasm/qwasmbackingstore.h	2026-11-10 01:28:24.075328819 +0100
+@@ -27,6 +27,7 @@
+     void beginPaint(const QRegion &) override;
+     void flush(QWindow *window, const QRegion &region, const QPoint &offset) override;
+     void resize(const QSize &size, const QRegion &staticContents) override;
++    bool scroll(const QRegion &area, int dx, int dy) override;
+     QImage toImage() const override;
+     const QImage &getImageRef() const;
+ 
