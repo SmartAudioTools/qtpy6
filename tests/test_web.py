@@ -1662,3 +1662,40 @@ def test_tache_asyncio_peut_suspendre_pendant_une_autre_attente():
         assert asyncio.run(tache())
     finally:
         bloquant._pyodide_peut, bloquant._suspendus = peut, suspendus
+
+
+def molette_rafale(source: Path = SW.parent / "qtpy6web.js") -> dict[str, float]:
+    """``molette`` de qtpy6web.js (extraite du fichier) sur un conteneur dont la cible est dans une ombre, comme le canevas
+    de Qt ; 30 wheel de 3 px envoyés dans la même tâche (la molette haute résolution de Firefox sous Wayland) : combien en
+    reçoit la cible, et leur somme, deux images plus tard."""
+    import re
+
+    from selenium import webdriver
+
+    fonction = re.search(r"^function molette\(conteneur\) \{.*?^\}$", source.read_text(), re.S | re.M).group(0)
+    options = webdriver.FirefoxOptions()
+    options.add_argument("--headless")
+    navigateur = webdriver.Firefox(options=options)
+    try:
+        navigateur.get("data:text/html;charset=utf-8,<!doctype html><body>")
+        return navigateur.execute_async_script(fonction + """
+const fin = arguments[arguments.length - 1];
+const conteneur = document.body.appendChild(document.createElement("div"));
+const cible = conteneur.attachShadow({ mode: "open" }).appendChild(document.createElement("canvas"));
+molette(conteneur);
+const recu = { n: 0, somme: 0 };
+cible.addEventListener("wheel", e => { recu.n++; recu.somme += e.deltaY; });
+for (let i = 0; i < 30; i++)
+  cible.dispatchEvent(new WheelEvent("wheel", { deltaY: 3, deltaMode: 0, bubbles: true, composed: true, cancelable: true }));
+requestAnimationFrame(() => requestAnimationFrame(() => fin(recu)));
+""")
+    finally:
+        navigateur.quit()
+
+
+@pytest.mark.skipif(not FIREFOX, reason="Firefox et geckodriver requis")
+def test_molette_un_roulement_par_image():
+    """Des centaines de petits wheel par seconde (Firefox sous Wayland) : Qt n'en reçoit qu'un par image, leur somme. Un par
+    wheel saturait le thread de la page, file de 4,8 s, retard et inertie (SmartTeacher W525, 10/11/2026)."""
+    recu = molette_rafale()
+    assert recu == {"n": 1, "somme": 180}, recu

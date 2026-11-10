@@ -320,8 +320,22 @@ function compter(tailles, jumeaux, signaler) {
 // cran de Firefox (3 lignes) 18 px au lieu de 60. Chaque roulement sur le conteneur est donc rejoué sur la même cible
 // (le canevas, dans l'ombre de Qt) en pixels doublés : le défilement suit le doigt sur le pavé tactile comme une page web,
 // une ligne vaut 20 px comme sur le bureau. Un roulement en pages (rare) passe tel quel.
+// Un roulement par image, pas un par événement : Firefox sous Wayland livre la molette haute résolution en centaines de
+// petits wheel par seconde (658/s mesurés), Qt défilait et déplaçait son backing store pour chacun, le thread de la page
+// saturait et la file atteignait 4,8 s — retard puis inertie après la molette lâchée (SmartTeacher W525, 10/11/2026,
+// profil Gecko du professeur). Les deltas s'additionnent jusqu'à l'image suivante (requestAnimationFrame), rejoués en un
+// seul événement ; un changement de cible ou de touches rejoue d'abord le cumul en cours.
 function molette(conteneur) {
   const rejoues = new WeakSet();
+  let cumul = null;
+  const rejouer = () => {
+    if (!cumul) return;
+    const { cible, init } = cumul;
+    cumul = null;
+    const copie = new WheelEvent("wheel", init);
+    rejoues.add(copie);
+    cible.dispatchEvent(copie);
+  };
   addEventListener("wheel", e => {
     if (rejoues.has(e) || e.deltaMode === WheelEvent.DOM_DELTA_PAGE || !e.composedPath().includes(conteneur)) return;
     // Ctrl + molette (et le pincement du pavé tactile, que le navigateur envoie ainsi) : le zoom du navigateur, que Qt-WASM
@@ -329,12 +343,15 @@ function molette(conteneur) {
     // molette sur le lecteur de SmartTeacher (remarque d'un professeur, 06/11/2026) ; Ctrl + plus / moins passait déjà.
     if (e.ctrlKey) { e.stopImmediatePropagation(); return; }
     const k = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? 40 : 2;
-    const copie = new WheelEvent("wheel", { deltaX: e.deltaX * k, deltaY: e.deltaY * k, deltaMode: WheelEvent.DOM_DELTA_PIXEL,
-      clientX: e.clientX, clientY: e.clientY, screenX: e.screenX, screenY: e.screenY, buttons: e.buttons, ctrlKey: e.ctrlKey,
-      shiftKey: e.shiftKey, altKey: e.altKey, metaKey: e.metaKey, bubbles: true, composed: true, cancelable: true });
-    rejoues.add(copie);
+    const cible = e.composedPath()[0], touches = `${e.shiftKey}${e.altKey}${e.metaKey}${e.buttons}`;
     e.stopImmediatePropagation(); e.preventDefault();
-    e.composedPath()[0].dispatchEvent(copie);
+    if (cumul && (cumul.cible !== cible || cumul.touches !== touches)) rejouer();
+    const deja = cumul?.init ?? { deltaX: 0, deltaY: 0 };
+    if (!cumul) requestAnimationFrame(rejouer);
+    cumul = { cible, touches, init: { deltaX: deja.deltaX + e.deltaX * k, deltaY: deja.deltaY + e.deltaY * k,
+      deltaMode: WheelEvent.DOM_DELTA_PIXEL, clientX: e.clientX, clientY: e.clientY, screenX: e.screenX, screenY: e.screenY,
+      buttons: e.buttons, ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, altKey: e.altKey, metaKey: e.metaKey, bubbles: true,
+      composed: true, cancelable: true } };
   }, { capture: true, passive: false });
 }
 
