@@ -100,8 +100,20 @@ export function print(m) {
 const BOITE = "qtpy6.boite_noire:" + location.pathname, SEUIL_GEL = 3000, LIGNES = 400;
 const boite = { debut: Date.now(), vivant: Date.now(), qt: null, fin: null, agent: navigator.userAgent, lignes: [] };
 let boite_avant = null, boite_ouverte = false;
+// Une ligne identique à la précédente ne s'ajoute pas : la dernière compte ses répétitions. Une erreur répétée à chaque tour
+// de pompe (100 par seconde) chassait sinon en 4 s les 400 lignes, et avec elles la cause (B1, 4 boîtes du 06-09/11 : 400 fois
+// « pompe : Cannot read properties of undefined », la cause de la mort de Pyodide perdue).
+let derniere = null, repetitions = 0, depuis = "";
 function noter(m) {
-  boite.lignes.push(`${new Date().toLocaleTimeString("fr-FR")} ${m.length > 300 ? m.slice(0, 300) + "…" : m}`);
+  const h = new Date().toLocaleTimeString("fr-FR");
+  m = m.length > 300 ? m.slice(0, 300) + "…" : m;
+  if (m === derniere && boite.lignes.length) {
+    repetitions++;
+    boite.lignes[boite.lignes.length - 1] = `${h} ${m} (×${repetitions} depuis ${depuis})`;
+    return;
+  }
+  derniere = m; repetitions = 1; depuis = h;
+  boite.lignes.push(`${h} ${m}`);
   if (boite.lignes.length > LIGNES) boite.lignes.splice(0, boite.lignes.length - LIGNES);
 }
 function sceller() {
@@ -392,6 +404,8 @@ function pompe(tour, periode) {
 function pomper(tour, periode) {
   let encours = false;
   const tourner = () => {
+    // Pyodide mort (`mourir`) : plus aucun tour, chacun refaisait la même erreur 100 fois par seconde (B1, 09/11/2026).
+    if (mort) return clearInterval(intervalle);
     // Ni pendant une tâche où Qt a suspendu : entre la reprise (`ctrl.resume`) et la suite de sa pile, une pompe glissée
     // là (queueMicrotask de figer_les_evenements) la trouvait non promettante, d'où les refus en boucle (05/10/2026).
     if (encours || suspension.qtEnTache) return;
@@ -405,7 +419,27 @@ function pomper(tour, periode) {
     p.catch(e => print("pompe : " + (e.message || e))).finally(() => { encours = false; suspension.promettant = false; });
   };
   suspension.tourner = tourner;
-  setInterval(tourner, periode);
+  const intervalle = setInterval(tourner, periode);
+}
+
+// Pyodide fatalement mort (API.on_fatal, posé par `preparer`) : un module WebAssembly dans un état indéfini, que rien ne
+// relance. Pyodide écrit la cause dans la console seule (console.error) : elle va dans la boîte noire, la pompe s'arrête, et
+// la page le DIT au lieu de rester figée sans un mot (B1 : 4 élèves devant une page morte 1 à 3 min, 09/11/2026). Le texte
+// par défaut ne suppose rien de l'application ; `preparer({ mort })` le remplace.
+let mort = null, texte_mort = "L'application s'est arrêtée sur une erreur interne. Recharge la page (F5) pour reprendre.";
+function mourir(e) {
+  if (mort) return;
+  mort = e || true;
+  noter(`Pyodide mort (erreur fatale) : ${(e && e.message) || e}`);
+  for (const l of String((e && e.stack) || "").split("\n").slice(0, 12)) if (l.trim()) noter(`  ${l.trim()}`);
+  sceller();
+  const d = document.createElement("div");
+  d.id = "qtpy6-mort";
+  d.textContent = texte_mort;
+  Object.assign(d.style, { position: "fixed", inset: "0", zIndex: "2147483647", display: "flex", alignItems: "center",
+    justifyContent: "center", padding: "2em", textAlign: "center", font: "bold 1.4em sans-serif", color: "#fff",
+    background: "rgba(150, 0, 0, 0.88)" });
+  (document.fullscreenElement || document.body).appendChild(d);
 }
 
 // Le glisser rejoué. QWasmDrag attend un glisser HTML5 (dragstart…dragend) que le navigateur ne lance pas : sous un doigt,
@@ -521,8 +555,9 @@ function glisser_rejoue(conteneur) {
 }
 
 export async function preparer(conteneur, { indexURL, archives = [], roues = [], env = {}, sur_ligne, progres = () => {},
-                                            tailles = {}, jumeaux = [], module, boucles = true } = {}) {
+                                            tailles = {}, jumeaux = [], module, boucles = true, mort: texte } = {}) {
   if (sur_ligne) ecouter = sur_ligne;
+  if (texte) texte_mort = texte;
   const avance = avancement(progres);
   const { prelancer, retablir } = compter(tailles, ["pyodide.asm.wasm", "python_stdlib.zip", ...jumeaux], f => {
     avance.reel("octets", f);
@@ -541,6 +576,7 @@ export async function preparer(conteneur, { indexURL, archives = [], roues = [],
   if (boucles) boucles_qt();  // avant que Pyodide instancie son module
   const { loadPyodide } = await import(indexURL + "pyodide.mjs");
   const [py, ...donnees] = await Promise.all([loadPyodide({ indexURL, stdout: print, stderr: print }), ...zips]);
+  py._api.on_fatal = mourir;  // l'API privée de Pyodide (fatal_error l'appelle une fois, après console.error)
   if (boucles) { suspension.M = py._module; figer_les_evenements(py._module); }
   print(`Pyodide-Qt ${py.version} chargé${donnees.length ? " ; archives " + donnees.map(d => (d.byteLength / 1024) | 0).join(", ") + " Kio" : ""}`);
   avance.debut("archives");
