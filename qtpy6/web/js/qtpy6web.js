@@ -107,17 +107,30 @@ function noter(m) {
 function sceller() {
   try { localStorage.setItem(BOITE, JSON.stringify(boite)); } catch { /* stockage plein ou refusé : la boîte reste en mémoire */ }
 }
-function ouvrir_boite_noire() {
+// Un onglet caché ou une page mise en cache (pagehide puis pageshow persisted, retour arrière) ralentit ou fige ses
+// intervalles et les QTimer : ce n'est pas un gel. L'état caché est donc pris à l'ÉVÉNEMENT, pas au tic suivant (la page
+// est souvent figée avant lui, et le tic du retour voyait un onglet resté « visible » : 50 des 90 alertes des boîtes du
+// 06-09/11, jusqu'à 596 s, n'étaient que le temps passé ailleurs), et la boucle de Qt a SEUIL_GEL depuis le retour pour battre.
+export function ouvrir_boite_noire() {
   if (boite_ouverte) return;
   boite_ouverte = true;
   try { boite_avant = JSON.parse(localStorage.getItem(BOITE)); } catch { boite_avant = null; }
-  let tic = performance.now(), visible = document.visibilityState === "visible", qt_muet = false;
+  let tic = performance.now(), visible = document.visibilityState === "visible", qt_muet = false, retour = Date.now();
+  const absente = () => { visible = false; };
+  const revenue = () => { retour = Date.now(); };
+  document.addEventListener("visibilitychange", () => document.visibilityState === "visible" ? revenue() : absente());
+  window.addEventListener("pagehide", absente);
+  window.addEventListener("pageshow", e => {
+    if (!e.persisted) return;
+    absente(); revenue(); boite.fin = null;  // la page n'était pas quittée : elle revient du cache du navigateur
+    noter("page reprise du cache du navigateur");
+  });
   setInterval(() => {
     const t = performance.now(), ecart = t - tic, vu = document.visibilityState === "visible";
     tic = t;
-    if (ecart > SEUIL_GEL && vu && visible)  // un onglet caché ralentit ses intervalles : ce n'est pas un gel
+    if (ecart > SEUIL_GEL && vu && visible)
       noter(`gel de la page : ${(ecart / 1000).toFixed(1)} s sans main rendue`);
-    const muet = vu && boite.qt !== null && Date.now() - boite.qt > SEUIL_GEL;
+    const muet = vu && visible && boite.qt !== null && Date.now() - Math.max(boite.qt, retour) > SEUIL_GEL;
     if (muet && !qt_muet) {
       const s = suspension;
       noter(`la boucle de Qt ne tourne plus depuis ${((Date.now() - boite.qt) / 1000).toFixed(1)} s (page vivante ; ` +
