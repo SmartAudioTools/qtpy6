@@ -593,6 +593,11 @@ export async function preparer(conteneur, { indexURL, archives = [], roues = [],
   if (boucles) glisser_rejoue(conteneur);
   window.qtpy6Conteneur = conteneur;  // ce que qtpy6.web.pdf lit pour caler ses <div> sur les widgets
   window.qtpy6Js = import.meta.url;  // d'où qtpy6.web.pdf charge pdf.js quand l'archive ne l'a pas (assembler, exclure)
+  // Le zoom choisi dans ce navigateur (qtpy6.loupe.zoomer, qui recharge la page) : Qt ne le prend qu'au démarrage
+  try {
+    const z = parseFloat(localStorage.getItem("qtpy6|loupe"));
+    if (z > 0 && z !== 1 && !("QT_SCALE_FACTOR" in env)) env = { ...env, QT_SCALE_FACTOR: String(z) };
+  } catch { /* stockage interdit : pas de zoom */ }
   py.runPython(`import json, os, sys
 os.environ.update(json.loads(${JSON.stringify(JSON.stringify(env))}))
 sys.path[:0] = json.loads(${JSON.stringify(JSON.stringify(archives.map(a => a.dossier)))})`);
