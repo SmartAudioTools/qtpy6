@@ -31,7 +31,11 @@ const isoler = r => {
   return new Response(r.body, { status: r.status, statusText: r.statusText, headers: h });
 };
 
-self.addEventListener("install", () => self.skipWaiting());
+// skipWaiting à la PREMIÈRE installation seulement (rien à remplacer) : une version neuve, quand une ancienne est active,
+// attend que plus aucune page ne s'en serve. L'évincer de force, à la première visite qui suit un déploiement, rendait
+// l'ancienne redondante en plein chargement et Firefox coupait les téléchargements qu'elle servait (lecteur.zip.br) :
+// « The operation was aborted. » (SmartTeacher W524, 10/11/2026 ; essai apres_deploiement.py, ligne à 500 Kio/s).
+self.addEventListener("install", () => { if (!self.registration.active) self.skipWaiting(); });
 self.addEventListener("activate", e => e.waitUntil(Promise.all([self.clients.claim(),  // contrôler dès la première visite :
   // sans claim, les workers de cette visite-là échapperaient au cache, qui ne se remplirait qu'à la seconde
   caches.keys().then(cles => Promise.all(

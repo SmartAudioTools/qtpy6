@@ -244,7 +244,8 @@ async function en_jumeau(fetch_origine, adresse) {
 // dossier et ce qui est en dessous) : la visite suivante a, sans aucune requête, ce que la page lui a confié.
 //   const garder = service_worker("./sw.js?v=…", { cache: "mon_appli", pyodide: "./pyodide-qt/" });
 //   … une fois la page prête : garder(url => …)   (les adresses chargées, performance, que ce filtre retient)
-// `cache` : le nom de l'application, début du nom de ses caches (ses autres caches, « NOM?… », sont effacés à l'activation : changer
+// `cache` : le nom de l'application, début du nom de ses caches (ses autres caches, « NOM?… », sont effacés à l'activation, quand
+// plus aucune page ne se sert de la version précédente, jamais en plein chargement : changer
 // la requête du script, ?v=… à chaque déploiement, repart sur un cache neuf). `pyodide` : le Pyodide des workers
 // (Travailleur), dont sw.js sert aux workers neufs les fichiers bruts depuis l'entrée de leur jumeau. Enregistré sur un
 // navigateur qui n'en a pas (ou un contexte non sûr, http hors 127.0.0.1) : rien, et `garder` ne fait rien.
@@ -258,7 +259,10 @@ export function service_worker(script, { cache = "qtpy6", pyodide, isoler = fals
   url.searchParams.set("cache", cache);
   if (pyodide) url.searchParams.set("p", new URL(pyodide, location.href).href);
   if (isoler) url.searchParams.set("isoler", "1");
-  sw.register(url).catch(erreur);
+  // la promesse de register() se résout une fois la version neuve en « installing » (ou sans elle, script inchangé) :
+  // garder l'attend, sinon, à une mise à jour, sw.ready (résolu par l'ancienne) lui ferait remplir le cache de l'ancienne
+  const inscrit = sw.register(url);
+  inscrit.catch(erreur);
   if (isoler) {
     const cle = "qtpy6-isoler", memoire = (f) => { try { return f(sessionStorage); } catch { return null; } };
     if (self.crossOriginIsolated) memoire(s => s.removeItem(cle));
@@ -270,7 +274,8 @@ export function service_worker(script, { cache = "qtpy6", pyodide, isoler = fals
   }
   return (filtre = () => true) => {
     const urls = performance.getEntriesByType("resource").map(r => r.name).filter(filtre);
-    sw.ready.then(r => r.active?.postMessage(urls)).catch(erreur);
+    // à la version qui s'installe ou attend (sw.js : elle n'évince plus l'active) : c'est son cache que la visite suivante lira
+    inscrit.then(r => (r.installing || r.waiting || r.active)?.postMessage(urls)).catch(erreur);
   };
 }
 

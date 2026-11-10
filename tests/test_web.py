@@ -1318,8 +1318,8 @@ SW = RACINE / "qtpy6" / "web" / "js" / "sw.js"  # le service worker servi à exe
 
 def visites_du_service_worker(moteur, sw=SW):
     """L'exemple sous ``?auto&sw=…`` (la page enregistre ``sw`` par ``service_worker``, le worker est sur Pyodide-Qt) : visite 1,
-    le cache rempli par ``garder``, visite 2 rechargée et servie par lui, visite 3 sous une autre version (le cache de la
-    première effacé). Rend, par visite, ce qu'on en dit ; une visite ratée finit par « KO »."""
+    le cache rempli par ``garder``, visite 2 rechargée et servie par lui, visite 3 sous une autre version (en attente,
+    son cache rempli ; Firefox : l'onglet fermé, elle s'active et le cache de la première est effacé). Rend, par visite, ce qu'on en dit ; une visite ratée finit par « KO »."""
     import functools
     import http.server
     import threading
@@ -1391,6 +1391,27 @@ def visites_du_service_worker(moteur, sw=SW):
         dit.append(visite("2 bis, cache vide"))
         aller(url + "2")
         dit.append(visite(3))
+        # la version 2 attend que plus aucune page ne se serve de la 1 (sw.js : l'évincer en plein chargement coupait ses
+        # téléchargements, SmartTeacher W524) ; garder() a rempli SON cache
+        attendre(lambda: any("v=2" in k and n > 0 for k, n in caches().items()), 60)
+        attente = js("const r = await navigator.serviceWorker.getRegistration(); return [r.active?.scriptURL, r.waiting?.scriptURL]")
+        ok = "v=1" in (attente[0] or "") and "v=2" in (attente[1] or "") and any("v=2" in k for k in caches())
+        dit.append(f"version 2 en attente, son cache rempli : {attente}" + ("" if ok else " : KO"))
+        if moteur == "chromium":
+            return dit
+        # l'onglet fermé (un autre ouvert d'abord : la session Selenium en garde un), elle s'active et efface le cache de la 1
+        ancien = navigateur.current_window_handle
+        navigateur.switch_to.new_window("tab")
+        navigateur.switch_to.window(ancien)
+        navigateur.close()
+        navigateur.switch_to.window(navigateur.window_handles[0])
+        # une page de la même origine HORS de la portée du service worker (le 404 du serveur, à la racine) : on y attend
+        # l'activation, sans qu'une page de /exemple/ ouverte trop tôt ne retienne la 1
+        navigateur.get(url.split("/exemple/")[0] + "/hors_portee_w524")
+        attendre(lambda: "v=2" in (js("const r = await navigator.serviceWorker.getRegistration('/exemple/');"
+                                       " return r?.active?.scriptURL") or ""), 30)
+        navigateur.get(url + "2")
+        dit.append(visite("3 bis, onglet fermé puis rouvert"))
         attendre(lambda: len(caches()) == 1, 30)
         restes = caches()
         dit.append(f"caches après la version 2 : {restes}" + ("" if len(restes) == 1 and "v=2" in list(restes)[0] else " : KO"))
