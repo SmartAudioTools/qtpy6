@@ -61,3 +61,12 @@ def test_page_morte_cachee_n_est_pas_tuee(scenarios: dict) -> None:
 
 def test_page_morte_visible_reste_tuee(scenarios: dict) -> None:
     assert "page tuée sans être quittée" in scenarios["morte_visible"]["precedente"]
+
+
+def test_page_figee_puis_liberee_n_est_pas_tuee(scenarios: dict) -> None:
+    precedente = scenarios["morte_figee"]["precedente"]
+    assert "figée puis libérée par le navigateur" in precedente and "tuée" not in precedente, precedente
+
+
+def test_memoire_dans_l_en_tete(scenarios: dict) -> None:
+    assert "mémoire JS : 50 Mo (au plus 50) sur 4096 Mo" in scenarios["morte_visible"]["texte"]

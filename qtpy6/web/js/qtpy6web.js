@@ -98,8 +98,8 @@ export function print(m) {
 // suspensions de `boucles_qt`. La visite suivante de la même page la lit (`boite_noire_precedente`) : `fin` nul et
 // `vivant` ancien disent une page tuée sans pagehide, un fil bloqué jusqu'au bout. L'application décide où l'envoyer.
 const BOITE = "qtpy6.boite_noire:" + location.pathname, SEUIL_GEL = 3000, LIGNES = 400;
-const boite = { debut: Date.now(), vivant: Date.now(), qt: null, fin: null, cachee: false, agent: navigator.userAgent,
-                lignes: [] };
+const boite = { debut: Date.now(), vivant: Date.now(), qt: null, fin: null, cachee: false, figee: false, memoire: null,
+                agent: navigator.userAgent, lignes: [] };
 let boite_avant = null, boite_ouverte = false;
 // Une ligne identique à la précédente ne s'ajoute pas : la dernière compte ses répétitions. Une erreur répétée à chaque tour
 // de pompe (100 par seconde) chassait sinon en 4 s les 400 lignes, et avec elles la cause (B1, 4 boîtes du 06-09/11 : 400 fois
@@ -135,7 +135,8 @@ export function ouvrir_boite_noire() {
   window.addEventListener("pagehide", absente);
   window.addEventListener("pageshow", e => {
     if (!e.persisted) return;
-    absente(); revenue(); boite.fin = null; boite.cachee = document.visibilityState !== "visible";  // revenue du cache
+    absente(); revenue(); boite.fin = null; boite.figee = false;  // revenue du cache
+    boite.cachee = document.visibilityState !== "visible";
     noter("page reprise du cache du navigateur");
   });
   setInterval(() => {
@@ -151,6 +152,7 @@ export function ouvrir_boite_noire() {
     } else if (!muet && qt_muet) noter("la boucle de Qt tourne de nouveau");
     qt_muet = muet; visible = vu;
     boite.vivant = Date.now();
+    memoire();
     sceller();
   }, 1000);
   window.addEventListener("error", e => noter(`erreur JS : ${e.message} (${e.filename}:${e.lineno})`));
@@ -163,6 +165,28 @@ export function ouvrir_boite_noire() {
     noter(`onglet ${boite.cachee ? "caché" : "montré"}`);
     sceller();
   });
+  // De quoi déboguer plus finement (demande de l'utilisateur, 10/11/2026) : la page figée puis libérée par le navigateur
+  // (Page Lifecycle, Chrome/Edge/Android : « freeze », « resume », `wasDiscarded` au rechargement qui suit) prouve ce que
+  // `cachee` ne fait que déduire ; le réseau perdu explique un envoi raté ; une tâche longue (Chrome/Edge) date un gel ; la
+  // mémoire (Chrome/Edge) dit une page tuée faute de place.
+  if (document.wasDiscarded) noter("page rechargée après avoir été libérée par le navigateur (wasDiscarded)");
+  document.addEventListener("freeze", () => { boite.figee = true; noter("page figée par le navigateur"); sceller(); });
+  document.addEventListener("resume", () => { boite.figee = false; noter("page reprise par le navigateur"); sceller(); });
+  window.addEventListener("offline", () => noter("réseau perdu"));
+  window.addEventListener("online", () => noter("réseau revenu"));
+  try {
+    new PerformanceObserver(l => { for (const e of l.getEntries()) if (e.duration > 1000)
+      noter(`tâche longue : ${(e.duration / 1000).toFixed(1)} s`); }).observe({ type: "longtask", buffered: true });
+  } catch { /* Firefox, Safari : pas de longtask */ }
+  const memoire = () => {
+    const m = performance.memory;
+    if (!m) return;
+    const mo = x => Math.round(x / 1048576);
+    boite.memoire = { utilisee: mo(m.usedJSHeapSize), max: Math.max(mo(m.usedJSHeapSize), boite.memoire?.max ?? 0),
+                      limite: mo(m.jsHeapSizeLimit) };
+  };
+  memoire();
+  if (navigator.onLine === false) noter("page ouverte sans réseau");
   document.addEventListener("fullscreenchange", () => noter(document.fullscreenElement ? "plein écran" : "plein écran quitté"));
   window.addEventListener("blur", () => noter("page sans le focus"));
   window.addEventListener("focus", () => noter("page avec le focus"));
@@ -182,9 +206,12 @@ export function boite_noire_precedente() {
   const h = t => t ? new Date(t).toLocaleString("fr-FR") : "?";
   return [`visite du ${h(b.debut)}, dernier signe de vie ${h(b.vivant)}, ` +
           (b.fin ? `page quittée ${h(b.fin)}`
+                 : b.figee ? "page figée puis libérée par le navigateur (pas un gel)"
                  : b.cachee ? "page fermée ou libérée par le navigateur pendant qu'elle était cachée (pas un gel)"
                  : "page tuée sans être quittée (fil bloqué, onglet fermé de force ou plantage)"),
-          `dernier battement de Qt : ${h(b.qt)}`, `navigateur : ${b.agent}`, "", ...b.lignes].join("\n");
+          `dernier battement de Qt : ${h(b.qt)}`, `navigateur : ${b.agent}`,
+          ...(b.memoire ? [`mémoire JS : ${b.memoire.utilisee} Mo (au plus ${b.memoire.max}) sur ${b.memoire.limite} Mo`] : []),
+          "", ...b.lignes].join("\n");
 }
 
 function telecharger(url) {

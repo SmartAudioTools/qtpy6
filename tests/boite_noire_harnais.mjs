@@ -14,7 +14,7 @@ Object.assign(globalThis, {
   window: { addEventListener: ecouter("window") },
   setInterval: f => { intervalle = f; return 1; },
 });
-Object.defineProperty(globalThis, "performance", { value: { now: () => maintenant }, configurable: true });
+Object.defineProperty(globalThis, "performance", { value: { now: () => maintenant, memory: { usedJSHeapSize: 50 * 1048576, jsHeapSizeLimit: 4096 * 1048576 } }, configurable: true });
 Date.now = () => maintenant;
 const m = await import(chemin);
 m.ouvrir_boite_noire();
@@ -49,8 +49,11 @@ const visite_suivante = async (nom, f) => {
   f(); const laissee = stockage.get("qtpy6.boite_noire:/page.html");
   const n = await import(chemin + "?" + nom);
   stockage.set("qtpy6.boite_noire:/page.html", laissee); n.ouvrir_boite_noire();
-  resultat[nom] = { precedente: n.boite_noire_precedente().split("\n")[0] };
+  const texte = n.boite_noire_precedente();
+  resultat[nom] = { precedente: texte.split("\n")[0], texte };
 };
 await visite_suivante("morte_cachee", () => { montrer(false); avancer(20, { tics: false }); });
 await visite_suivante("morte_visible", () => { montrer(true); avancer(3); });
+// Figée par le navigateur (Page Lifecycle « freeze »), puis libérée sans autre événement.
+await visite_suivante("morte_figee", () => { montrer(true); emettre("document", "freeze"); avancer(5, { tics: false }); });
 console.log(JSON.stringify(resultat));
