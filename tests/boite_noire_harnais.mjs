@@ -43,4 +43,14 @@ scenario("cache_sans_visibilite", () => {
 scenario("fil_bloque", () => { avancer(10, { qt: false, tics: false }); avancer(5); });
 // La boucle de Qt arrêtée seule, la page tique toujours : 10 s sans battement, puis Qt repart.
 scenario("qt_arretee", () => { avancer(10, { qt: false }); avancer(2); });
+// Visite suivante (B4) : la boîte laissée par une page morte sans pagehide, relue par un module neuf. Cachée : libérée par
+// le navigateur pendant qu'elle était cachée (onglet caché, puis plus rien) ; visible : vraiment tuée (fil bloqué).
+const visite_suivante = async (nom, f) => {
+  f(); const laissee = stockage.get("qtpy6.boite_noire:/page.html");
+  const n = await import(chemin + "?" + nom);
+  stockage.set("qtpy6.boite_noire:/page.html", laissee); n.ouvrir_boite_noire();
+  resultat[nom] = { precedente: n.boite_noire_precedente().split("\n")[0] };
+};
+await visite_suivante("morte_cachee", () => { montrer(false); avancer(20, { tics: false }); });
+await visite_suivante("morte_visible", () => { montrer(true); avancer(3); });
 console.log(JSON.stringify(resultat));

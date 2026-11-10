@@ -52,3 +52,12 @@ def test_un_fil_bloque_reste_un_gel(scenarios: dict) -> None:
 def test_une_boucle_de_qt_arretee_reste_notee(scenarios: dict) -> None:
     lignes = scenarios["qt_arretee"]["lignes"]
     assert alertes(lignes) == [l for l in lignes if l.startswith("la boucle de Qt ne tourne plus depuis 4.0 s")] != [], lignes
+
+
+def test_page_morte_cachee_n_est_pas_tuee(scenarios: dict) -> None:
+    precedente = scenarios["morte_cachee"]["precedente"]
+    assert "pendant qu'elle était cachée" in precedente and "tuée" not in precedente, precedente
+
+
+def test_page_morte_visible_reste_tuee(scenarios: dict) -> None:
+    assert "page tuée sans être quittée" in scenarios["morte_visible"]["precedente"]

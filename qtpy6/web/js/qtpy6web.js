@@ -98,7 +98,8 @@ export function print(m) {
 // suspensions de `boucles_qt`. La visite suivante de la même page la lit (`boite_noire_precedente`) : `fin` nul et
 // `vivant` ancien disent une page tuée sans pagehide, un fil bloqué jusqu'au bout. L'application décide où l'envoyer.
 const BOITE = "qtpy6.boite_noire:" + location.pathname, SEUIL_GEL = 3000, LIGNES = 400;
-const boite = { debut: Date.now(), vivant: Date.now(), qt: null, fin: null, agent: navigator.userAgent, lignes: [] };
+const boite = { debut: Date.now(), vivant: Date.now(), qt: null, fin: null, cachee: false, agent: navigator.userAgent,
+                lignes: [] };
 let boite_avant = null, boite_ouverte = false;
 // Une ligne identique à la précédente ne s'ajoute pas : la dernière compte ses répétitions. Une erreur répétée à chaque tour
 // de pompe (100 par seconde) chassait sinon en 4 s les 400 lignes, et avec elles la cause (B1, 4 boîtes du 06-09/11 : 400 fois
@@ -134,7 +135,7 @@ export function ouvrir_boite_noire() {
   window.addEventListener("pagehide", absente);
   window.addEventListener("pageshow", e => {
     if (!e.persisted) return;
-    absente(); revenue(); boite.fin = null;  // la page n'était pas quittée : elle revient du cache du navigateur
+    absente(); revenue(); boite.fin = null; boite.cachee = document.visibilityState !== "visible";  // revenue du cache
     noter("page reprise du cache du navigateur");
   });
   setInterval(() => {
@@ -154,7 +155,14 @@ export function ouvrir_boite_noire() {
   }, 1000);
   window.addEventListener("error", e => noter(`erreur JS : ${e.message} (${e.filename}:${e.lineno})`));
   window.addEventListener("unhandledrejection", e => noter(`promesse rejetée : ${e.reason}`));
-  document.addEventListener("visibilitychange", () => noter(`onglet ${document.visibilityState === "visible" ? "montré" : "caché"}`));
+  // `cachee` scellé à l'événement : un onglet caché peut être figé puis libéré par le navigateur (Chrome, Edge, Android)
+  // sans pagehide ; la visite suivante ne doit pas le lire comme une page tuée (B4, 3 boîtes du 06-09/11/2026 : Qt battait
+  // jusqu'à la dernière seconde, morte 0 à 40 s après « onglet caché »).
+  document.addEventListener("visibilitychange", () => {
+    boite.cachee = document.visibilityState !== "visible";
+    noter(`onglet ${boite.cachee ? "caché" : "montré"}`);
+    sceller();
+  });
   document.addEventListener("fullscreenchange", () => noter(document.fullscreenElement ? "plein écran" : "plein écran quitté"));
   window.addEventListener("blur", () => noter("page sans le focus"));
   window.addEventListener("focus", () => noter("page avec le focus"));
@@ -166,13 +174,16 @@ export function ouvrir_boite_noire() {
 export function battement_qt() { boite.qt = Date.now(); }
 
 // La boîte de la visite précédente de cette page, en texte (null s'il n'y en a pas) : en tête, si la page a été quittée
-// proprement (pagehide) ou tuée, fil bloqué, et la dernière seconde où elle vivait.
+// proprement (pagehide), fermée ou libérée pendant qu'elle était cachée, ou tuée, fil bloqué, et la dernière seconde où
+// elle vivait.
 export function boite_noire_precedente() {
   const b = boite_avant;
   if (!b || !Array.isArray(b.lignes)) return null;
   const h = t => t ? new Date(t).toLocaleString("fr-FR") : "?";
   return [`visite du ${h(b.debut)}, dernier signe de vie ${h(b.vivant)}, ` +
-          (b.fin ? `page quittée ${h(b.fin)}` : "page tuée sans être quittée (fil bloqué, onglet fermé de force ou plantage)"),
+          (b.fin ? `page quittée ${h(b.fin)}`
+                 : b.cachee ? "page fermée ou libérée par le navigateur pendant qu'elle était cachée (pas un gel)"
+                 : "page tuée sans être quittée (fil bloqué, onglet fermé de force ou plantage)"),
           `dernier battement de Qt : ${h(b.qt)}`, `navigateur : ${b.agent}`, "", ...b.lignes].join("\n");
 }
 
