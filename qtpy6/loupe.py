@@ -16,7 +16,7 @@ import os
 import sys
 
 CLE = "qtpy6|loupe"  # la place du facteur dans le navigateur
-PALIERS = (1.0, 1.15, 1.3, 1.5)
+PLAGE, CRAN = (1.0, 1.5), 0.05  # le facteur se choisit dans PLAGE, de CRAN en CRAN (un curseur)
 
 
 def facteur() -> float:
@@ -25,12 +25,6 @@ def facteur() -> float:
         return float(os.environ.get("QT_SCALE_FACTOR") or 1)
     except ValueError:
         return 1.0
-
-
-def suivant() -> float:
-    """Le palier qui suit le facteur en cours, le premier après le dernier (un seul bouton qui fait le tour)."""
-    f = facteur()
-    return next((p for p in PALIERS if p > f + 1e-6), PALIERS[0])
 
 
 def choisi() -> bool:
