@@ -4,7 +4,7 @@
 // Servi depuis le dossier de la page (qtpy6.web.construire.deposer l'y met) : un service worker ne contrôle que son dossier
 // et ce qui est en dessous.
 // La page envoie, une fois prête, la liste des adresses à garder (postMessage, `garder`) : le service worker les relit dans le
-// cache HTTP (« force-cache » : sans réseau, la page vient de les télécharger) et les range. Un cache par requête
+// cache HTTP, revalidés (« no-cache » : 304 sans corps quand la page vient de les télécharger) et les range. Un cache par requête
 // d'enregistrement (?v=… de la page, cache=… : le nom de l'application, p=… : le Pyodide des workers) ; à l'activation, les
 // caches du même nom d'application et d'une autre requête sont effacés. Le Pyodide des workers (p=…, passé à
 // l'enregistrement car le service worker ne lit pas les constantes de la page) : un worker neuf demande les fichiers BRUTS
@@ -44,8 +44,13 @@ self.addEventListener("activate", e => e.waitUntil(Promise.all([self.clients.cla
 // l'en-tête que qtpy6web.js reconnaît (DECOMPRESSE) : sinon la page le décompresserait à chaque ouverture (0,15 à 0,3 s pour le moteur).
 self.addEventListener("message", e => e.waitUntil(caches.open(CACHE).then(cache => Promise.all(e.data.map(async url => {
   if (await cache.match(url)) return;
-  let reponse = await fetch(url, { cache: "force-cache" });
-  if (!reponse.ok) return;
+  // « no-cache » : revalidé (ETag, 304 sans corps si le cache HTTP est à jour), jamais « force-cache ». La version qui
+  // s'installe reçoit la liste pendant que l'ancienne sert la page depuis SON cache : le cache HTTP peut alors tenir un
+  // fichier d'une version antérieure (même adresse, ex. pyside_agrege.so d'un Qt republié), que force-cache rangeait
+  // pour toute la version neuve (SmartTeacher W525, 10/11/2026 : l'ancien Qt servi indéfiniment après le déploiement).
+  // Hors ligne, la revalidation échoue : rien n'est rangé pour cette adresse (une visite en ligne le fera), les autres si
+  let reponse = await fetch(url, { cache: "no-cache" }).catch(() => undefined);
+  if (!reponse?.ok) return;
   const nom = new URL(url).pathname;
   const format = { br: "brotli", gz: "gzip" }[nom.split(".").pop()];
   if (format)

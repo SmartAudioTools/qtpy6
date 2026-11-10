@@ -1433,6 +1433,104 @@ def test_service_worker(moteur):
     assert not any(l.endswith("KO") for l in dit), "\n".join(dit)
 
 
+def fichier_republie(sw: Path = SW) -> dict[str, str | None]:
+    """Un fichier republié à la même adresse (pyside_agrege.so d'un Qt neuf) puis la page redéployée (``?v=2``) : ce que la
+    version 2 range dans son cache, et ce que reçoit la page une fois la 2 active. Page minimale, sans Pyodide (~6 s) : elle
+    enregistre ``sw`` et confie la liste à la version qui s'installe, comme ``service_worker`` de qtpy6web.js ; le serveur
+    sert le fichier avec ETag et max-age=0 (le max-age de 600 s de GitHub Pages, expiré)."""
+    import functools
+    import http.server
+    import threading
+
+    from selenium import webdriver
+
+    etat = {"fichier": "A"}
+    page = b"""<!doctype html><meta charset=utf-8><script type=module>
+const inscrit = navigator.serviceWorker.register("sw.js?v=" + new URLSearchParams(location.search).get("v"));
+window.recu = await (await fetch("fichier.bin")).text();
+await inscrit.then(r => (r.installing || r.waiting || r.active)?.postMessage([new URL("fichier.bin", location.href).href]));
+window.fini = true;
+</script>"""
+
+    class Gestionnaire(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *_):
+            pass
+
+        def do_GET(self):
+            chemin = self.path.split("?")[0]
+            if chemin == "/app/fichier.bin" and self.headers.get("If-None-Match") == f'"{etat["fichier"]}"':
+                self.send_response(304)
+                self.end_headers()
+                return
+            corps, type_ = {"/app/sw.js": (Path(sw).read_bytes(), "text/javascript"),
+                            "/app/fichier.bin": (etat["fichier"].encode(), "application/octet-stream"),
+                            "/app/index.html": (page, "text/html")}.get(chemin, (b"", "text/plain"))
+            self.send_response(200 if corps else 404)
+            self.send_header("Content-Type", type_)
+            self.send_header("Content-Length", str(len(corps)))
+            self.send_header("Cache-Control", "max-age=0")
+            if chemin == "/app/fichier.bin":
+                self.send_header("ETag", f'"{etat["fichier"]}"')
+            self.end_headers()
+            self.wfile.write(corps)
+
+    def attendre(condition, secondes):
+        limite = time.time() + secondes
+        while time.time() < limite:
+            if condition():
+                return True
+            time.sleep(0.2)
+        return False
+
+    def cache_v2():
+        return navigateur.execute_script(
+            "return (async () => { for (const k of await caches.keys()) if (k.endsWith('v=2')) {"
+            " const m = await (await caches.open(k)).match(new URL('fichier.bin', location.href).href);"
+            " return m ? await m.text() : null; } })()")
+
+    def visite(v):
+        navigateur.get(base + v)
+        attendre(lambda: navigateur.execute_script("return window.fini"), 30)
+        return navigateur.execute_script("return window.recu")
+
+    serveur = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Gestionnaire)
+    threading.Thread(target=serveur.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{serveur.server_port}/app/index.html?v="
+    options = webdriver.FirefoxOptions()
+    options.add_argument("--headless")
+    navigateur = webdriver.Firefox(options=options)
+    try:
+        visite("1")
+        visite("1")  # contrôlée par la 1, servie par son cache
+        etat["fichier"] = "B"
+        visite("2")  # servie par la 1 (fichier A de son cache) ; la 2 s'installe et reçoit la liste
+        attendre(cache_v2, 15)
+        rangé = cache_v2()
+        # plus aucune page ne se sert de la 1 : la 2 s'active. L'onglet fermé (le cache de pages de Firefox le garderait
+        # client), puis une page de la même origine HORS de la portée (/app/), comme test_service_worker
+        ancien = navigateur.current_window_handle
+        navigateur.switch_to.new_window("tab")
+        navigateur.switch_to.window(ancien)
+        navigateur.close()
+        navigateur.switch_to.window(navigateur.window_handles[0])
+        navigateur.get(base.split("/app/")[0] + "/hors_portee")
+        attendre(lambda: "v=2" in (navigateur.execute_script(
+            "return (async () => (await navigator.serviceWorker.getRegistration('/app/'))?.active?.scriptURL)()") or ""), 30)
+        return {"rangé par la 2": rangé, "reçu, la 2 active": visite("2")}
+    finally:
+        navigateur.quit()
+        serveur.shutdown()
+
+
+@pytest.mark.skipif(not FIREFOX, reason="Firefox et geckodriver requis")
+def test_service_worker_fichier_republie():
+    """Un fichier de l'hôte republié à la même adresse (Qt neuf) atteint la page après son redéploiement. Avec « force-cache »
+    dans sw.js, la version 2 rangeait l'ancien fichier depuis le cache HTTP (la page, servie par la 1, ne l'avait pas
+    retéléchargé) et le servait pour toute sa durée : l'ancien Qt chez l'utilisateur (SmartTeacher W525, 10/11/2026)."""
+    dit = fichier_republie()
+    assert dit == {"rangé par la 2": "B", "reçu, la 2 active": "B"}, dit
+
+
 
 _GLISSER = """
 import functools, http.server, sys, threading, time
