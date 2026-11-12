@@ -366,7 +366,7 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
     (section W566). Essai : `test_serveur_open_files_sans_so_reuseaddr`, puis sonde Firefox sur `spe.py` (pas de
     rapporteur), puis le professeur dans son Firefox.
     - **FAIT, W566, 12/11 19:10, mesuré (sonde Firefox)** : `installer()` pose les deux constantes, `setsockopt` tient
-      les options de liaison pour sans objet ; plus de rapporteur à l'ouverture de spe.py. Reste : vu par le professeur.
+      les options de liaison pour sans objet ; plus de rapporteur à l'ouverture de spe.py. **Vu par le professeur, 19:56** : son rapporteur ne portait que l'erreur de l'explorateur (item 10), sans SO_REUSEADDR.
       Note `notes/2026-11-12 - socket SO_REUSEADDR dans la page (W566).md`.
 20. **qtpy6 comme `qtpy` dans SmartPythonEditor natif** (reste de W559). **FAIT, W567, 12/11** : `.pth` paresseux du
     venv (`python -m qtpy6._qtpy` → `qtpy6_qtpy.pth`, qtpy6 chargé au premier `import qtpy` seulement), aucune ligne
