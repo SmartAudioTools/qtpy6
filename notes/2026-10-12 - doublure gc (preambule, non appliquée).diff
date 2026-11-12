@@ -1,8 +1,39 @@
+diff --git a/qtpy6/web/__init__.py b/qtpy6/web/__init__.py
+index 01013c6..d2d73a6 100644
+--- a/qtpy6/web/__init__.py
++++ b/qtpy6/web/__init__.py
+@@ -107,21 +107,15 @@ def _ramasser(app):
+     un widget sans parent (un enfant qui garde son widget, une lambda branchée sur un signal), le widget est
+     détruit sous les pieds de Qt, qui plante (segmentation fault, mesuré sur les tests de SmartTeacher le 01/10/2026).
+     Ici, une minuterie regarde toutes les demi-secondes les compteurs du ramasse-miettes, et ramasse la génération qu'il
+-    aurait ramassée lui-même : le même travail, à un moment où aucun appel de Qt n'est en cours."""
+-    import gc  # noqa: PLC0415
+-
++    aurait ramassée lui-même : le même travail, à un moment où aucun appel de Qt n'est en cours. Compteurs, seuils et
++    doublure de ``gc.enable`` : ``ramasse_miettes``, partagé avec le Worker (``preambule._doubler_gc``)."""
+     from qtpy6.QtCore import QTimer  # noqa: PLC0415
+ 
+-    gc.disable()
+-    seuils = gc.get_threshold()
+-
+-    def passer():
+-        n0, n1, n2 = gc.get_count()
+-        if n0 > seuils[0]:
+-            gc.collect(2 if n2 > seuils[2] else 1 if n1 > seuils[1] else 0)
++    from . import ramasse_miettes  # noqa: PLC0415
+ 
++    ramasse_miettes.couper()
+     minuterie = QTimer(app)
+-    minuterie.timeout.connect(passer)
++    minuterie.timeout.connect(ramasse_miettes.passer)
+     minuterie.start(500)
+ 
+ 
 diff --git a/qtpy6/web/preambule.py b/qtpy6/web/preambule.py
-index 6266cc5..37f7407 100644
+index 6266cc5..864aa54 100644
 --- a/qtpy6/web/preambule.py
 +++ b/qtpy6/web/preambule.py
-@@ -88,6 +88,33 @@ def _doubler_sleep() -> None:
+@@ -88,6 +88,24 @@ def _doubler_sleep() -> None:
      time.sleep = sleep_
  
  
@@ -11,32 +42,23 @@ index 6266cc5..37f7407 100644
 +    dès que des piles JSPI se sont entrelacées (fils émulés, ``time.sleep``) ; ``gc.collect()``, passe complète, jamais
 +    (12/10/2026 : ``gc.set_threshold(1, 1, 1)`` dans le noyau meurt à la première allocation, ``gc.collect()`` après
 +    chaque pas passe ; Pyodide nu, sans piles entrelacées, passe les deux). Le GC automatique reste donc coupé, et une
-+    passe complète a lieu toutes les ``periode_s`` secondes si plus de ``seuil`` objets sont nés depuis la dernière.
-+    ``gc.enable``/``disable``/``isenabled`` ne règlent plus que ces passes (parso réactive le GC sans condition)."""
-+    import gc  # noqa: PLC0415
++    passe complète a lieu toutes les ``periode_s`` secondes si plus de ``seuil`` objets sont nés depuis la dernière
++    (``ramasse_miettes``, le même module que la page)."""
++    from qtpy6.web import ramasse_miettes  # noqa: PLC0415
 +
-+    actif = [gc.isenabled()]
-+    gc.disable()
-+
-+    def enable() -> None:
-+        actif[0] = True
-+
-+    def disable() -> None:
-+        actif[0] = False
++    ramasse_miettes.couper()
 +
 +    def passe() -> None:
-+        if actif[0] and gc.get_count()[0] > seuil:
-+            gc.collect()
++        ramasse_miettes.passer(complete=True, seuil=seuil)
 +        boucle.call_later(periode_s, passe)
 +
-+    gc.enable, gc.disable, gc.isenabled = enable, disable, lambda: actif[0]
 +    boucle.call_later(periode_s, passe)
 +
 +
  def _poster(destination: Any, message: dict[str, Any]) -> None:
      """Dans le Worker, la seule destination est la page : ``destination`` n'est pas lue."""
      import js  # noqa: PLC0415
-@@ -156,6 +183,7 @@ def installer(dossier_web: str, boucle: asyncio.AbstractEventLoop | None = None)
+@@ -156,6 +174,7 @@ def installer(dossier_web: str, boucle: asyncio.AbstractEventLoop | None = None)
      boucle = boucle or asyncio.get_event_loop()
      threading_web.partager_boucle(boucle)  # les boucles qu'ipykernel crée par fil
      _garde_vie(boucle)
@@ -44,3 +66,71 @@ index 6266cc5..37f7407 100644
      _doubler_sleep()
      _completer_site()
      js.zmq_pret(create_proxy(recevoir_page))  # la page a pu écrire avant : travailleur.js vide ce qu'il a gardé
+diff --git a/qtpy6/web/ramasse_miettes.py b/qtpy6/web/ramasse_miettes.py
+new file mode 100644
+index 0000000..996a305
+--- /dev/null
++++ b/qtpy6/web/ramasse_miettes.py
+@@ -0,0 +1,49 @@
++"""Le ramasse-miettes de Python ne passe plus au hasard d'une allocation, mais quand l'hôte le décide : entre deux
++événements de Qt dans l'application (``qtpy6.web._ramasser``, toutes les plates-formes), au réveil d'une minuterie de la
++boucle asyncio dans le Worker de ``ProcessusWeb`` (``preambule._doubler_gc``). Python pur, sans Qt ni ``js`` : le même
++module des deux côtés (copié dans le Worker, ``travailleur._FICHIERS_WORKER``).
++
++    couper()                 GC automatique coupé ; ``gc.enable``/``disable``/``isenabled`` ne règlent plus que les
++                             passes de ``passer`` (parso fait ``gc.enable()`` dans un ``finally`` : sans la doublure, il
++                             rallume le GC automatique)
++    passer(complete, seuil)  une passe si le GC est « actif » et que les compteurs l'auraient déclenchée"""
++
++from __future__ import annotations
++
++import gc
++
++_actif = [True]
++_seuils = gc.get_threshold()
++_vrais = (gc.enable, gc.disable, gc.isenabled)
++
++
++def _enable() -> None:
++    _actif[0] = True
++
++
++def _disable() -> None:
++    _actif[0] = False
++
++
++def _isenabled() -> bool:
++    return _actif[0]
++
++
++def couper() -> None:
++    """Idempotent : un second appel (page puis Worker dans un même processus de test) ne double pas la doublure."""
++    if gc.isenabled is not _isenabled:
++        _actif[0] = _vrais[2]()
++        gc.enable, gc.disable, gc.isenabled = _enable, _disable, _isenabled
++    _vrais[1]()
++
++
++def passer(complete: bool = False, seuil: int | None = None) -> None:
++    """Rien si l'application a « coupé » le GC (``gc.disable()``). Sinon, si plus de ``seuil`` objets sont nés depuis la
++    dernière passe (par défaut le premier seuil de Python) : passe complète si ``complete``, sinon la génération que
++    Python aurait ramassée lui-même."""
++    if not _actif[0]:
++        return
++    n0, n1, n2 = gc.get_count()
++    if n0 <= (_seuils[0] if seuil is None else seuil):
++        return
++    gc.collect(2 if complete or n2 > _seuils[2] else 1 if n1 > _seuils[1] else 0)
+diff --git a/qtpy6/web/travailleur.py b/qtpy6/web/travailleur.py
+index 6980d57..4c4359a 100644
+--- a/qtpy6/web/travailleur.py
++++ b/qtpy6/web/travailleur.py
+@@ -48,7 +48,7 @@ from qtpy6.web.preambule import _vers_python
+ REGLAGES = {}  # configurer() : indexURL, roues, filtre
+ _URL_WORKER = None
+ _FICHIERS_WORKER = ("preambule.py", "zmq_web.py", "threading_web.py", "psutil_web.py", "pyxel_web.py",
+-                    "memoire_partagee.py")  # de qtpy6/web, ce que le préambule du worker importe
++                    "memoire_partagee.py", "ramasse_miettes.py")  # de qtpy6/web, ce que le préambule du worker importe
+ 
+ 
+ def _nouveau_worker():
