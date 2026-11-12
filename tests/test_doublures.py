@@ -24,3 +24,24 @@ def test_modules_rendus_tels_quels():
         assert {nom: sys.modules.get(nom, "absent") for nom in MODULES} == avant
     finally:
         sys.modules.pop("pyodide")
+
+
+# --- W558 : renderProcessTerminated de la doublure QWebEngine (greffon spyder_python_tutor, main_widget.py:385) ----------
+def test_moteur_web_render_process_terminated(app):
+    """Le tuteur branche ``page.renderProcessTerminated`` (statut, code de sortie) : le signal existe sous le nom et la
+    signature Qt sur la page et sur la vue, qui le relaie comme les autres ; jamais émis par la doublure (l'iframe meurt
+    avec la page)."""
+    from unittest.mock import MagicMock
+
+    with navigateur_double(document=MagicMock(), window=MagicMock()):
+        from qtpy6.web.moteur_web import QWebEnginePage, QWebEngineView
+
+        vue = QWebEngineView()
+        page = QWebEnginePage(vue)
+        vue.setPage(page)
+        recus = []
+        page.renderProcessTerminated.connect(lambda statut, code: recus.append(("page", statut, code)))
+        vue.renderProcessTerminated.connect(lambda statut, code: recus.append(("vue", statut, code)))
+        crash = QWebEnginePage.RenderProcessTerminationStatus.CrashedTerminationStatus
+        page.renderProcessTerminated.emit(crash, 11)
+        assert sorted(recus) == [("page", crash, 11), ("vue", crash, 11)]

@@ -207,6 +207,9 @@ class QWebEnginePage(QObject):
         FindBackward = 1
         FindCaseSensitively = 2
 
+    class RenderProcessTerminationStatus(enum.Enum):
+        NormalTerminationStatus, AbnormalTerminationStatus, CrashedTerminationStatus, KilledTerminationStatus = range(4)
+
     loadStarted = Signal()
     loadProgress = Signal(int)
     loadFinished = Signal(bool)
@@ -214,6 +217,9 @@ class QWebEnginePage(QObject):
     titleChanged = Signal(str)
     iconChanged = Signal(QIcon)
     selectionChanged = Signal()
+    # Jamais émis : l'iframe n'a pas de processus de rendu à part, elle meurt avec la page (sous le nom Qt pour le code qui
+    # s'y branche, greffon spyder_python_tutor).
+    renderProcessTerminated = Signal(RenderProcessTerminationStatus, int)
 
     def __init__(self, *args):
         """``QWebEnginePage(parent=None)`` ou ``QWebEnginePage(profil, parent=None)``."""
@@ -456,8 +462,9 @@ class QWebEngineView(Calque):
     titleChanged = Signal(str)
     iconChanged = Signal(QIcon)
     selectionChanged = Signal()
+    renderProcessTerminated = Signal(QWebEnginePage.RenderProcessTerminationStatus, int)
     _SIGNAUX = ("loadStarted", "loadProgress", "loadFinished", "urlChanged", "titleChanged", "iconChanged",
-                "selectionChanged")
+                "selectionChanged", "renderProcessTerminated")
 
     def __init__(self, parent=None, **kwargs):
         super().__init__(parent, **kwargs)  # coopératif : WebView(QWebEngineView, SpyderWidgetMixin) y passe class_parent

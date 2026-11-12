@@ -123,6 +123,15 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
      part ; l'iframe meurt avec la page), sous le nom Qt, sans branche dans le greffon.
    - Essai : `site/index.html?script=greffons.py` (W551), action « Lancer » du tuteur.
    - Niveau : lu dans les sources, non mesuré (les actions des greffons ne s'impriment pas encore, item 14).
+   **[FAIT, W558, 12/11]** signal et énumération `RenderProcessTerminationStatus` sur la page et la vue, jamais émis ;
+   test rouge puis vert (`tests/test_doublures.py`). Relevé des autres attributs appelés : aucun autre manque (mainFrame
+   en branche QtWebKit morte). Reste : la trace dans la page (sonde arrêtée après la liste des greffons, item 14).
+   `notes/2026-11-12 - Signaux manquants de la doublure QWebEngine (W558).md`.
+2 ter. **`javaScriptAlert` / `javaScriptConsoleMessage` surchargées mais jamais appelées par la doublure** (W558, 12/11).
+   - Appelant : `_DebugPage` du tuteur (`main_widget.py:372-380`) : intercepte `alert()` de pytutor.js, « garde-fou
+     essentiel » ; dans la page, `alert()` de l'iframe ouvrirait le dialogue du navigateur (gel vu par W546).
+   - À faire : dans `moteur_web.py`, remplacer `alert`/`console.error|warn` de l'iframe par des appels aux méthodes de
+     la page (surchargeables) ; défaut Qt : `javaScriptAlert` ouvre un QMessageBox. Niveau : lu, non mesuré.
 3. **Slots homonymes d'un signal : le fork plante sans contournement d'essai.**
    - État : le fork du 01/11 définit encore `cursor_position_changed` (`spyder/plugins/editor/widgets/base.py:430`),
      `cell_changed` (`spyder/widgets/arraybuilder.py:156`), `item_expanded`
