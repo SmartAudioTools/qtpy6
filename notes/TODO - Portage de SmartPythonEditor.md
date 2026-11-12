@@ -362,6 +362,9 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
     médianes sur 10) : `import qtpy.QtCore, QtGui, QtWidgets, QtWebEngineWidgets` 760 ms par l'alias qtpy6 contre
     165 ms par le vrai qtpy ; ~0,5 s de création d'énumérations PySide6 (~700) déclenchée par `_binding._pyside6_class`
     qui parcourt les classes (cProfile). Coût de qtpy6 en général, pas de l'alias.
+    **Contrainte de l'utilisateur (12/11/2026 19:42)** : « le profilage ne devra se faire que cette nuit à un moment
+    où le CPU n'est pas utilisé et en concertation avec les autres sessions ». Session neuve ; banc
+    `qtpy6_essais/w567/mesurer_demarrage.py` (option cProfile à ajouter).
 
 ## Décisions à prendre par l'utilisateur
 
