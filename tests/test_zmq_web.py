@@ -743,3 +743,45 @@ def test_battement_repondu_par_la_page_tant_que_le_worker_vit():
     req.send(b"ping")
     with pytest.raises(zmq_web.Again):
         req.recv(zmq_web.NOBLOCK)
+
+
+# --- Opérations de flux (TCP de boucle locale, socket_web) ---------------------------------------------------------
+
+def test_flux_page_relaie_entre_deux_workers():
+    """pylsp écoute dans w2, la passerelle LSP de Spyder s'y connecte depuis w1 : la page relaie chaque opération par
+    son identifiant de connexion, et l'oublie après les deux fins."""
+    envoyes = []
+    zmq_web.installer(poster=lambda destination, message: envoyes.append((destination, message)))
+    connexion = {"op": "flux_connect", "port": 2087, "conn": "c1", "adresse": ["127.0.0.1", 50001]}
+    zmq_web.recevoir("w1", connexion)
+    assert envoyes == [("w1", {"op": "flux_refus", "conn": "c1"})]  # rien n'écoute encore : refusée
+    zmq_web.recevoir("w2", {"op": "bind", "port": 2087})
+    envoyes.clear()
+    zmq_web.recevoir("w1", connexion)
+    zmq_web.recevoir("w2", {"op": "flux_accepte", "conn": "c1"})
+    zmq_web.recevoir("w1", {"op": "flux_octets", "conn": "c1", "octets": b"requete"})
+    zmq_web.recevoir("w2", {"op": "flux_octets", "conn": "c1", "octets": b"reponse"})
+    assert envoyes == [("w2", connexion), ("w1", {"op": "flux_accepte", "conn": "c1"}),
+                       ("w2", {"op": "flux_octets", "conn": "c1", "octets": b"requete"}),
+                       ("w1", {"op": "flux_octets", "conn": "c1", "octets": b"reponse"})]
+    zmq_web.recevoir("w1", {"op": "flux_fin", "conn": "c1"})
+    zmq_web.recevoir("w2", {"op": "flux_fin", "conn": "c1"})
+    assert not zmq_web._relais_flux
+    zmq_web.recevoir("w2", {"op": "flux_octets", "conn": "c1", "octets": b"tard"})  # ignoré, comme un port inconnu
+    assert len(envoyes) == 6
+
+
+def test_flux_worker_mort_ferme_l_autre_bout():
+    envoyes = []
+    zmq_web.installer(poster=lambda destination, message: envoyes.append((destination, message)))
+    zmq_web.recevoir("w2", {"op": "bind", "port": 2087})
+    zmq_web.recevoir("w1", {"op": "flux_connect", "port": 2087, "conn": "c2", "adresse": ["127.0.0.1", 50002]})
+    envoyes.clear()
+    zmq_web.oublier("w2")
+    assert envoyes == [("w1", {"op": "flux_fin", "conn": "c2"})] and not zmq_web._relais_flux
+
+
+def test_bind_zmq_sur_un_port_tcp_en_ecoute():
+    zmq_web._ecoutes[5700] = object()
+    with pytest.raises(zmq_web.ZMQError):
+        zmq_web.Context().socket(zmq_web.ROUTER).bind("tcp://127.0.0.1:5700")

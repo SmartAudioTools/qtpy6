@@ -164,6 +164,8 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
    `load OK` avec (note `2026-11-12 - Pyxel, ressources et son (W549).md`). Reste : jeu complet dans le Firefox du
    professeur. **Défaut trouvé** : un second `pyxel.init` dans le même noyau est fatal (`handback_tstate == NULL`,
    `pystate.c:222`) — relancer un jeu tue le noyau ; non traité.
+   **Vérifié par le professeur (14:33)** : images et sprites affichés. **Défauts neufs, non traités** : le jeu ne
+   répond pas au clavier ; le panneau Pyxel n'a pas de cadre de focus (« je ne peux pas être certain qu'il a le focus »).
 9. **Le son de Pyxel** : renvoi au TODO son, premier item. Existant : `memoire_partagee.reconcilier()`,
    `preambule._doubler_sleep` (`qtpy6/web/preambule.py:70`) ; aucun `AudioContext` dans `qtpy6/` (grep → 0).
    Niveau : supposé (piste, rien d'écrit).
@@ -186,16 +188,17 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
     - dossier autorisé de Chrome comme troisième emplacement de `persistant`, bouton « Réautoriser » : non codé
       (existant : `stockage.monter`, `qtpy6/web/stockage.py:59`) ;
     - couche Dropbox par élève : hors qtpy6 (SmartTeacher), raccordement professeur à décider ;
-    - `EN_RETARD` de `construire_site.py:45` : à retirer « une fois le fork regénéré » ; il l'a été le 01/11, non
-      vérifié s'il porte les six fichiers ;
+    - `EN_RETARD` : FAIT (W551, 12/11), retiré, les six fichiers du fork sont identiques à l'installé (`cmp`) ;
     - Interpréteur : chemin factice `/pyodide/3.13/bin/python` dans `spe.py` ; `custom` reste faux.
     Niveau : mesuré pour les coûts, supposé pour les remèdes.
-14. **Les treize greffons** (faisabilité, « Les treize greffons »). Embarqués : `spyder_stop_toolbar`,
-    `spyder_interpreter_toolbar`, `spyder_pyxel`. Portables, non embarqués : `spyder_code_analysis` (pylint en
-    `ProcessusWeb`), `spyder_smartteacher`, `spyder_collab` (transport QtNetwork à réécrire). À réécrire :
-    `spyder_python_tutor` (QtWebEngine : la doublure `moteur_web.py` peut suffire, non mesuré). Hors champ : claude,
-    konsole, tortoisehg, window_controls (remplacé par la barre vide de `spe.py`), viztracer, line_profiler.
-    Niveau : grep des imports, aucun greffon lancé hors des trois embarqués.
+14. **Les treize greffons** (faisabilité, « Les treize greffons » ; W551, `notes/2026-11-12 - Greffons dans la page
+    (W551).md`). Embarqués les sept portables (`construire_site.py`, essai `greffons.py`). Inscrits dans la page :
+    stop, interpreter, pyxel, `spyder_code_analysis`, `spyder_python_tutor` (mesuré). Reste : `spyder_collab` casse à
+    l'import (`QNetworkInterface` absent de QtNetwork wasm ; doublure QTcpServer/QTcpSocket sur relais WebSocket à
+    écrire) ; `spyder_smartteacher` absent sans erreur (cause non mesurée ; le pont veut le dossier QCM : réglage) ;
+    `renderProcessTerminated` manque à `moteur_web.py` pour le tuteur (lu) ; actions (Docteur, Lancer) non mesurées :
+    la page ne rend plus rien après la liste des greffons ; volet pylint à activer dans la configuration pour Docteur.
+    Hors champ : claude, konsole, tortoisehg, window_controls, viztracer, line_profiler.
 15. **Chrome** : jalons 8a à 8c, Pyxel, `QWebEngineView` mesurés sous Firefox seul ; phase 2 du jalon 5 jamais lancée
     sous Blink (branches de la sonde écrites). Niveau : non mesuré.
 16. **Outillage** : `_fait` de la sonde par compare-and-set (`qtpy6/web/sonde.py`, rencontré aux jalons 3 et 5) ; test

@@ -30,7 +30,10 @@ Existant : `_resolve` du greffon (garde, complémentaire : il couvre le bureau, 
 à `/home/pyodide` avant le lancement : sans le correctif `Failed to open file 'projet_monkey.pyxres'` ; avec, cwd après
 `init` = `/home/pyodide/monkey`, `load OK`. Essai : `spe_monkey.py?jeu=…&diag=1` (instrumentation : jeu réduit à
 `init(headless=True)` → `load`), journaux `repro_sans` / `repro_avec` dans `/DATA/Python/qtpy6_essais/w549/`.
-Reste : la preuve dans le Firefox du professeur (WebGL), jeu complet.
+**Vérifié par le professeur** (12/11 14:33, son Firefox, copie privée du site) : « L'image et [les sprites] s'affichent »
+— le `.pyxres` est chargé. **Défaut neuf** : « il n'a pas l'air de répondre au clavier » ; et « comme il n'y a pas de
+cadre autour du jeu Pyxel, je ne peux pas être certain qu'il a le focus. Ça, c'est sans doute quelque chose qu'il
+faudrait corriger ». Non traité (contexte de W549 à 72 %) : au TODO Portage, item 8.
 
 **Défaut trouvé en passant, NON corrigé** : un second `pyxel.init` dans le même noyau (relancer le jeu) est fatal —
 `Aborted(Assertion failed: handback_tstate == NULL, at: src/core/stack_switching/pystate.c,222,restoreThreadState)`

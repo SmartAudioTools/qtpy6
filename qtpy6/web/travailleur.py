@@ -48,7 +48,7 @@ from qtpy6.web.preambule import _vers_python
 REGLAGES = {}  # configurer() : indexURL, roues, filtre
 _URL_WORKER = None
 _FICHIERS_WORKER = ("preambule.py", "zmq_web.py", "threading_web.py", "psutil_web.py", "pyxel_web.py",
-                    "memoire_partagee.py")  # de qtpy6/web, ce que le préambule du worker importe
+                    "memoire_partagee.py", "socket_web.py")  # de qtpy6/web, ce que le préambule du worker importe
 
 
 def _nouveau_worker():

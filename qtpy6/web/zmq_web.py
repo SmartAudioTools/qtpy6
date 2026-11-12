@@ -21,7 +21,14 @@ filtrage (PUB, SUB). Les messages entre interpréteurs sont des dictionnaires ``
 - ``bind``       {port}                            un Worker annonce à la page un port qu'il vient de lier ;
 - ``echo``       {port}                            un Worker annonce que ce port lié n'est qu'un écho (le battement de
                                                    cœur d'ipykernel) : la page répond à sa place tant qu'il vit, même
-                                                   pendant un calcul qui ne rend jamais la main."""
+                                                   pendant un calcul qui ne rend jamais la main.
+
+Les opérations de flux (TCP de boucle locale, dont les sockets sont dans ``socket_web``) ; ``conn`` identifie une
+connexion, la page relaie celles qui vont d'un Worker à un autre (``_relais_flux``) :
+
+- ``flux_connect`` {port, conn, adresse}           un client se connecte à un port en écoute chez le destinataire ;
+- ``flux_accepte`` / ``flux_refus`` {conn}         réponse du serveur (ou d'un interpréteur où rien n'écoute) ;
+- ``flux_octets`` {conn, octets} ; ``flux_fin`` {conn}  dans les deux sens."""
 
 from __future__ import annotations
 
@@ -204,6 +211,10 @@ _echos: dict[int, Any] = {}  # port → interpréteur qui l'a annoncé ``echo`` 
 _attentes: list[tuple[Socket, int | str]] = []  # connect() vers un port ni lié ni déclaré : libzmq l'accepte aussi
 _numeros_fd = itertools.count(1000)
 _sockets_connues: weakref.WeakValueDictionary[int, Socket] = weakref.WeakValueDictionary()  # underlying → socket
+_par_fd: weakref.WeakValueDictionary[int, Any] = weakref.WeakValueDictionary()  # fd → socket zmq ou TCP (socket_web)
+_ecoutes: dict[int, Any] = {}  # port → socket TCP en écoute ici (socket_web)
+_flux: dict[str, Any] = {}  # conn → bout TCP d'ici d'une connexion avec un autre interpréteur (socket_web)
+_relais_flux: dict[str, list] = {}  # côté page : conn entre deux Workers → [client, serveur, fins vues]
 
 
 def reinitialiser() -> None:
@@ -214,6 +225,9 @@ def reinitialiser() -> None:
     _echos.clear()
     _connectees.clear()
     _attentes.clear()
+    _ecoutes.clear()
+    _flux.clear()
+    _relais_flux.clear()
     en_travailleur = False
     _fils.reinitialiser_crochets()
     for classe in (Context, ContextAsync):
@@ -265,12 +279,46 @@ def oublier(destination: Any) -> None:
     """L'interpréteur ``destination`` est mort : la page cesse de répondre à sa place aux battements de cœur."""
     for port in [p for p, d in _echos.items() if d == destination]:
         del _echos[port]
+    for conn, (client, serveur, _) in list(_relais_flux.items()):  # ses connexions TCP : l'autre bout voit la fin
+        if destination in (client, serveur):
+            del _relais_flux[conn]
+            poster(serveur if destination is client else client, _op(op="flux_fin", conn=conn))
+    for conn, bout in list(_flux.items()):
+        if bout._vers is destination and destination is not None:
+            bout._recevoir(_op(op="flux_fin", conn=conn))
+
+
+def _recevoir_flux(origine: Any, message: dict[str, Any]) -> None:
+    """Une opération de flux : pour un port en écoute ici, pour un bout d'ici, ou (page) à relayer entre Workers."""
+    operation, conn = message["op"], message["conn"]
+    if operation == "flux_connect":
+        ecoute = _ecoutes.get(message["port"])
+        connu, destination = _destination(message["port"])
+        if ecoute is not None:
+            ecoute._arrivee(conn, origine, message["adresse"])
+        elif connu and not en_travailleur and destination is not None and destination is not origine:
+            _relais_flux[conn] = [origine, destination, 0]
+            poster(destination, message)
+        else:
+            poster(origine, _op(op="flux_refus", conn=conn))
+        return
+    if conn in _flux:
+        _flux[conn]._recevoir(message)
+    elif conn in _relais_flux:
+        relais = _relais_flux[conn]
+        poster(relais[1] if origine is relais[0] else relais[0], message)
+        relais[2] += operation == "flux_fin"
+        if operation == "flux_refus" or relais[2] >= 2:
+            del _relais_flux[conn]
 
 
 def recevoir(origine: str | None, message: dict[str, Any]) -> None:
     """Un message ``{"zmq": …}`` arrive de ``origine`` (``message`` est le contenu de la clé). Un port ou un pair
     inconnu est ignoré sans erreur, comme libzmq jette ce qui n'a pas de destinataire."""
     operation = message["op"]
+    if operation.startswith("flux_"):
+        _recevoir_flux(origine, message)
+        return
     if operation == "bind":
         declarer_distant(message["port"], origine)
         return
@@ -394,6 +442,8 @@ class Socket:
         self._relais: Callable[[], Any] | None = None  # device/proxy : appelé à chaque arrivée
         self._stream: ZMQStream | None = None
         self._fd = next(_numeros_fd)
+        _par_fd[self._fd] = self
+        self._veilleurs: list[Callable[[], Any]] = []  # QSocketNotifier (socket_web) : appelés à chaque arrivée
         self._attentes_async: list[Callable[[], bool]] = []  # utilisé par SocketAsync et PollerAsync
         context._sockets.append(self)
         self._numero = id(self)  # stable aussi pour une ombre, qui partage le __dict__
@@ -496,7 +546,7 @@ class Socket:
         if cle == 0:
             self.bind_to_random_port(f"tcp://{hote}")
             return
-        if cle in _lies:
+        if cle in _lies or cle in _ecoutes:
             raise ZMQError(EADDRINUSE)
         _lies[cle] = self
         self._cles.append(cle)
@@ -663,6 +713,8 @@ class Socket:
             self._relais()
         if self._stream is not None:
             plus_tard(self._stream._livrer)
+        for veilleur in list(self._veilleurs):
+            plus_tard(veilleur)
 
     def _prendre(self, flags: int) -> list[bytes]:
         """Le message suivant, en attendant s'il le faut ; ``Again`` si le délai échoit ou si ``NOBLOCK``."""
@@ -1107,3 +1159,9 @@ def installer(attendre=None, plus_tard=None, poster=None) -> None:
     _fils.poser_crochets(attendre, plus_tard, poster)
     if "zmq" not in sys.modules and importlib.util.find_spec("zmq") is None:
         sys.modules.update(_construire())
+    if sys.platform == "emscripten":  # le TCP de boucle locale (pylsp et la passerelle LSP de Spyder), page et Worker
+        try:
+            from . import socket_web  # noqa: PLC0415
+        except ImportError:  # un Worker où socket_web.py n'a pas été copié
+            return
+        socket_web.installer()
