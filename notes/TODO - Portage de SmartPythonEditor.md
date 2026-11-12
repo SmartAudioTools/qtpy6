@@ -218,6 +218,12 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
    `pystate.c:222`) — relancer un jeu tue le noyau ; non traité.
    **Vérifié par le professeur (14:33)** : images et sprites affichés. **Défauts neufs, non traités** : le jeu ne
    répond pas au clavier ; le panneau Pyxel n'a pas de cadre de focus (« je ne peux pas être certain qu'il a le focus »).
+   **[W565, 12/11] Clavier FAIT** : un clic sur le canevas de Qt (écran déjà focus de Qt) donne le focus DOM au `body`,
+   Qt ne le reprend qu'au changement de widget → 0 KeyPress. Doublure `_garder_le_focus()` (`qtpy6/web/__init__.py`,
+   f75949b par W559). Mesuré (sonde, vrai clic + vraies frappes) : 0 KeyPress sans, 3/3 et le noyau voit Espace avec,
+   site reconstruit sans injection (`clavier7`). **Cadre** : au ras de l'image, coins arrondis (décision du professeur
+   18:50), confié au generator de SmartPythonEditor (greffon). Note `2026-11-12 - Clavier et focus de Pyxel dans la page
+   (W565).md`. Reste : vérification par le professeur (clavier et cadre).
 9. **Le son de Pyxel** : renvoi au TODO son, premier item. Existant : `memoire_partagee.reconcilier()`,
    `preambule._doubler_sleep` (`qtpy6/web/preambule.py:70`) ; aucun `AudioContext` dans `qtpy6/` (grep → 0).
    Niveau : supposé (piste, rien d'écrit).

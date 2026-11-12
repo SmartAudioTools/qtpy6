@@ -56,6 +56,29 @@ try:
 except BaseException:
     _t(traceback.format_exc())
 """  # instrumentation, &son=1 : un son en boucle (headless), compteurs de l'anneau relevés par la page
+DIAG_CLAVIER = """
+import js, pyxel
+def _t(m): js.console.log("DIAG noyau " + str(m))
+pyxel.init(64, 48, headless=True)  # le Firefox du bac n a pas de WebGL
+vu = []
+def update():
+    if pyxel.btn(pyxel.KEY_SPACE) and not vu:
+        vu.append(pyxel.frame_count)
+        _t(("espace vue", pyxel.frame_count))
+    if pyxel.frame_count % 60 == 0:
+        _t(("image", pyxel.frame_count))
+def draw():
+    pyxel.cls(8 if vu else 1)
+pyxel.run(update, draw)
+"""  # instrumentation, &clavier=1 : un jeu minimal qui dit quand il voit Espace (item 8, clavier)
+REFOCUS = """let presse = false;
+window.addEventListener("pointerdown", () => { presse = true; }, true);
+for (const n of ["pointerup", "pointercancel"]) window.addEventListener(n, () => { presse = false; }, true);
+document.addEventListener("focusout", e => {
+  const el = e.composedPath()[0];
+  if (!presse || e.relatedTarget || !String(el.className).startsWith("qt-window-")) return;
+  setTimeout(() => { if (!document.activeElement || document.activeElement === document.body) el.focus({preventScroll: true}); }, 0);
+}, true);"""
 _ICI = os.path.dirname(os.path.abspath(__file__))
 _source = open(os.path.join(_ICI, "spe.py"), encoding="utf-8").read()
 _avant = 'travailleur.configurer("./pyodide-qt/")'
@@ -102,8 +125,77 @@ PROFIL = {js.URLSearchParams.new(js.location.search).get("profil")!r}
 open("diag_son.py", "w").write(@DIAG_SON@)
 exec(compile(open("/home/pyodide/monkey/diag_son.py").read(), "/home/pyodide/monkey/diag_son.py", "exec"), {{"__name__": "__main__", "POMPE": POMPE, "PROFIL": PROFIL}})
 """
+    diagnostic_clavier = """
+open("diag_clavier.py", "w").write(@DIAG_CLAVIER@)
+exec(compile(open("/home/pyodide/monkey/diag_clavier.py").read(), "/home/pyodide/monkey/diag_clavier.py", "exec"), {"__name__": "__main__"})
+"""
     os.makedirs(dossier, exist_ok=True)
     from qtpy6.QtCore import QTimer
+    clavier = js.URLSearchParams.new(js.location.search).get("clavier") == "1"
+    if clavier:  # instrumentation : vrai clic sur l'écran du jeu, puis vraies touches ; focus DOM et Qt relevés
+        from qtpy6.QtCore import QEvent, QObject, QPoint
+        from qtpy6.QtWidgets import QApplication
+        from spyder_pyxel.spyder.bridge_manager import get_bridge
+        recu = {"images": 0, "evenements": [], "sig_key": []}
+
+        def dom(quand):
+            a = js.document.activeElement
+            racine = getattr(a, "shadowRoot", None) if a else None
+            b = racine.activeElement if racine else None
+            js.console.log(f"CLAVIER {quand} : DOM actif {a.tagName if a else None} classe={getattr(a, 'className', '')!r}"
+                           f" ombre {b.tagName if b else None} {getattr(b, 'className', '')!r}"
+                           f" id={getattr(a, 'id', '')!r} ; Qt focus {type(QApplication.focusWidget()).__name__}"
+                           f" ; événements écran {recu['evenements'][-12:]} ; sig_key {recu['sig_key'][-6:]}")
+
+        def ecouter_dom(e):
+            js.console.log(f"CLAVIER DOM {e.type} {e.key!r} cible {e.target.tagName} {getattr(e.target, 'className', '')!r}")
+        from pyodide.ffi import create_proxy
+        js.window.addEventListener("keydown", create_proxy(ecouter_dom), True)
+        if js.URLSearchParams.new(js.location.search).get("refocus") == "1":  # essai du correctif, avant la doublure
+            from pyodide.code import run_js
+            run_js(REFOCUS)
+
+        class Filtre(QObject):
+            def eventFilter(self, objet, e):
+                if e.type() in (QEvent.KeyPress, QEvent.KeyRelease, QEvent.FocusIn, QEvent.FocusOut, QEvent.MouseButtonPress):
+                    recu["evenements"].append(e.type().name if hasattr(e.type(), "name") else int(e.type()))
+                return False
+        filtre = Filtre()
+
+        def image(kind, frame, canal):
+            recu["images"] += 1
+            if recu["images"] != 60:
+                return
+            ecran = main.get_plugin("pyxel_game").get_widget()._screens.get(canal)
+            ecran.installEventFilter(filtre)
+            ecran.sig_key.connect(lambda code, appui: recu["sig_key"].append((code, appui)))
+            centre = ecran.mapToGlobal(QPoint(ecran.width() // 2, ecran.height() // 2))
+            js.console.log(f"CLAVIER écran {ecran.width()}x{ecran.height()} centre global {centre.x()},{centre.y()}"
+                           f" visible {ecran.isVisible()} focusPolicy {ecran.focusPolicy()}")
+            dom("avant clic")
+            js.window.clic = js.JSON.parse(f"[{centre.x()}, {centre.y()}]")
+            js.window.etat = "cliquer"
+            QTimer.singleShot(200, etape)
+
+        def etape():
+            if js.window.etat == "cliquer_fait" and not recu.get("temoin"):
+                dom("après clic")
+                js.window.texte = "   "
+                js.window.etat = "taper"
+            elif js.window.etat == "taper_fait":
+                dom("après frappe")
+                editeur = main.get_plugin("editor").get_current_editor()  # témoin : un clic sur l'éditeur
+                c = editeur.viewport().mapToGlobal(QPoint(editeur.viewport().width() // 2, 40))
+                js.window.clic = js.JSON.parse(f"[{c.x()}, {c.y()}]")
+                js.window.etat = "cliquer"
+                recu["temoin"] = True
+            elif js.window.etat == "cliquer_fait" and recu.get("temoin"):
+                dom(f"après clic éditeur ({type(QApplication.focusWidget()).__name__})")
+                js.window.etat = "attente"
+                QTimer.singleShot(4000, lambda: (dom("fin"), setattr(js.window, "etat", "fini")))
+                return
+            QTimer.singleShot(200, etape)
+        get_bridge().sig_frame.connect(image)
     if son:  # instrumentation : compteurs de l'anneau côté page, chaque seconde ; une vraie touche au premier son (geste)
         releves = []
 
@@ -160,7 +252,7 @@ for nom in ({jeu!r}, "projet_monkey.pyxres"):
     x.responseType = "arraybuffer"; x.send()
     open({dossier!r} + "/" + nom, "wb").write(bytes(js.Uint8Array.new(x.response).to_py()))
 os.chdir({dossier!r})
-{diagnostic_son if son else diagnostic if diag else lancement}
+{diagnostic_son if son else diagnostic if diag else diagnostic_clavier if clavier else lancement}
 """
     from qtpy6.QtCore import QTimer
     console = main.get_plugin("ipython_console")
@@ -177,6 +269,6 @@ os.chdir({dossier!r})
             QTimer.singleShot(1000, injecter)
     QTimer.singleShot(5000, injecter)
     js.window.etat = "monkey"
-'''.replace("@DIAG_JEU@", repr(repr(DIAG_JEU))[1:-1]).replace("@DIAG_SON@", repr(repr(DIAG_SON))[1:-1]) + _fin)
+'''.replace("@DIAG_JEU@", repr(repr(DIAG_JEU))[1:-1]).replace("@DIAG_SON@", repr(repr(DIAG_SON))[1:-1]).replace("@DIAG_CLAVIER@", repr(repr(DIAG_CLAVIER))[1:-1]) + _fin)
 __file__ = os.path.join(_ICI, "spe.py")
 exec(compile(_source, __file__, "exec"))
