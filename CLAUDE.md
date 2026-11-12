@@ -20,6 +20,11 @@ adaptation à faire dans l'application. Le combler ici :
   - **la liste « Rendre une application qtpy6 compatible » de `web.md`** est ce qui reste différent du bureau, mesuré : une
     liste À RÉDUIRE à chaque occasion, pas une consigne d'adaptation pour l'application.
 
+**Nuance de l'utilisateur, 12/11/2026 18:00** : « je ne suis pas sûr qu'il faille interdire absolument
+sys.platform == "emscripten", il faut mieux l'éviter au maximum, mais pas obligatoirement, si ça reste la solution la plus
+élégante ». La doublure ou le réglage d'abord ; une branche n'est retenue que si elle est plus élégante qu'eux, et la note
+de l'essai dit alors laquelle a été écartée et pourquoi.
+
 L'alternative écartée : la branche `if WEB` dans l'application. Elle coûte deux codes à tenir, et chaque application
 refait le même contournement. *Mesure, jalon 4 du portage de SmartPythonEditor (10/10/2026) : quatre branches propres au
 web recensées dans un seul essai (réglages du worker, worker de réserve, `waitForFinished`, dossier de l'élève),
@@ -30,4 +35,4 @@ pas le code de l'application. Mais tout ce qui y reste propre au web HORS instru
 doit encore doubler, et se note comme telle dans la note de l'essai, avec le coût de la doublure.
 
 Vérification avant de rendre compte d'un port ou d'un widget : `grep -n "emscripten\|qtpy6\.web\|import js\b\|pyodide"` sur
-le code de l'application rend zéro ligne hors instrumentation.
+le code de l'application rend zéro ligne hors instrumentation et hors branche justifiée dans la note (nuance du 12/11).

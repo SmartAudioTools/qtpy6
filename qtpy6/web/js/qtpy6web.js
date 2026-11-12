@@ -647,6 +647,10 @@ export async function preparer(conteneur, { indexURL, archives = [], roues = [],
     await py.loadPackage(new URL(roue, location.href).href);
   }
   retablir();
+  // Le Pyodide et les roues de la page : ceux que prend par défaut le Worker d'un QProcess (qtpy6.web.lancer, D4 du
+  // 12/11/2026), pour que l'application n'ait pas à les redire (travailleur.configurer reste pour en donner d'autres).
+  window.qtpy6Pyodide = indexURL;
+  window.qtpy6Roues = roues.map(r => new URL(r, location.href).href);
   py._module.qtContainerElements = [conteneur];  // l'API privée de Qt-WASM, isolée ici : l'élément qui sert d'écran à Qt
   molette(conteneur);
   sans_menu(conteneur);

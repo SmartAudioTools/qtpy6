@@ -277,6 +277,19 @@ def importer(nom, signaler=None, periode=0.04):
             signaler(vu[0])
 
 
+def _reglages_du_worker():
+    """Le Worker d'un ``QProcess`` (``travailleur``) prend par défaut le Pyodide et les roues de la page (posés par
+    ``preparer`` de qtpy6web.js) au lieu du Pyodide en ligne de ``versions.json`` : l'application n'appelle plus
+    ``travailleur.configurer`` (D4, 12/11/2026). Un ``configurer`` du script les remplace."""
+    import js  # noqa: PLC0415
+
+    from . import travailleur  # noqa: PLC0415
+
+    if getattr(js.window, "qtpy6Pyodide", None):
+        travailleur.REGLAGES.setdefault("indexURL", js.window.qtpy6Pyodide)
+        travailleur.REGLAGES.setdefault("roues", tuple(js.window.qtpy6Roues))
+
+
 def lancer(script, args=(), pret=None, module=None):
     """Exécute ``script`` comme ``python script args…`` sur un bureau : ``__name__ == "__main__"``, ``sys.argv``, le
     dossier du script en tête de ``sys.path`` et comme dossier courant. Avec ``module``, ``script`` est son
@@ -291,6 +304,10 @@ def lancer(script, args=(), pret=None, module=None):
     from . import bloquant  # noqa: PLC0415
 
     _qtpy.installer()  # qtpy servi par qtpy6 : Spyder, qtconsole… trouvent les doublures de la page sous « qtpy »
+    _reglages_du_worker()
+    from . import chardet_web  # noqa: PLC0415
+
+    chardet_web.installer()  # chardet.detect : utf-8 sans charger chardet (63 Mio) quand le fichier en est (D6)
 
     chemin = os.path.abspath(script)
     appele = []

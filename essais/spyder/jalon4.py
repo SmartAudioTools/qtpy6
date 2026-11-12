@@ -257,8 +257,8 @@ class MoteurB:
 
     def arreter(self):
         self.p.kill()
-        if not WEB:
-            self.p.waitForFinished(1000)  # sinon Qt se plaint d'un QProcess détruit en cours de route à la sortie
+        self.p.waitForFinished(1000)  # sinon Qt se plaint d'un QProcess détruit en cours de route à la sortie ; dans la
+        # page, ProcessusWeb.waitForFinished rend vrai une fois tué (qtpy6/web/travailleur.py, adf75de) : même ligne
 
 
 # Les requêtes directes, hors widget : la même liste de trois, à froid puis à chaud, par moteur.

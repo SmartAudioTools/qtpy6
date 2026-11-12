@@ -63,11 +63,6 @@ from spyder.plugins.application.container import ApplicationContainer  # noqa: E
 ApplicationContainer.report_missing_dependencies = lambda self: None
 
 
-if sys.platform == "emscripten":  # comme jalon8c.py : le Worker du noyau prend le Pyodide-Qt du site, pas celui en ligne
-    from qtpy6.web import travailleur  # noqa: E402
-    travailleur.configurer("./pyodide-qt/")
-
-
 def SUITE(main, rapport):  # noqa: N802, ARG001 - jalon7.py l'appelle après post_visible_setup : la fenêtre reste ouverte
     """Contournement d'ESSAI : le centrage des boutons Exécuter…Interpréteur (mainmenu du fork, ``_recenter``) suppose à
     droite la barre ``window_controls_toolbar`` du greffon spyder_window_controls, dont la zone extensible prend la place

@@ -171,8 +171,9 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
      (faisabilité, « Doublure QWebEngineView », POINTS OUVERTS) ; à trancher avec la question du qtpy du fork (D5).
    - b. `travailleur.configurer("./pyodide-qt/")` sous `if sys.platform == "emscripten"` : `spe.py:71-73`. Existant :
      `qtpy6/web/travailleur.py:66` (`configurer`), `:77` (`prechauffer`). Où vit la liste des roues : D4.
-   - c. `waitForFinished` : existe sur `ProcessusWeb` (`travailleur.py:344`, rend faux tout de suite, adf75de) ; le
-     point 3 du jalon 4 est donc réglé, à vérifier dans `jalon4.py` (la branche native y est-elle encore ?).
+     **FAIT (W559, 12/11, non commité à l'écriture)** : le Worker prend par défaut le Pyodide et les roues de la page
+     (`qtpy6web.js` → `lancer()`), `spe.py` sans branche ; mesuré : jalon8c sans `configurer` 5/5 (Firefox).
+   - c. **FAIT (W559, 12/11)** : `jalon4.py` appelle `waitForFinished(1000)` sans `if not WEB`. Non relancé dans la page.
    - d. Doublures de l'essai qui sont des manques de qtpy6 ou de l'archive : `pickleshare`, `three_merge`,
      `jellyfish`, `bcrypt`, `keyring`, `inflection`, métadonnées de `pylint` (`preparer.py:36-62`).
    - Niveau : lu dans les sources (12/11). Commande : `grep -nE "emscripten|qtpy6\.web|import js\b|pyodide"
@@ -242,7 +243,8 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
 13. **Le reste du port** (faisabilité, « Points ouverts » et jalons 3-5) :
     - console : `max_line_count` (300 lignes) à monter ; Worker de réserve et complétion factice pour cacher 1,4 s ;
     - REPL persistant et explorateur de variables hors noyau : sans objet si la console IPython (8c) est retenue ;
-    - doublure `chardet.detect → utf-8` (63 Mio économisés) : D6 ;
+    - doublure `chardet.detect → utf-8` (63 Mio économisés) : D6 ; **FAIT (W559)** `qtpy6/web/chardet_web.py`, utf-8
+      sinon vrai chardet, mesuré en natif seulement ;
     - dossier autorisé de Chrome comme troisième emplacement de `persistant`, bouton « Réautoriser » : codé (W556),
       `application(persistant=chemin, disque=True)`, opt-in (l'automatique sur tout Chrome, écarté, changerait toutes les
       applications) ; repli Firefox mesuré (sonde), boutons vus sous Blink ; mesuré dans le Chromium du professeur
@@ -328,6 +330,8 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
   chargement, ou qtpy6 annonce l'absence de WebEngine (`WEBENGINE` de Spyder faux, Help et OnlineHelp en repli).
 - **D4. Liste des roues du Worker** (faisabilité, jalon 4, « propre au web » 1) : réglage commun sur
   `qtpy6.QtCore.QProcess` sans effet en natif, ou posée par la page à la construction (`window.roues`).
+  **Décidé par l'utilisateur, 12/11 18:01 : la page** (Pyodide et roues de la page par défaut) ; **D6 : utf-8 sinon
+  chardet réel**. Nuance de règle du même jour dans `CLAUDE.md` (branche emscripten évitée, pas interdite). Note W559.
 - **D5. Le qtpy du fork** : qtpy6 pose-t-il lui-même ses doublures sous les noms `PySide6.*` (item 4a) ?
 - **D6. `chardet`** : doublure `utf-8` (63 Mio de moins, un fichier d'un autre encodage mal lu) ou chardet réel.
 - **D7. Vrais threads** (pthreads) : essai de faisabilité en mode plan, ordre (a)/(b)/(c) du TODO son ; décidé « à
