@@ -64,6 +64,11 @@ modifie pas le code de Spyder […] puis un démarrage complet mesuré ». Le pr
     parcours des classes par `_binding._pyside6_class`. C'est un coût de qtpy6 en général, pas de l'alias.
     Signalé au Superviseur, hors de cet item.
 
+- **Barres d'outils** (19:40, le professeur : « pas mal de choses sont absentes de la barre d'outils », puis « les
+  boutons ont fini par arriver ») : au repère `editeur_utilisable`, le relevé hors écran (`*.qtpy.barres` du banc)
+  donne 70 barres et 119 actions, identiques avec et sans alias (noms aléatoires des barres ignorés). Mesuré. Le
+  retard vu par le professeur est donc du temps de démarrage (item 21 Vitesse), pas un manque.
+
 ## RESTE
 
 - **3 `SignalAliasMasked`**, tous dans le fork : `TextEditBaseWidget.cursor_position_changed`
