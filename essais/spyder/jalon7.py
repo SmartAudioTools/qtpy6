@@ -74,9 +74,9 @@ try:
             if alias in vars(c):
                 delattr(c, alias)
     # Help et OnlineHelp : QtWebEngine sur le bureau, la doublure QWebEngineView de qtpy6 dans la page (preparer.py).
-    # --new-instance : contournement d'ESSAI. Le serveur d'instance unique (post_visible_setup) écoute un socket dans un
-    # threading.Thread, que la page ne sait pas démarrer (RuntimeError) ; sa doublure est un point ouvert de la note.
-    options, _ = get_options(["--new-instance"])
+    # Sans --new-instance (W547, item 5 du TODO Portage) : le serveur d'instance unique (post_visible_setup) démarre son
+    # threading.Thread comme sur le bureau ; dans la page, c'est la doublure threading_web.Thread de qtpy6.
+    options, _ = get_options([])
     app = create_application()  # avant l'énumération des plugins, qui les importe (qtawesome veut l'application)
     application(polices=os.path.join(ICI, "polices"), defaut=("DejaVu Sans", 10))  # polices de la page ; sur le bureau,
     etape(f"{type(app).__name__}")  # ne fait que garder l'application
@@ -139,17 +139,20 @@ try:
         sys.stdout, sys.stderr = sys.__stdout__, sys.__stderr__  # la console interne de Spyder les a redirigés
         print(f"fenêtre : {type(main).__name__}, {'visible' if main.isVisible() else 'invisible'}, "
               f"{ATTENTE / 1000:.0f} s après exec() ; mémoire {memoire():.0f} Mio, {time.monotonic() - T0:.1f} s")
-        fin("fini")
+        fin("fermeture")  # la sonde qui expire sur « fermeture » : main.closing ou la sortie de exec() ne finit pas
+        etape("closing")
         try:
             main.closing(cancelable=False, close_immediately=True)  # arrête le noyau que la console a démarré
         except Exception:  # noqa: BLE001
             traceback.print_exc()
+        etape("closing fini")
         app.quit()
 
     if "SUITE" not in globals():
         QTimer.singleShot(ATTENTE, rapport)  # armé avant create_window : exec() est dedans
     create_window(MainWindow, app, None, options, None)
     etape("sortie de exec()")
+    fin("fini")  # la fermeture mesurée jusqu'au bout (item 12)
 except Exception:
     traceback.print_exc()
     fin("erreur")
