@@ -256,10 +256,10 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
 15. **Chrome** : jalons 8a à 8c, Pyxel, `QWebEngineView` mesurés sous Firefox seul ; phase 2 du jalon 5 jamais lancée
     sous Blink (branches de la sonde écrites). Niveau : non mesuré.
     Chrome : W552 (12/11), Blink de QtWebEngine (Chrome 140, sonde --chromium, dans le bac) : 7, 8a, 8b, 8c,
-    QWebEngineView (panneaux) passent ; Pyxel passe partiel ; jalon 5 : rechargement et IDBFS passent, puis arrêt
+    QWebEngineView (panneaux), Pyxel passent ; jalon 5 : rechargement et IDBFS passent, puis arrêt
     dans `CodeEditor.setPlainText` IDENTIQUE sous Firefox (régression commune depuis le 10/10, à reprendre au jalon 5) ;
     propre à Blink : `cannot join current thread` (`threading_web.py:174`) à la fermeture de jalon7. Reste : Chrome de
-    bureau avec GPU, contrôle Firefox de Pyxel. Note `2026-11-12 - Jalons sous Chrome (W552).md`.
+    bureau avec GPU. Note `2026-11-12 - Jalons sous Chrome (W552).md`.
 16. **Outillage** : `_fait` de la sonde par compare-and-set (`qtpy6/web/sonde.py`, rencontré aux jalons 3 et 5) ; test
     unitaire de la règle « slot à QEvent sur place » de `bloquant.py` dans `tests/test_web.py` ; `SystemError: Cannot
     enter a promising task` résiduels (Pyxel, « Point ouvert immédiat »). Niveau : lu.
