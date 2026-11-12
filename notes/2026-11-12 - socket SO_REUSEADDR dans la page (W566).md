@@ -81,4 +81,4 @@ Le professeur, 19:15, après avoir ouvert spe.py dans son Firefox :
 
 ## RESTE
 
-- Rien. **Vu par le professeur (12/11 19:52, puis confirmé 19:56)** : au démarrage de spe.py dans son Firefox, le rapporteur ne portait que l'erreur de l'explorateur (`initStyleOption`, `isDir` sur None, item 10, confiée à W570), texte complet dans `qtpy6_essais/equipe/w566/trace_professeur_explorateur_1952.txt` ; aucune mention de SO_REUSEADDR ni de `start_open_files_server`.
+- **Chez le professeur (12/11 19:52 et 19:56), non concluant** : il ne sait pas si une seconde erreur se serait affichée après la première. La preuve reste la sonde (console sans `SO_REUSE` ni `open_files`). Relevé : au démarrage de spe.py dans son Firefox, le rapporteur ne portait que l'erreur de l'explorateur (`initStyleOption`, `isDir` sur None, item 10, confiée à W570), texte complet dans `qtpy6_essais/equipe/w566/trace_professeur_explorateur_1952.txt` ; aucune mention de SO_REUSEADDR ni de `start_open_files_server`.
