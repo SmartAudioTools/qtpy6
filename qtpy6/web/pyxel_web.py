@@ -52,6 +52,27 @@ def _canvas(largeur: int, hauteur: int) -> None:
     pyodide_js.canvas.setCanvas2D(canvas)
 
 
+_ENVELOPPES = ("qtpy6.", "spyder_pyxel.")
+
+
+def _cwd_du_jeu(avant: str) -> None:
+    """Le répertoire courant que Pyxel aurait choisi sans enveloppe. ``init`` exécute
+    ``os.chdir(os.path.dirname(inspect.stack()[1].filename) or ".")`` (lu dans ``pyxel_binding``) : le dossier de
+    l'APPELANT, censé être le jeu, d'où ses ``load("x.pyxres")`` relatifs. Ici l'appelant est ``init_web`` (et le
+    crochet du greffon) : le cwd partait dans ``qtpy6/web`` et le ``.pyxres`` du jeu n'était plus trouvé (item 8 du
+    TODO Portage). On remonte donc au premier cadre hors des enveloppes, et on fait le même ``chdir`` que Pyxel, un
+    dossier relatif résolu depuis ``avant``, le cwd d'avant ``init`` (Pyxel l'aurait résolu de là)."""
+    cadre = sys._getframe(1)
+    while cadre is not None and str(cadre.f_globals.get("__name__", "")).startswith(_ENVELOPPES):
+        cadre = cadre.f_back
+    if cadre is not None:
+        dossier = os.path.dirname(cadre.f_code.co_filename)
+        if dossier:
+            dossier = os.path.join(avant, dossier)  # sans effet si absolu
+        if dossier and os.path.isdir(dossier):
+            os.chdir(dossier)
+
+
 def completer(pyxel: Any) -> None:
     """Remplace ``init``, ``flip`` et ``run`` du module ``pyxel.pyxel_binding`` exécuté."""
     import js  # noqa: PLC0415
@@ -68,7 +89,9 @@ def completer(pyxel: Any) -> None:
         _canvas(width, height)
         etat["fps"] = kwargs.get("fps") or 30
         etat["boucle"] = None
+        avant = os.getcwd()
         init(width, height, *args, **kwargs)
+        _cwd_du_jeu(avant)
 
     def flip_web() -> None:
         boucle = etat["boucle"]

@@ -6,6 +6,21 @@ l'éditeur et le jeu se lance dans la console, l'image dans le panneau Pyxel, à
 import os
 
 ROUE = "./roues/pyxel-2.9.9-cp311-abi3-emscripten_5_0_3_wasm32.whl"
+DIAG_JEU = """
+import js, os, traceback
+def _t(m): js.console.log("DIAG " + str(m))
+try:
+    _t(("listdir", os.listdir("/home/pyodide/monkey")))
+    _t(("cwd avant init", os.getcwd()))
+    import pyxel
+    _t(("pyxel.init", getattr(pyxel.init, "__module__", None), getattr(pyxel.init, "__qualname__", None)))
+    pyxel.init(160, 120, headless=True)
+    _t(("cwd après init", os.getcwd()))
+    pyxel.load("projet_monkey.pyxres")
+    _t("load OK")
+except BaseException:
+    _t(traceback.format_exc())
+"""  # instrumentation, &diag=1
 _ICI = os.path.dirname(os.path.abspath(__file__))
 _source = open(os.path.join(_ICI, "spe.py"), encoding="utf-8").read()
 _avant = 'travailleur.configurer("./pyodide-qt/")'
@@ -35,6 +50,15 @@ def suite(main):
     chemin = dossier + "/" + jeu
     bouton = js.URLSearchParams.new(js.location.search).get("bouton") == "1"  # lancer au triangle, pas tout seul
     lancement = "" if bouton else f'exec(compile(open({chemin!r}).read(), {chemin!r}, "exec"), {{"__name__": "__main__", "__file__": {chemin!r}}})'
+    # Instrumentation (item 8 du TODO Portage) : ``&diag=1`` remplace le jeu par la chaîne init → load en headless
+    # (le Firefox du bac n'a pas de WebGL), chaque étape tracée dans la console de la page.
+    diag = js.URLSearchParams.new(js.location.search).get("diag") == "1"
+    # Le jeu réduit à init → load, lancé deux fois comme le triangle (%runfile --wdir), cwd du noyau ailleurs avant.
+    diagnostic = """
+open("diag_jeu.py", "w").write(@DIAG_JEU@)
+os.chdir("/home/pyodide")  # cwd hors du dossier du jeu (un second init dans le noyau est fatal : un seul lancement)
+exec(compile(open("/home/pyodide/monkey/diag_jeu.py").read(), "/home/pyodide/monkey/diag_jeu.py", "exec"), {"__name__": "__main__"})
+"""
     os.makedirs(dossier, exist_ok=True)
     from qtpy6.QtCore import QTimer
 
@@ -59,7 +83,7 @@ for nom in ({jeu!r}, "projet_monkey.pyxres"):
     x.responseType = "arraybuffer"; x.send()
     open({dossier!r} + "/" + nom, "wb").write(bytes(js.Uint8Array.new(x.response).to_py()))
 os.chdir({dossier!r})
-{lancement}
+{diagnostic if diag else lancement}
 """
     from qtpy6.QtCore import QTimer
     console = main.get_plugin("ipython_console")
@@ -76,6 +100,6 @@ os.chdir({dossier!r})
             QTimer.singleShot(1000, injecter)
     QTimer.singleShot(5000, injecter)
     js.window.etat = "monkey"
-''' + _fin)
+'''.replace("@DIAG_JEU@", repr(repr(DIAG_JEU))[1:-1]) + _fin)
 __file__ = os.path.join(_ICI, "spe.py")
 exec(compile(_source, __file__, "exec"))

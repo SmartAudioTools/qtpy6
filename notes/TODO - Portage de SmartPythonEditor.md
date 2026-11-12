@@ -159,6 +159,11 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
 8. **Pyxel, chargement des ressources** : `load("projet_monkey.pyxres")` → `Failed to open file` malgré l'injection
    (TODO son, « Suite du 12/10, 19 h 45 »). À vérifier : fichier dans le FS du noyau, cwd à `init`, `load` par chemin
    absolu. Essai : `spe_monkey.py?jeu=…`. Fichiers : `qtpy6/web/pyxel_web.py`. Niveau : mesuré (échec), cause supposée.
+   **[W549, 12/11] FAIT** : `init` fait `chdir` vers le dossier de son appelant, la doublure `init_web` → cwd dans
+   `qtpy6/web` ; `_cwd_du_jeu()` refait ce `chdir` vers le jeu. Mesuré par la sonde (headless) : échec reproduit sans,
+   `load OK` avec (note `2026-11-12 - Pyxel, ressources et son (W549).md`). Reste : jeu complet dans le Firefox du
+   professeur. **Défaut trouvé** : un second `pyxel.init` dans le même noyau est fatal (`handback_tstate == NULL`,
+   `pystate.c:222`) — relancer un jeu tue le noyau ; non traité.
 9. **Le son de Pyxel** : renvoi au TODO son, premier item. Existant : `memoire_partagee.reconcilier()`,
    `preambule._doubler_sleep` (`qtpy6/web/preambule.py:70`) ; aucun `AudioContext` dans `qtpy6/` (grep → 0).
    Niveau : supposé (piste, rien d'écrit).
