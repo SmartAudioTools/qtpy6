@@ -145,6 +145,9 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
      essentiel » ; dans la page, `alert()` de l'iframe ouvrirait le dialogue du navigateur (gel vu par W546).
    - À faire : dans `moteur_web.py`, remplacer `alert`/`console.error|warn` de l'iframe par des appels aux méthodes de
      la page (surchargeables) ; défaut Qt : `javaScriptAlert` ouvre un QMessageBox. Niveau : lu, non mesuré.
+   - **W560, 12/11 15:30 : FAIT, non commité** (relecteur à passer) : `_RELAIS` injecté en tête de la page de même
+     origine (alert, console.*, erreurs non rattrapées) ; défaut `open()` d'une QMessageBox ; 2 tests rouge→vert, script
+     éprouvé sous node. Non mesuré dans la page (tuteur non atteint par la sonde). Note `notes/2026-11-12 - Alert de l'iframe et environnement de l'exécution (W560).md`.
 3. **Slots homonymes d'un signal : le fork plante sans contournement d'essai.**
    - État : le fork du 01/11 définit encore `cursor_position_changed` (`spyder/plugins/editor/widgets/base.py:430`),
      `cell_changed` (`spyder/widgets/arraybuilder.py:156`), `item_expanded`
@@ -175,6 +178,9 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
    - Essai : retirer `--new-instance` de `essais/spyder/jalon7.py:79`, rejouer par la sonde. Même question pour le
      serveur pydoc d'OnlineHelp.
    - Niveau : supposé (lu, non remesuré). Note : `web.md` point 3 dit encore « `threading.Thread` … pas doublés ».
+   **[FAIT, W547, 12/11]** `--new-instance` retiré de `jalon7.py` ; sonde sur un site reconstruit avec le
+   `socket_web.py` de W548 : `post_visible_setup` passe, `closing` en 0,4 s, état « fini ». Mesuré. Serveur pydoc
+   d'OnlineHelp non essayé. Note `2026-11-12 - Jalon 7 sans contournement (W547).md`.
 6. **Jalon 8d : le serveur pylsp dans un Worker** (tranché par l'utilisateur, zmq « Compléments », 19 h 14 : « je
    souhaite le couvrir »).
    - Obtenir : client LSP de Spyder (`plugins/completion/providers/languageserver/client.py`, sockets `PAIR`,
@@ -218,6 +224,10 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
 12. **Fermeture de l'application non mesurée jusqu'au bout** et `InvalidStateError` de superqt
     (`_throttler._set_future_result`) : zmq, « Le gel au démarrage », pistes 3 et 4. Essai : poser l'état de la sonde
     après `main.closing` dans `jalon7.py`. Niveau : mesuré partiellement.
+    **[FAIT, W547, 12/11]** `jalon7.py` pose « fermeture » puis « fini » après la sortie de `exec()` : fermeture
+    mesurée jusqu'au bout. L'`InvalidStateError` n'est PAS de superqt : `jupyter_client/manager.py:111` via
+    `restarter.py:144 poll` (redémarreur du noyau qui tire pendant l'arrêt). Cause des minuteries pompées par les
+    attentes coopératives : supposée ; sans effet sur la fermeture ; absente du dernier essai. Correctif non posé.
 13. **Le reste du port** (faisabilité, « Points ouverts » et jalons 3-5) :
     - console : `max_line_count` (300 lignes) à monter ; Worker de réserve et complétion factice pour cacher 1,4 s ;
     - REPL persistant et explorateur de variables hors noyau : sans objet si la console IPython (8c) est retenue ;
@@ -245,6 +255,11 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
       QTcpSocket) ; vu dans les deux essais `--visible` du professeur (`/DATA/Python/qtpy6_essais/w558/capture_main.console.log`).
 15. **Chrome** : jalons 8a à 8c, Pyxel, `QWebEngineView` mesurés sous Firefox seul ; phase 2 du jalon 5 jamais lancée
     sous Blink (branches de la sonde écrites). Niveau : non mesuré.
+    Chrome : W552 (12/11), Blink de QtWebEngine (Chrome 140, sonde --chromium, dans le bac) : 7, 8a, 8b, 8c,
+    QWebEngineView (panneaux) passent ; Pyxel passe partiel ; jalon 5 : rechargement et IDBFS passent, puis arrêt
+    dans `CodeEditor.setPlainText` IDENTIQUE sous Firefox (régression commune depuis le 10/10, à reprendre au jalon 5) ;
+    propre à Blink : `cannot join current thread` (`threading_web.py:174`) à la fermeture de jalon7. Reste : Chrome de
+    bureau avec GPU, contrôle Firefox de Pyxel. Note `2026-11-12 - Jalons sous Chrome (W552).md`.
 16. **Outillage** : `_fait` de la sonde par compare-and-set (`qtpy6/web/sonde.py`, rencontré aux jalons 3 et 5) ; test
     unitaire de la règle « slot à QEvent sur place » de `bloquant.py` dans `tests/test_web.py` ; `SystemError: Cannot
     enter a promising task` résiduels (Pyxel, « Point ouvert immédiat »). Niveau : lu.
@@ -271,6 +286,11 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
     (`get_user_environment_variables` lance un shell par sous-processus, lu avec délai) sous la doublure QProcess ;
     attendu : la même ligne des deux côtés, doublure qui rend `os.environ` sans sous-processus dans la page
     (règle CLAUDE.md). Distinct de l'item 1 (%runfile tue le noyau) : ici le noyau n'est pas atteint.
+    - **W560, 12/11 15:30, mesuré (sonde, `essais/spyder/env18_spe.py`)** : l'environnement arrive en 2 s mais VIDE
+      (0 variable, `asyncio.create_subprocess_shell` échoue) ; le message reste pendant `get_cached_kernel` (23 s,
+      lancement du Worker), puis « Connexion au noyau… » sans fin : le noyau n'est JAMAIS connecté. Reste : doublure de
+      `create_subprocess_shell`/environnement (`sous_processus.py`, à W560 depuis 536b1a4), connexion du noyau à relever,
+      `ProcessusWeb.finished(int, ExitStatus)` (travailleur.py:232, demandé par le Superviseur). Note `notes/2026-11-12 - Alert de l'iframe et environnement de l'exécution (W560).md`.
 
 ## Décisions à prendre par l'utilisateur
 
