@@ -75,3 +75,9 @@ contexte « suspended », et SDL ne remplit alors rien.
    - `pyxel` expose-t-il un rendu PCM, comme `pyxel.save` d'un son ? Le pousser dans l'anneau depuis `reconcilier`.
    - Sinon, attendre le patch Pyodide / JSPI (item 1 bis).
 2. La machine chargée (charge 26-44) a rendu des essais instables : le délai de la sonde est passé à 450 s.
+
+## Décision du professeur (12/11 18:02)
+
+« Attendre l'item 1 bis » (choix entre rendu PCM côté Python et attente du patch Pyodide / JSPI) : item 9 suspendu,
+rien de plus avant la fin de 1 bis. Au branchement : `son_web.doubler()` dans `pyxel_web.init_web`, l'anneau dans
+`installer()` sous `try`, `"son_web.py"` dans le tuple de `travailleur.py`.
