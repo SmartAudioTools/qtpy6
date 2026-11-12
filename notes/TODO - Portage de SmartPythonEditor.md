@@ -82,13 +82,17 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
      à revoir, il ne reposait que sur le triangle visible de 19:45.
    - **Autre signature, W568 (professeur, 12/11 19:20, ×5, dans la fenêtre de W566)** : `%runfile` dans la console de la
      page rend `SystemError: Cannot enter a promising task from inside another running promising task`, pile
-     `code_runner._exec_code:597` → webloop `run_handle`. Le noyau SURVIT : ce n'est pas le plantage GC/JSPI ci-dessus.
-     Source du message (lu, Pyodide 314.0.7 du Worker, `site/pyodide/pyodide.asm.wasm`) : `enter_promising_task`
+     `code_runner._exec_code:597` → webloop `run_handle`. **Diagnostic W568 (19:45)** : la trace est le vidage
+     faulthandler d'un Pyodide MORT dans le Worker (pendant `ast.parse` du `%runfile`) ; la tâche morte n'est jamais
+     sortie, `in_task` reste vrai, chaque `run_handle` suivant est refusé. Le noyau ne survit pas : c'est ce plantage-ci
+     vu dans la console, cause du fatal inconnue (question posée au professeur : la ligne « The cause of the fatal
+     error was » de F12). Manque de qtpy6 : `travailleur.js` sans `on_fatal` (W568, après accord de W564). Source du message (lu, Pyodide 314.0.7 du Worker, `site/pyodide/pyodide.asm.wasm`) : `enter_promising_task`
      (`src/core/stack_switching/pystate.c`), drapeau unique `in_task` ; `run_handle` de la WebLoop est
      `create_once_callable(…, _may_syncify=True)`, donc une entrée promettante. Fichiers : `qtpy6/web/js/qtpy6web.js`,
      `bloquant.py`, `threading_web.py` (et le `preambule.py` de W564 : `_attendre`, `_garde_vie`, `time.sleep`, tous en
-     `run_sync`). Essai : `sh essais/spyder/sonde_tri.sh` ou `spe_m4.py?…&bouton=1`. Niveau : signalé par le
-     professeur, pas encore reproduit ; note `notes/2026-11-12 - runfile et tache promising imbriquee (W568).md`.
+     `run_sync`). Essai : `sh essais/spyder/sonde_tri.sh` (spe_m4/spe_monkey périmés : assert `configurer`) ;
+     `essais/spyder/gc_jspi/spe_rf.py` n'envoie pas le `%runfile` (`sw.execute` d'un QTimer ne revient pas). Niveau :
+     lu dans les sources, pas reproduit ; note `notes/2026-11-12 - runfile et tache promising imbriquee (W568).md`.
 1 bis. **Reproduction minimale, puis patch de Pyodide / JSPI** (demande de l'utilisateur, 12/11 13:58-13:59 : « et on
    ne peut pas réparer Pyodide / JSPI ? », « ajoute la reproduction minimale et le patch Pyodide au TODO »). La parade
    de l'item 1 tient l'éditeur en vie ; la cause, elle, n'est que supposée (GC jeune parcourant les piles des
@@ -310,6 +314,9 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
     **[FAIT, W553, 12/11, e40d9f5]** compare-and-set et test de bloquant (deux tests, échouent sans) ; SystemError :
     pile relevée (pompe `tourner` → `callPromising`), suite de la corruption GC (item 1, transmis à W545) ; reste : repro
     à relancer sur site stable. `notes/2026-11-12 - Outillage sonde et bloquant (W553).md`.
+    **[FAIT, W568, 12/11] Pyodide mort dans un Worker** : `travailleur.js` pose `_api.on_fatal` (`garder`) : cause sur
+    stderr puis `{fin: 1}` (mode lancer) ou `{erreur}` (mode appels), et ferme le Worker, au lieu d'un noyau muet suivi de
+    SystemError en série. Test node `tests/test_travailleur_js.py` (échoue sans). Reste : vu par le professeur.
 16 bis. **Trois tests de `tests/test_web.py` échouent depuis 82f2793** (boîte noire démarrée par `application()`),
     relevé par W553 le 12/11 : `test_application_persistant_dans_le_navigateur`, `test_police_fixe_dans_le_navigateur`,
     `test_coller_passe_par_qt`. Même message dans le sous-processus `en_navigateur` : `AttributeError:
@@ -365,6 +372,10 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
     **Contrainte de l'utilisateur (12/11/2026 19:42)** : « le profilage ne devra se faire que cette nuit à un moment
     où le CPU n'est pas utilisé et en concertation avec les autres sessions ». Session neuve ; banc
     `qtpy6_essais/w567/mesurer_demarrage.py` (option cProfile à ajouter).
+22. **Vitesse : démarrage de spe.py dans la page** (non attribué, plan de nuit : même contrainte du 12/11 19:42 que
+    l'item 21). Professeur, 12/11 19:49, dans son Firefox : « le demarage est horriblement long ». Mesuré une fois
+    (W566, sonde Firefox, 12/11 19:03, machine chargée : 8 sessions et Firefox concurrents) : durée totale 62,6 s, dont
+    `post_visible_setup` 48,7 s ; tas wasm 215 Mio. Log `qtpy6_essais/equipe/w566/sonde_spe.log`.
 
 ## Décisions à prendre par l'utilisateur
 
