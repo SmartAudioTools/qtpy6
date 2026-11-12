@@ -116,6 +116,13 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
    - Première mesure à faire (zmq, « Pistes pour un relecteur » 1) : quel appel de la doublure coûte (`setHtml`,
      polices, iframe ?), avec `PANNEAUX_WEB=1` dans `panneaux.py`.
    - Niveau : mesuré (une passe Firefox par hypothèse). Décision D3.
+2 bis. **La doublure `QWebEngineView`/`QWebEnginePage` n'a pas `renderProcessTerminated`** (relevé par W551, 12/11).
+   - Appelant : greffon `spyder_python_tutor`, `main_widget.py:385` (`page.renderProcessTerminated.connect`) →
+     AttributeError à la première trace, avant la vue web.
+   - À faire : un `Signal` sans émission dans `qtpy6/web/moteur_web.py` (un navigateur ne perd pas un processus de rendu à
+     part ; l'iframe meurt avec la page), sous le nom Qt, sans branche dans le greffon.
+   - Essai : `site/index.html?script=greffons.py` (W551), action « Lancer » du tuteur.
+   - Niveau : lu dans les sources, non mesuré (les actions des greffons ne s'impriment pas encore, item 14).
 3. **Slots homonymes d'un signal : le fork plante sans contournement d'essai.**
    - État : le fork du 01/11 définit encore `cursor_position_changed` (`spyder/plugins/editor/widgets/base.py:430`),
      `cell_changed` (`spyder/widgets/arraybuilder.py:156`), `item_expanded`
@@ -185,8 +192,10 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
     - console : `max_line_count` (300 lignes) à monter ; Worker de réserve et complétion factice pour cacher 1,4 s ;
     - REPL persistant et explorateur de variables hors noyau : sans objet si la console IPython (8c) est retenue ;
     - doublure `chardet.detect → utf-8` (63 Mio économisés) : D6 ;
-    - dossier autorisé de Chrome comme troisième emplacement de `persistant`, bouton « Réautoriser » : non codé
-      (existant : `stockage.monter`, `qtpy6/web/stockage.py:59`) ;
+    - dossier autorisé de Chrome comme troisième emplacement de `persistant`, bouton « Réautoriser » : codé (W556),
+      `application(persistant=chemin, disque=True)`, opt-in (l'automatique sur tout Chrome, écarté, changerait toutes les
+      applications) ; repli Firefox mesuré (sonde), boutons vus sous Blink ; reste la mesure sous Chrome par le professeur.
+      Note `2026-11-12 - Dossier Chrome comme emplacement persistant (W556).md` ;
     - couche Dropbox par élève : hors qtpy6 (SmartTeacher), raccordement professeur à décider ;
     - `EN_RETARD` : FAIT (W551, 12/11), retiré, les six fichiers du fork sont identiques à l'installé (`cmp`) ;
     - Interpréteur : chemin factice `/pyodide/3.13/bin/python` dans `spe.py` ; `custom` reste faux.
@@ -196,9 +205,10 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
     stop, interpreter, pyxel, `spyder_code_analysis`, `spyder_python_tutor` (mesuré). Reste : `spyder_collab` casse à
     l'import (`QNetworkInterface` absent de QtNetwork wasm ; doublure QTcpServer/QTcpSocket sur relais WebSocket à
     écrire) ; `spyder_smartteacher` absent sans erreur (cause non mesurée ; le pont veut le dossier QCM : réglage) ;
-    `renderProcessTerminated` manque à `moteur_web.py` pour le tuteur (lu) ; actions (Docteur, Lancer) non mesurées :
+    `renderProcessTerminated` manque à `moteur_web.py` pour le tuteur (lu, item 2 bis) ; actions (Docteur, Lancer) non mesurées :
     la page ne rend plus rien après la liste des greffons ; volet pylint à activer dans la configuration pour Docteur.
-    Hors champ : claude, konsole, tortoisehg, window_controls, viztracer, line_profiler.
+    Hors champ : claude, konsole, tortoisehg, window_controls, viztracer, line_profiler. Commit 150070b : archive du site
+    saine (sources seules, écriture atomique, `--sortie`), pylsp de W548 compris.
 15. **Chrome** : jalons 8a à 8c, Pyxel, `QWebEngineView` mesurés sous Firefox seul ; phase 2 du jalon 5 jamais lancée
     sous Blink (branches de la sonde écrites). Niveau : non mesuré.
 16. **Outillage** : `_fait` de la sonde par compare-and-set (`qtpy6/web/sonde.py`, rencontré aux jalons 3 et 5) ; test
