@@ -31,7 +31,7 @@ async function demarrer({ indexURL, archives, module: nom, cwd }) {
   const zips = archives.map(a => telecharger(a.url));
   const { loadPyodide } = await import(indexURL + "pyodide.mjs");  // worker module : importScripts est refusé chez Google
   const [p, ...donnees] = await Promise.all([loadPyodide({ indexURL }), ...zips]);
-  py = p;
+  py = garder(p, m => postMessage(courant ? { id: courant, erreur: m } : { erreur: m }));  // sans id : « le worker est tombé »
   const sortie = { write: octets => { postMessage({ id: courant, sortie: decodeur.decode(octets, { stream: true }) }); return octets.length; } };
   py.setStdout(sortie); py.setStderr(sortie);
   archives.forEach((a, i) => py.unpackArchive(donnees[i], "zip", { extractDir: a.dossier }));
@@ -62,8 +62,19 @@ self.signaux = [];  // {signal} reçus, pas encore livrés au Python du programm
 const entrees = [], attentes = [];  // stdin : ce qui est arrivé sans être lu, et les lectures qui attendent
 self.prochaine_entree = () => entrees.length ? Promise.resolve(entrees.shift()) : new Promise(r => attentes.push(r));
 
+// Un Pyodide mort (fatal_error : « index out of bounds », « unreachable ») ne rend plus jamais la main : sans ce rappel,
+// le Worker reste muet et la WebLoop d'un noyau enchaîne « Cannot enter a promising task » à chaque minuterie (W568).
+function garder(p, signaler) {
+  p._api.on_fatal = e => { signaler("Pyodide mort (erreur fatale) dans le Worker : " + (e && e.message || e));
+    self.postMessage = () => {};  // fatal_error relance e : le {erreur} du catch de lancer/traiter ne doit pas suivre
+    close();
+  };
+  return p;
+}
+
 function charger(indexURL) {
-  return import(indexURL + "pyodide.mjs").then(({ loadPyodide }) => loadPyodide({ indexURL }));
+  return import(indexURL + "pyodide.mjs").then(({ loadPyodide }) => loadPyodide({ indexURL }))
+    .then(p => garder(p, m => { postMessage({ sortie_erreur: "\n" + m + "\n" }); postMessage({ fin: 1 }); }));
 }
 
 async function lancer({ indexURL, zip, dossier, argv, cwd, roues, env, web }) {
