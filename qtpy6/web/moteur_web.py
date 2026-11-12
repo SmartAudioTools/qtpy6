@@ -6,8 +6,8 @@ navigateur que la vue cale sur son widget (``calque.Calque``, comme ``QPdfView``
 ``setHtml(html, baseUrl)`` passe par ``srcdoc`` : la page est de même origine, son texte, sa sélection et ses liens
 sont lisibles. Les ressources locales qu'elle cite (``<script src>``, ``<link href>``, ``<img src>``, relatives à
 ``baseUrl`` ou en ``file://``), lues dans le système de fichiers de Pyodide, deviennent des URL ``blob:`` (les ``url()``
-des feuilles de style aussi) ; celles qu'un script charge lui-même ensuite (MathJax et ses extensions) ne sont pas
-servies. ``load`` d'un fichier local fait de même ; ``load`` d'une URL http(s) pose ``src`` : la page est alors d'une
+des feuilles de style aussi, et les chaînes ``'file:///…'`` des scripts de la page) ; celles qu'un script compose ou
+charge lui-même ensuite (MathJax et ses extensions) ne sont pas servies. ``load`` d'un fichier local fait de même ; ``load`` d'une URL http(s) pose ``src`` : la page est alors d'une
 autre origine, et le navigateur interdit d'y lire quoi que ce soit — ``toPlainText``, ``toHtml``, ``selectedText`` et
 ``runJavaScript`` rendent une chaîne vide (ou None), ``findText`` ne trouve rien, et ses liens ne passent pas par
 ``acceptNavigationRequest``.
@@ -170,8 +170,21 @@ def _ressources(html: str, base: QUrl) -> str:
         return f"{m.group(1)}{m.group(2)}{m.group(3)}{_blob(chemin)}{m.group(3)}" if chemin else m.group(0)
 
     html = _BALISE.sub(lambda m: _ATTRIBUT.sub(attribut, m.group(0)), html)
+    html = re.sub(r"(<script\b[^>]*>)(.*?)(</script>)", lambda m: m.group(1) + _urls_script(m.group(2)) + m.group(3),
+                  html, flags=re.I | re.S)
     return re.sub(r"(<style\b[^>]*>)(.*?)(</style>)", lambda m: m.group(1) + _urls_css(m.group(2), base) + m.group(3),
                   html, flags=re.I | re.S)
+
+
+def _urls_script(source: str) -> str:
+    """Les chaînes ``'file:///…'`` d'un script de la page, d'un fichier lisible, en URL blob: : le navigateur refuse
+    file:// à une page servie en http(s). La page de chargement de la console de Spyder (``loading.html``) charge ainsi
+    son image, et son ``onerror`` appelle ``alert()``, qui suspend toute la page."""
+    def remplacer(m):
+        chemin = _local(m.group(2), QUrl())
+        return f"{m.group(1)}{_blob(chemin)}{m.group(1)}" if chemin else m.group(0)
+
+    return re.sub(r"""(["'`])(file://[^"'`\s]+)\1""", remplacer, source)
 
 
 @_a_plat

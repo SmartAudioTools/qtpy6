@@ -549,8 +549,9 @@ if sys.platform == "emscripten":
         print("WORKER termine", file=sys.__stdout__, flush=True)
         return r
     _tv5.ProcessusWeb.start = _st8_
-# Bissection (12/10) : sans les widgets web (option de Spyder --no-web-widgets : page de chargement de la console, aide)
-if os.environ.get("PANNEAUX_WEB", "0") == "0":
+# Bissection (12/10) : sans les widgets web (option de Spyder --no-web-widgets). Plus nécessaire depuis W546 (12/11) : le gel
+# était l'alert() de loading.html (image en file:// non servie), corrigé dans qtpy6/web/moteur_web.py ; PANNEAUX_WEB=0 le remet
+if os.environ.get("PANNEAUX_WEB", "1") == "0":
     from spyder.app import cli_options as _co9  # noqa: E402
     _go9 = _co9.get_options
     _co9.get_options = lambda argv=None: _go9(list(argv or []) + ["--no-web-widgets"])

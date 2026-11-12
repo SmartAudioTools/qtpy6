@@ -104,7 +104,10 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
      mesurée : `_garde_vie.run_forever` reste dans `run_sync` toute la vie du noyau (« pendant une suspension » = toujours).
    - Coût : chaque essai de c. est une reconstruction de Pyodide-PySide6 (durée à relever à la première). Ne commence
      c. qu'avec b. prouvée.
-2. **[EN COURS W546, 12/11 14:10] Les widgets web de Spyder gèlent la page au démarrage de la console.** Obtenir la console sans `--no-web-widgets`.
+2. **[FAIT W546, 12/11] Les widgets web de Spyder gèlent la page au démarrage de la console.** Obtenir la console sans `--no-web-widgets`.
+   - FAIT (note `2026-11-12 - Widgets web, gel au démarrage (W546).md`) : le gel était l'`alert()` de `loading.html`
+     (image en `'file:///…'` dans un script, non servie) ; `_urls_script` dans `moteur_web.py` ; 8c 5/5 avec widgets
+     web, Firefox, une passe. D3 sans objet. Reste : `spe.py` sans l'option (W555) ; doublure `javaScriptAlert`.
    - Cause (zmq, « Le gel au démarrage ») : la page de chargement (`ClientWidget._create_loading_page`, `FrameWebView`)
      sur la doublure `QWebEngineView`. Avec `--no-web-widgets` : 5/5 (In [1] en 3,6 s, `1+1`, variables, redémarrage).
    - Existant : `qtpy6/web/moteur_web.py:438` (`class QWebEngineView(Calque)`), `qtpy6/web/calque.py`.
