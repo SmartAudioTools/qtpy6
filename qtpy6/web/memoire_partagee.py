@@ -37,12 +37,16 @@ _MOTEUR = """
     for (let i = 0; i < q >> 2; i++) if (P[i] !== S[i]) L[i] = S[i] = P[i];
     for (let i = q; i < m.n; i++) if (p[i] !== s[i]) l[i] = s[i] = p[i];
   };
-  setInterval(() => liste.forEach(passe), 4);
+  const crochets = new Set();  // appelés à chaque passe, après les segments (son_web : la pompe du son) ; leur argument :
+  // vrai depuis la minuterie (aucun wasm sur la pile), faux depuis reconcilier() (appel imbriqué sous Python)
+  const tout = sommet => { liste.forEach(passe); crochets.forEach(f => f(sommet)); };
+  setInterval(() => tout(true), 4);
   self.qtpy6_memoires ??= new Map();  // nom → SharedArrayBuffer : ceux que la page a envoyés (travailleur.js) ou créés ici
   return self.qtpy6_memoire = {
     ajouter: (module, l, s, sab, n) => { const m = { module, l, s, sab, n }; passe(m); liste.add(m); return m; },
     retirer: m => liste.delete(m),
-    passer: () => liste.forEach(passe),
+    passer: () => tout(false),
+    crochet: f => crochets.add(f),
     envoyer: (w, nom, sab) => w.postMessage({ memoire: { nom, sab } }),
   };
 })()
@@ -68,6 +72,11 @@ def enregistrer_worker(worker: Any) -> None:
         moteur = _moteur()
         for nom, sab in _SEGMENTS.items():
             moteur.envoyer(worker, nom, sab)
+
+
+def ajouter_crochet(fonction: Any) -> None:
+    """Une fonction JS appelée à chaque passe du moteur (minuterie de 4 ms et ``reconcilier()``), après les segments."""
+    _moteur().crochet(fonction)
 
 
 def reconcilier() -> None:
