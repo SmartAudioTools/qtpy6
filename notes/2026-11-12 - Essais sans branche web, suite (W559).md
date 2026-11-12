@@ -60,9 +60,42 @@ Relevé (releve) : importeurs dans le fork (hors tests) et `essais/roues/lib`, d
   SmartPythonEditor (la doublure de `preparer.py` ne sert que le SmartPython de l'essai, qui ne l'a pas).
 - **métadonnées de pylint** : non traité.
 
+## 4d fini, Interpréteur, spe.py sans capture (18:30-19:00)
+
+- **Roues** : le professeur a téléchargé pickleshare 0.7.5, three_merge 0.1.1, inflection 0.5.1 (« je l'ai fait ») ;
+  dépaquetées dans `essais/roues/lib` (non suivi par git), ajoutées à `construire_site.py` (PAQUETS ; pickleshare,
+  module à un fichier, dans DISTRIBUTIONS) ; doublures retirées de `preparer.py`. Mesuré, natif : `walk_packages(spyder)`
+  mêmes 5 échecs, les trois servis par `essais/roues/lib`. Page : présents dans app.zip.
+- **keyring** : `qtpy6/web/keyring_web.py` (neuf), posé par `lancer()` : `get/set/delete_password` en mémoire de la page
+  (rien de persisté), `get_keyring()` rend ce trousseau (pas une `backends.fail.Keyring` : le client distant le croit
+  utilisable), `keyring.errors`. Mesuré hors page (set/get/delete, `PasswordDeleteError`) ; page : la doublure de
+  `preparer.py` ne s'imprime plus (keyring déjà servi). La doublure de `preparer.py` reste pour le SmartPython natif de
+  l'essai, qui n'a pas keyring (le vrai SmartPythonEditor l'a).
+- **pylint** : doublure de métadonnées gardée dans `preparer.py` : elle n'est pas propre au web (elle sert aussi le
+  SmartPython natif sans pylint) ; la vraie roue (astroid, dill, isort…) n'apporterait rien tant que le greffon est coupé.
+- **Interpréteur** : `qtpy6.web._executable`, appelé par `lancer()` : quand `sys.executable` n'est pas un fichier
+  (Pyodide : `/home/pyodide/this.program`), un fichier vide `/home/pyodide/versions/3.13/bin/python` le remplace (chemin
+  pyenv : le combo du fork le nomme « 3.13 » ; nom en `python` : `sous_processus._PYTHONS` le reconnaît). `spe.py` écrit
+  `sys.executable` comme `update_spyder_interpreters.py` sur le bureau, plus de chemin factice. Écarté : laisser le
+  chemin dans spe.py (une ligne propre au web). Mesuré, page : `custom_interpreters_list` =
+  `['/home/pyodide/versions/3.13/bin/python']` gardée par Spyder (fichier valide) ; le combo lui-même n'est pas vu
+  (capture de 1000 px, barre coupée).
+- **spe.py sans capture, cause établie** : spe.py définit `SUITE`, jalon7 n'arme donc pas `rapport()`, et `SUITE` ne
+  l'appelle pas (la fenêtre reste ouverte) : `window.etat` ne devient jamais « fini », la sonde attend son délai. Ce n'est
+  pas un défaut de la page (journal : post_visible_setup 16 s, durée totale 27 s). Remède d'instrumentation : `SUITE`
+  pose `fin("ouvert")` 2 s après ; `--etat ouvert` capture (`qtpy6_essais/w559/capture_spe_c.png`, sonde 0).
+- **Défaut trouvé, hors de mon item** : à l'ouverture de spe.py, le rapporteur d'erreur de Spyder s'affiche :
+  `mainwindow.py:1526 start_open_files_server` → `AttributeError: module 'socket' has no attribute 'SO_REUSEADDR'`
+  (le `socket` de Pyodide). Manque de qtpy6 (doublure de socket ou serveur sans effet dans la page), signalé au
+  Superviseur.
+- **Page, jalon 8c** (site reconstruit 18:43 avec tout ceci) : 5/5, noyau prêt 20,4 s. Un essai précédent (18:35, avant
+  keyring/executable, machine chargée : noyau 34,6 s) : 4/5, redémarrage « rien en 180 s » et `ZMQError: Not a socket`
+  à la fermeture ; la ZMQError revient au 5/5 aussi, après le jalon : non lié, non traité.
+- **Hors brief, à la demande de W565** : `_garder_le_focus` (focus clavier après clic sur un widget non-texte, item 8),
+  son code tel qu'il l'a mesuré, appelé par `application()`.
+
 ## RESTE
 
-- 4d, relevé seulement : `pickleshare`, `three_merge`, `inflection`, `keyring`, `jellyfish`, `bcrypt` absents du
-  SmartPython natif ET du `pyodide-lock.json` de Pyodide-Qt ; utilisateurs : pickleshare → `module_completion.py`,
-  three_merge → `lsp_mixin.py`, keyring → `widgets/github`, `remoteclient`. Choix par cas non fait.
-- Interpréteur (`spe.py:42-54`), alias qtpy en natif, spe.py sans capture : non commencés (contexte de la session).
+- Alias qtpy en natif : cinq lignes au professeur (SmartPythonEditor natif est en PyQt5 et Python 3.12, qtpy6 absent
+  de son environnement ; l'alias ne sert que PySide6/PyQt6).
+- `socket.SO_REUSEADDR` dans la page (ci-dessus).

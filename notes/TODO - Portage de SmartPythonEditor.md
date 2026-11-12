@@ -176,6 +176,8 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
    - c. **FAIT (W559, 12/11)** : `jalon4.py` appelle `waitForFinished(1000)` sans `if not WEB`. Non relancé dans la page.
    - d. Doublures de l'essai qui sont des manques de qtpy6 ou de l'archive : `pickleshare`, `three_merge`,
      `jellyfish`, `bcrypt`, `keyring`, `inflection`, métadonnées de `pylint` (`preparer.py:36-62`).
+     FAIT (W559, 12/11) : jellyfish/bcrypt retirés (importés par aucun module) ; pickleshare, three_merge, inflection
+     en vraies roues ; keyring = doublure qtpy6 en mémoire (`qtpy6/web/keyring_web.py`) ; pylint gardé (pas propre au web).
    - Niveau : lu dans les sources (12/11). Commande : `grep -nE "emscripten|qtpy6\.web|import js\b|pyodide"
      essais/spyder/spe.py essais/spyder/preparer.py` (9 lignes le 12/11 : 6 et 3).
 5. **Serveur d'instance unique dans un `threading.Thread` : `--new-instance` reste dans l'essai.**
@@ -252,7 +254,8 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
       Note `2026-11-12 - Dossier Chrome comme emplacement persistant (W556).md` ;
     - couche Dropbox par élève : hors qtpy6 (SmartTeacher), raccordement professeur à décider ;
     - `EN_RETARD` : FAIT (W551, 12/11), retiré, les six fichiers du fork sont identiques à l'installé (`cmp`) ;
-    - Interpréteur : chemin factice `/pyodide/3.13/bin/python` dans `spe.py` ; `custom` reste faux.
+    - Interpréteur : chemin factice `/pyodide/3.13/bin/python` dans `spe.py` ; `custom` reste faux. FAIT (W559, 12/11) : `qtpy6.web._executable`
+      donne à `sys.executable` un vrai fichier au chemin pyenv ; spe.py écrit `sys.executable`. Mesuré page.
     Niveau : mesuré pour les coûts, supposé pour les remèdes.
 14. **Les treize greffons** (faisabilité, « Les treize greffons » ; W551, `notes/2026-11-12 - Greffons dans la page
     (W551).md`). Embarqués les sept portables (`construire_site.py`, essai `greffons.py`). Inscrits dans la page :

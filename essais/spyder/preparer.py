@@ -29,14 +29,7 @@ def doublure(nom, **attrs):
         print(f"doublure : {nom}")
 
 
-class PickleShareDB(dict):
-    """Ce que module_completion en fait : un dict persistant ; ici en mémoire."""
-    def __init__(self, root):
-        super().__init__()
-
-
-doublure("pickleshare", PickleShareDB=PickleShareDB)        # en attendant la roue pure
-doublure("three_merge", merge=lambda a, b, c: a)             # idem
+# pickleshare, three_merge, inflection : vraies roues (essais/roues, W559 4d, 12/11/2026), plus de doublure.
 # jellyfish et bcrypt : plus de doublure (W559, 12/11/2026) : déclarés par setup.py du fork, importés par aucun module.
 doublure("keyring", __path__=[], get_password=lambda *a: None, set_password=lambda *a: None)
 doublure("keyring.errors", NoKeyringError=type("NoKeyringError", (Exception,), {}))
@@ -56,9 +49,6 @@ except importlib.metadata.PackageNotFoundError:
     sys.path.append(os.path.dirname(_meta))
     print("doublure : métadonnées de pylint")
 # PySide6.QtPrintSupport : plus de doublure depuis le 10/10/2026, le module est chargé à la demande (wasm/pyodide-qt.mjs).
-doublure("inflection",                                       # pour qstylizer ; les deux seules fonctions qu'il appelle
-         underscore=lambda m: re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", m)).lower(),
-         camelize=lambda m, maj=True: "".join(x.title() if i or maj else x for i, x in enumerate(m.split("_"))))
 
 
 def etape(nom):

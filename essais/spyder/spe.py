@@ -41,18 +41,11 @@ for section, option, valeur in (("editor", "show_filename_toolbar", False),
                                 ("statusbar", "clock/enable", False), ("statusbar", "show_status_bar", False)):
     CONF.set(section, option, valeur)
 # La liste de la barre Interpréteur (main_interpreter/custom_interpreters_list), que update_spyder_interpreters.py
-# remplit à l'installation avec les environnements pyenv de la machine : ici le seul interpréteur, celui de la page. Le
-# combo nomme un interpréteur d'après le dossier deux crans au-dessus de l'exécutable (convention pyenv) ; le
-# sys.executable de Pyodide (/home/pyodide/this.program) donnerait « Python home », d'où ce chemin, un fichier vide dans
-# la mémoire de la page, qui n'est que l'étiquette : custom reste faux, le noyau ne le lit pas.
-_python = f"/pyodide/{'.'.join(map(str, sys.version_info[:2]))}/bin/python"
-try:  # le greffon MainInterpreter retire de la liste tout chemin qui n'est pas un fichier (validate_custom_interpreters_list)
-    os.makedirs(os.path.dirname(_python), exist_ok=True)
-    open(_python, "a").close()
-except OSError:  # sur le bureau, la racine n'est pas inscriptible : l'essai est fait pour la page
-    pass
-CONF.set("main_interpreter", "custom_interpreters_list", [_python])
-CONF.set("main_interpreter", "custom_interpreter", _python)
+# remplit à l'installation avec les environnements pyenv de la machine : ici le seul interpréteur, celui qui exécute
+# l'essai. Dans la page, qtpy6 donne à sys.executable un vrai fichier au chemin pyenv (…/versions/3.13/bin/python,
+# _executable du lanceur de qtpy6, W559) : le combo le nomme « 3.13 » ; custom reste faux, le noyau prend sys.executable.
+CONF.set("main_interpreter", "custom_interpreters_list", [sys.executable])
+CONF.set("main_interpreter", "custom_interpreter", sys.executable)
 CONF.set("toolbar", "last_visible_toolbars",
          [b for b in CONF.get("toolbar", "last_visible_toolbars", []) if b != "main_toolbar"])
 
@@ -91,6 +84,17 @@ def SUITE(main, rapport):  # noqa: N802, ARG001 - jalon7.py l'appelle après pos
     icone()
     plein.triggered.connect(icone)  # branché après toggle_fullscreen : passe après lui
     barre.addAction(plein)
+    # Instrumentation : la fenêtre reste ouverte, rapport() n'est jamais appelé, la sonde attendait « fini » jusqu'à son
+    # délai, sans capture (cause relevée par W559, 12/11/2026) ; `--etat ouvert` capture la fenêtre ouverte.
+    from qtpy6.QtCore import QTimer
+    def ouvert():
+        from qtpy6.QtWidgets import QApplication
+        for w in QApplication.topLevelWidgets():  # le rapporteur d'erreur de Spyder garde la trace pour lui : au journal
+            if type(w).__name__ == "SpyderErrorDialog" and w.isVisible():
+                print("rapporteur d'erreur :", w.error_traceback, file=sys.__stdout__)
+        print("interpréteurs :", CONF.get("main_interpreter", "custom_interpreters_list"), file=sys.__stdout__)
+        fin("ouvert")  # noqa: F821 - fin() de jalon7.py, exécuté dans ces globales
+    QTimer.singleShot(2000, ouvert)
 
 
 exec(compile(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "jalon7.py")).read(), "jalon7.py", "exec"))

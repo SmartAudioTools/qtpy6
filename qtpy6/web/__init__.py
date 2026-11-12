@@ -90,6 +90,7 @@ def application(polices: str | os.PathLike[str] | None = None, defaut: QFont | t
             if defaut is not None:
                 app.setFont(defaut if isinstance(defaut, QFont) else QFont(*defaut))
             _coller()
+            _garder_le_focus()
             _dessiner_aussitot()
             _plein_ecran(app)
             from . import boite_noire  # noqa: PLC0415
@@ -178,6 +179,26 @@ def _plein_ecran(app):
 
     app._qtpy6_plein_ecran = PleinEcran(app)
     app.installEventFilter(app._qtpy6_plein_ecran)
+
+
+def _garder_le_focus():
+    """Un clic sur un widget qui n'est pas un champ de texte laisse le clavier à Qt, comme sur le bureau. Qt-WASM reçoit
+    les touches par l'élément de son conteneur qui a le focus du navigateur (``qt-window-focus-helper``, ou
+    ``qt-window-input-element`` pour un champ de texte) et ne le lui redonne que quand le widget focus CHANGE ; or un clic
+    sur le canevas, sans rien de focusable dessous, donne le focus du navigateur au ``body``. Cliquer sur un widget qui
+    avait déjà le focus de Qt (l'écran du jeu Pyxel) le laissait sans touche : 0 KeyPress, 3 sur 3 avec ceci (Firefox,
+    12/11/2026, item 8 du TODO Portage, note W565). Seul l'élément de Qt qui perd le focus vers RIEN pendant un appui
+    le reprend ; un focus donné à un autre élément n'est pas touché."""
+    import js  # noqa: PLC0415 - voir la docstring du module
+
+    js.Function.new("""let presse = false;
+        window.addEventListener("pointerdown", () => { presse = true; }, true);
+        for (const n of ["pointerup", "pointercancel"]) window.addEventListener(n, () => { presse = false; }, true);
+        document.addEventListener("focusout", e => {
+          const el = e.composedPath()[0];
+          if (!presse || e.relatedTarget || !String(el.className).startsWith("qt-window-")) return;
+          setTimeout(() => { if (!document.activeElement || document.activeElement === document.body) el.focus({preventScroll: true}); }, 0);
+        }, true);""")()
 
 
 def _coller():
@@ -277,6 +298,20 @@ def importer(nom, signaler=None, periode=0.04):
             signaler(vu[0])
 
 
+def _executable():
+    """``sys.executable`` de Pyodide (``/home/pyodide/this.program``) n'est pas un fichier : une application qui le
+    range parmi ses interpréteurs le voit retiré (Spyder, ``validate_custom_interpreters_list``) ou mal nommé. qtpy6 le
+    remplace par un vrai fichier (vide) au chemin d'un environnement pyenv, ``…/versions/3.13/bin/python`` : l'application
+    écrit ``sys.executable`` comme sur le bureau (Interpréteur, W559, 12/11/2026). Le nom finit par ``python`` : les
+    sous-processus le reconnaissent (``sous_processus._PYTHONS``)."""
+    if os.path.isfile(sys.executable):
+        return
+    python = f"/home/pyodide/versions/{sys.version_info.major}.{sys.version_info.minor}/bin/python"
+    os.makedirs(os.path.dirname(python), exist_ok=True)
+    open(python, "a").close()
+    sys.executable = python
+
+
 def _reglages_du_worker():
     """Le Worker d'un ``QProcess`` (``travailleur``) prend par défaut le Pyodide et les roues de la page (posés par
     ``preparer`` de qtpy6web.js) au lieu du Pyodide en ligne de ``versions.json`` : l'application n'appelle plus
@@ -305,9 +340,11 @@ def lancer(script, args=(), pret=None, module=None):
 
     _qtpy.installer()  # qtpy servi par qtpy6 : Spyder, qtconsole… trouvent les doublures de la page sous « qtpy »
     _reglages_du_worker()
-    from . import chardet_web  # noqa: PLC0415
+    _executable()
+    from . import chardet_web, keyring_web  # noqa: PLC0415
 
     chardet_web.installer()  # chardet.detect : utf-8 sans charger chardet (63 Mio) quand le fichier en est (D6)
+    keyring_web.installer()  # trousseau en mémoire de la page : pas de trousseau dans un navigateur (4d)
 
     chemin = os.path.abspath(script)
     appele = []
