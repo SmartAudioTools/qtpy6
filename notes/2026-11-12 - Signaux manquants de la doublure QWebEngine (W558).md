@@ -58,3 +58,7 @@ CLAUDE.md interdit.
   attention »). Le dialogue d'erreur au démarrage est l'ImportError `QNetworkInterface` de `spyder_collab/network.py:43`
   (19,06 s, connu, item 14). « J'ai essayé de lancer le script qui était ouvert, et ça a tourné dans le vide en cherchant
   les variables d'environnement » : Exécuter de Spyder, hors de cet item, signalé au Superviseur.
+- 3e essai du professeur (15:25) : « Lancer Python Tutor » franchit `_ensure_web` — le signal doublé est MESURÉ dans la
+  page (plus d'AttributeError) — puis la trace finit sur `TypeError: TutorRunner._on_finished() missing 1 required
+  positional argument: 'status'` : `ProcessusWeb.finished = Signal(int)` (`travailleur.py:232`) au lieu de
+  `finished(int, QProcess.ExitStatus)`. Fichier d'un autre worker : inscrit au TODO 2 bis, transmis au Superviseur.

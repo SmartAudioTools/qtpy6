@@ -134,6 +134,11 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
    Essai du professeur (`--visible`, 15:05) : « Lancer » du tuteur non observé ; dialogue d'erreur au démarrage =
    ImportError `QNetworkInterface` de `spyder_collab/network.py:43` (connu, item 14) ; « Exécuter » de Spyder « tourne
    dans le vide en cherchant les variables d'environnement » (professeur, non attribué : à inscrire comme item).
+   **Mesuré 15:25 (3e essai du professeur)** : « Lancer Python Tutor » passe `_ensure_web` (plus d'AttributeError) et
+   lance la trace ; à la fin, `TypeError: TutorRunner._on_finished() missing 1 required positional argument: 'status'`
+   (`bloquant.py:377`) : `ProcessusWeb.finished = Signal(int)` (`qtpy6/web/travailleur.py:232`), Qt émet
+   `finished(int, QProcess.ExitStatus)` — doublure à compléter (Signal(int, ExitStatus), émis avec NormalExit/CrashExit),
+   fichier d'un autre worker, non attribué. Appelant : `spyder_python_tutor/spyder/tracer.py:78, 97`.
    `notes/2026-11-12 - Signaux manquants de la doublure QWebEngine (W558).md`.
 2 ter. **`javaScriptAlert` / `javaScriptConsoleMessage` surchargées mais jamais appelées par la doublure** (W558, 12/11).
    - Appelant : `_DebugPage` du tuteur (`main_widget.py:372-380`) : intercepte `alert()` de pytutor.js, « garde-fou
