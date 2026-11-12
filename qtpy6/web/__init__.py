@@ -285,7 +285,10 @@ def lancer(script, args=(), pret=None, module=None):
     script se termine. Rend le code de sortie."""
     import runpy  # noqa: PLC0415
 
+    from .. import _qtpy  # noqa: PLC0415
     from . import bloquant  # noqa: PLC0415
+
+    _qtpy.installer()  # qtpy servi par qtpy6 : Spyder, qtconsole… trouvent les doublures de la page sous « qtpy »
 
     chemin = os.path.abspath(script)
     appele = []

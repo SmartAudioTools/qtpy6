@@ -2,11 +2,10 @@
 l'utilisateur affiche (éditeur, console IPython, explorateur de variables, fichiers, projets, plan, recherche), sans
 instrumentation et sans fermeture automatique : ``site/index.html?script=spe.py``.
 
-Deux réglages de CONFIGURATION, pas de branche dans le code de l'application :
-  - les panneaux que l'utilisateur n'affiche pas sont désactivés (``<section>/enable``), comme le ferait la page de
-    préférences de Spyder : Plots, aide, aide en ligne, historique, pylint, complétions ;
-  - l'option de Spyder ``--no-web-widgets`` : la page de chargement de la console, rendue par la doublure QWebEngineView
-    de qtpy6, gèle la page (bissection du 12/10, notes/2026-10-11 - Doublure zmq, plan.md). Point ouvert côté qtpy6."""
+Un réglage de CONFIGURATION, pas de branche dans le code de l'application : les panneaux que l'utilisateur n'affiche
+pas sont désactivés (``<section>/enable``), comme le ferait la page de préférences de Spyder : Plots, aide, aide en
+ligne, historique, pylint, complétions. (``--no-web-widgets`` retiré le 12/11/2026 : le gel de la page de chargement
+était l'alert() de loading.html, corrigé dans qtpy6/web/moteur_web.py par W546.)"""
 
 import os
 import sys
@@ -56,10 +55,6 @@ CONF.set("main_interpreter", "custom_interpreters_list", [_python])
 CONF.set("main_interpreter", "custom_interpreter", _python)
 CONF.set("toolbar", "last_visible_toolbars",
          [b for b in CONF.get("toolbar", "last_visible_toolbars", []) if b != "main_toolbar"])
-
-_get_options = cli_options.get_options  # nom à part : jalon7.py, exécuté dans ces globales, réimporte get_options
-cli_options.get_options = lambda argv=None: _get_options([*(argv or []), "--no-web-widgets"])
-
 
 # Contournement d'ESSAI : 30 s après le démarrage, Spyder liste ses dépendances obligatoires absentes (pylsp, jedi 0.20,
 # aiohttp…) dans une boîte d'erreur ; aucune préférence ne la coupe, et ces modules manquent réellement dans la page

@@ -1,5 +1,5 @@
 """Préambule commun des essais Spyder (editeur.py, jalon2.py) : chemins du fork et des roues pures sur le bureau,
-doublures des modules absents du navigateur, PySide6.QtCore complété par qtpy6 dans la page, et `etape` (chronomètre
+doublures des modules absents du navigateur, et `etape` (chronomètre
 depuis l'import). Importé en premier, avant spyder."""
 
 import os
@@ -66,21 +66,5 @@ def etape(nom):
     print(f"{nom} : {time.monotonic() - T0:.2f} s")
 
 
-if sys.platform == "emscripten":
-    # Spyder importe qtpy, qui lit PySide6 directement : ce que qtpy6 double pour le navigateur (QThread, QProcess, verrous…
-    # dans son propre espace de noms, QtCore de qtpy6) est posé ici sur PySide6.QtCore, pour les classes qui y manquent.
-    import qtpy6.QtCore
-    from PySide6 import QtCore
-    poses = [n for n, v in vars(qtpy6.QtCore).items() if isinstance(v, type) and n.startswith("Q") and not hasattr(QtCore, n)]
-    for n in poses:
-        setattr(QtCore, n, getattr(qtpy6.QtCore, n))
-    print(f"PySide6.QtCore complété par qtpy6 : {' '.join(poses)}")  # QtGui et QtWidgets : rien n'y manque (vérifié)
-    # QtWebEngine (absent de Qt-WASM) : les doublures de qtpy6 (une <iframe> calée sur le widget), sous les noms de PySide6
-    # que lit qtpy ; Spyder instancie alors Help et OnlineHelp comme sur le bureau.
-    import qtpy6.QtWebEngineCore
-    import qtpy6.QtWebEngineWidgets
-    for _nom, _source in (("QtWebEngineCore", qtpy6.QtWebEngineCore), ("QtWebEngineWidgets", qtpy6.QtWebEngineWidgets)):
-        _m = types.ModuleType(f"PySide6.{_nom}")
-        _m.__dict__.update((n, v) for n, v in vars(_source).items() if n.startswith("QWebEngine"))
-        sys.modules[_m.__name__] = _m
-    print("doublure : PySide6.QtWebEngineCore, PySide6.QtWebEngineWidgets (qtpy6)")
+# Spyder importe qtpy : dans la page, le lanceur de qtpy6 le sert lui-même (qtpy6/_qtpy.py, 12/11/2026), doublures
+# comprises (QProcess, fils, QWebEngineView) ; plus rien à poser ici sur PySide6.
