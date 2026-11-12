@@ -162,9 +162,12 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
 9. **Le son de Pyxel** : renvoi au TODO son, premier item. Existant : `memoire_partagee.reconcilier()`,
    `preambule._doubler_sleep` (`qtpy6/web/preambule.py:70`) ; aucun `AudioContext` dans `qtpy6/` (grep → 0).
    Niveau : supposé (piste, rien d'écrit).
-10. **Fenêtre d'erreur fugitive de l'explorateur** [EN COURS W550] (`directoryLoaded` → `initStyleOption`, `index.model()` None) :
+10. **Fenêtre d'erreur fugitive de l'explorateur** (`directoryLoaded` → `initStyleOption`, `index.model()` None) :
     TODO son, avant-dernier item. Doublure de `QFileSystemModel` à écrire côté qtpy6 (aucune dans `qtpy6/web/`).
     Niveau : lu dans la pile relevée, cause supposée.
+    W550 (12/11) : NON reproduite en quatre essais (modèle seul, slot reporté ou non, Spyder entier, `spe_monkey` jeu
+    lancé : il casse avant, item 1). Reste : reproduire jeu tournant (après item 1, ou Chrome), pile entière ; pas de
+    doublure sans cause. Note `2026-11-12 - QFileSystemModel et dossier Chrome (W550).md`, essai `essais/fsmodel/`.
 11. **Interruption d'un calcul qui ne dort jamais.** Aujourd'hui : signal livré au prochain `time.sleep` (a4ee0c6).
     Pour un vrai arrêt : `setInterruptBuffer` sur SharedArrayBuffer (grep → 0). La page EST isolée depuis f02c16c
     (`sw.js`, `isoler`) : voir « Contradictions ». Niveau : lu.
@@ -175,7 +178,7 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
     - console : `max_line_count` (300 lignes) à monter ; Worker de réserve et complétion factice pour cacher 1,4 s ;
     - REPL persistant et explorateur de variables hors noyau : sans objet si la console IPython (8c) est retenue ;
     - doublure `chardet.detect → utf-8` (63 Mio économisés) : D6 ;
-    - [EN COURS W550] dossier autorisé de Chrome comme troisième emplacement de `persistant`, bouton « Réautoriser » : non codé
+    - dossier autorisé de Chrome comme troisième emplacement de `persistant`, bouton « Réautoriser » : non codé
       (existant : `stockage.monter`, `qtpy6/web/stockage.py:59`) ;
     - couche Dropbox par élève : hors qtpy6 (SmartTeacher), raccordement professeur à décider ;
     - `EN_RETARD` de `construire_site.py:45` : à retirer « une fois le fork regénéré » ; il l'a été le 01/11, non
