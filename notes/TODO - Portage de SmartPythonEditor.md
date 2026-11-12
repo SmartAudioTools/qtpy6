@@ -241,6 +241,10 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
    site reconstruit sans injection (`clavier7`). **Cadre** : au ras de l'image, coins arrondis (décision du professeur
    18:50), confié au generator de SmartPythonEditor (greffon). Note `2026-11-12 - Clavier et focus de Pyxel dans la page
    (W565).md`. Reste : vérification par le professeur (clavier et cadre).
+   **[W565, 19:55] « Le jeu rame » — en cours** : `&cadence=1` mesuré sans rendu GL (headless, bac) : noyau 60 images/s,
+   panneau 27-39/s, passe de `memoire_partagee` 1-3 ms → la chaîne tient. Vrai rendu (WebGL du Worker) NON mesuré (bac
+   sans WebGL) : `&cadence=1&headless=0 --visible` à lancer par le professeur après la PAUSE CPU. Niveau : mesuré (sans
+   GL), cause supposée (rendu GL, charge machine).
 9. **Le son de Pyxel** : renvoi au TODO son, premier item. Existant : `memoire_partagee.reconcilier()`,
    `preambule._doubler_sleep` (`qtpy6/web/preambule.py:70`) ; aucun `AudioContext` dans `qtpy6/` (grep → 0).
    Niveau : supposé (piste, rien d'écrit).

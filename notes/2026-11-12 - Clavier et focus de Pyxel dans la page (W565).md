@@ -41,6 +41,22 @@ pixels rognés aux coins acceptés. Écarté : remplir les bandes par étirement
 Le greffon ne se modifie que depuis la session du generator (CLAUDE.md satellite) : demande envoyée à
 `smartpythoneditor-generator-7d` le 12/11 à 18:52, avec les lieux (`_chemin_du_cadre`, `PyxelGameWidget`).
 
+## « Le jeu rame complètement » (professeur, 19:20) — mesuré sans rendu GL, cause non trouvée
+
+Instrumentation `&cadence=1` de `spe_monkey.py` : le VRAI jeu, `init` forcé headless (`&headless=0` : vrai rendu) ;
+noyau, toutes les 60 images : images/s et ms par image d'update, draw, sommeil demandé / réel ; page, toutes les 2 s :
+images/s reçues par le panneau (`sig_frame`), pire retard d'une minuterie de 50 ms, durée d'une passe du moteur de
+`memoire_partagee`.
+**Mesuré** (`cadence2`, Firefox du bac, headless, machine chargée ≈ 25-33 de charge pour 20 cœurs) : noyau 59-60 images/s
+(16,7 ms : update 0,3, draw 1,5-4, sommeil 11-14) ; page 27-39 images/s reçues ; une passe 1-2,7 ms sur les deux
+segments (131 136 et 282 624 octets) ; retard de minuterie 50-280 ms. La chaîne noyau → mémoire partagée → panneau tient
+donc ; la pompe par `reconcilier()` (dans `time.sleep`) suffit, la minuterie de 4 ms coûte 1-3 ms par passe.
+**Non mesuré** : le vrai rendu (WebGL de l'`OffscreenCanvas` du Worker, `boucle.func()` de `flip_web`) — le Firefox du bac
+n'a pas de WebGL ; `--chromium` : `ImportError QNetworkInterface` (zip privé antérieur à la doublure QtNetwork, non
+poursuivi) ; sonde `--visible` lancée par le professeur : fenêtre fermée à 30 s, avant le jeu (`cadence4`). Suspect
+principal : le rendu GL, puis la charge de la machine (relevée par le professeur). Commande prête (même URL,
+`&headless=0`, `--visible`, `cadence5`), suspendue par la PAUSE CPU de 19:54.
+
 ## Reste
 
-Cadre par le generator (révision à venir) ; vérification par le professeur dans son Firefox (clavier ET cadre).
+Mesure `&headless=0` (après la reprise) ; cadre par le generator (révision à venir) ; vérification par le professeur dans son Firefox (clavier ET cadre).

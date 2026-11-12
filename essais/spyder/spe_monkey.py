@@ -71,6 +71,32 @@ def draw():
     pyxel.cls(8 if vu else 1)
 pyxel.run(update, draw)
 """  # instrumentation, &clavier=1 : un jeu minimal qui dit quand il voit Espace (item 8, clavier)
+DIAG_CADENCE = """
+import js, pyxel, time
+def _t(m): js.console.log("CADENCE noyau " + str(m))
+_init, _run, _sleep = pyxel.init, pyxel.run, time.sleep
+def init_h(*a, **k):
+    k["headless"] = HEADLESS  # le Firefox du bac n a pas de WebGL ; &headless=0 : le vrai rendu
+    _t(("init", a, k))
+    return _init(*a, **k)
+M = dict(u=0.0, d=0.0, sd=0.0, sr=0.0, n=0, t=time.monotonic())
+def sleep_m(s):
+    t = time.monotonic(); _sleep(s); M["sd"] += s; M["sr"] += time.monotonic() - t
+def run_m(update, draw):
+    def u():
+        t = time.monotonic(); update(); M["u"] += time.monotonic() - t
+    def d():
+        t = time.monotonic(); draw(); M["d"] += time.monotonic() - t
+        M["n"] += 1
+        if M["n"] % 60 == 0:
+            T = time.monotonic(); dt = T - M["t"]
+            _t(dict(images=M["n"], ips=round(60 / dt, 1), ms_image=round(dt * 1000 / 60, 1),
+                    ms_update=round(M["u"] * 1000 / 60, 1), ms_draw=round(M["d"] * 1000 / 60, 1),
+                    ms_sommeil_demande=round(M["sd"] * 1000 / 60, 1), ms_sommeil_reel=round(M["sr"] * 1000 / 60, 1)))
+            M.update(u=0.0, d=0.0, sd=0.0, sr=0.0, t=T)
+    return _run(u, d)
+pyxel.init, pyxel.run, time.sleep = init_h, run_m, sleep_m
+"""  # instrumentation, &cadence=1 : le vrai jeu en headless, temps par image découpé (item 8, « le jeu rame »)
 REFOCUS = """let presse = false;
 window.addEventListener("pointerdown", () => { presse = true; }, true);
 for (const n of ["pointerup", "pointercancel"]) window.addEventListener(n, () => { presse = false; }, true);
@@ -129,9 +155,46 @@ exec(compile(open("/home/pyodide/monkey/diag_son.py").read(), "/home/pyodide/mon
 open("diag_clavier.py", "w").write(@DIAG_CLAVIER@)
 exec(compile(open("/home/pyodide/monkey/diag_clavier.py").read(), "/home/pyodide/monkey/diag_clavier.py", "exec"), {"__name__": "__main__"})
 """
+    cadence = js.URLSearchParams.new(js.location.search).get("cadence") == "1"
+    diagnostic_cadence = """
+open("diag_cadence.py", "w").write(@DIAG_CADENCE@)
+exec(compile(open("/home/pyodide/monkey/diag_cadence.py").read(), "/home/pyodide/monkey/diag_cadence.py", "exec"), {"__name__": "diag", "HEADLESS": @HEADLESS@})
+""".replace("@HEADLESS@", repr(js.URLSearchParams.new(js.location.search).get("headless") != "0")) + lancement
     os.makedirs(dossier, exist_ok=True)
     from qtpy6.QtCore import QTimer
-    clavier = js.URLSearchParams.new(js.location.search).get("clavier") == "1"
+    if cadence:  # instrumentation : images reçues par le panneau, et retard de la boucle de la page, toutes les 2 s
+        from spyder_pyxel.spyder.bridge_manager import get_bridge
+        page = {"images": 0, "releves": 0, "t": js.performance.now(), "retard": 0.0}
+
+        def image_page(kind, frame, canal):
+            page["images"] += 1
+        get_bridge().sig_frame.connect(image_page)
+
+        def battement():
+            t = js.performance.now()
+            page["retard"] = max(page["retard"], t - page["prevu"])
+            page["prevu"] = t + 50
+            QTimer.singleShot(50, battement)
+        page["prevu"] = js.performance.now() + 50
+        QTimer.singleShot(50, battement)
+
+        def relever_page():
+            from qtpy6.web import memoire_partagee
+            t0 = js.performance.now()
+            js.self.qtpy6_memoire.passer()  # une passe du moteur de réconciliation (tous les segments), chronométrée
+            t = js.performance.now()
+            tailles = [s.byteLength for s in memoire_partagee._SEGMENTS.values()]
+            js.console.log(f"CADENCE page images/s {page['images'] * 1000 / (t - page['t']):.1f}"
+                           f" ; pire retard minuterie 50 ms : {page['retard']:.0f} ms"
+                           f" ; une passe {t - t0:.1f} ms sur segments {tailles}")
+            page.update(images=0, t=t, retard=0.0)
+            page["releves"] += 1
+            if page["releves"] < 25:
+                QTimer.singleShot(2000, relever_page)
+            else:
+                js.window.etat = "fini"
+        QTimer.singleShot(2000, relever_page)
+    clavier =js.URLSearchParams.new(js.location.search).get("clavier") == "1"
     if clavier:  # instrumentation : vrai clic sur l'écran du jeu, puis vraies touches ; focus DOM et Qt relevés
         from qtpy6.QtCore import QEvent, QObject, QPoint
         from qtpy6.QtWidgets import QApplication
@@ -252,7 +315,7 @@ for nom in ({jeu!r}, "projet_monkey.pyxres"):
     x.responseType = "arraybuffer"; x.send()
     open({dossier!r} + "/" + nom, "wb").write(bytes(js.Uint8Array.new(x.response).to_py()))
 os.chdir({dossier!r})
-{diagnostic_son if son else diagnostic if diag else diagnostic_clavier if clavier else lancement}
+{diagnostic_son if son else diagnostic if diag else diagnostic_clavier if clavier else diagnostic_cadence if cadence else lancement}
 """
     from qtpy6.QtCore import QTimer
     console = main.get_plugin("ipython_console")
@@ -269,6 +332,6 @@ os.chdir({dossier!r})
             QTimer.singleShot(1000, injecter)
     QTimer.singleShot(5000, injecter)
     js.window.etat = "monkey"
-'''.replace("@DIAG_JEU@", repr(repr(DIAG_JEU))[1:-1]).replace("@DIAG_SON@", repr(repr(DIAG_SON))[1:-1]).replace("@DIAG_CLAVIER@", repr(repr(DIAG_CLAVIER))[1:-1]) + _fin)
+'''.replace("@DIAG_JEU@", repr(repr(DIAG_JEU))[1:-1]).replace("@DIAG_SON@", repr(repr(DIAG_SON))[1:-1]).replace("@DIAG_CLAVIER@", repr(repr(DIAG_CLAVIER))[1:-1]).replace("@DIAG_CADENCE@", repr(repr(DIAG_CADENCE))[1:-1]) + _fin)
 __file__ = os.path.join(_ICI, "spe.py")
 exec(compile(_source, __file__, "exec"))
