@@ -26,6 +26,17 @@ def test_modules_rendus_tels_quels():
         sys.modules.pop("pyodide")
 
 
+# --- W556 : application(persistant=…, disque=True), le dossier autorisé de Chrome --------------------------------------
+def test_disque_sans_effet_en_natif(tmp_path):
+    """En natif, ``disque`` ne change rien : le dossier persistant est un dossier du disque, créé au besoin, et aucun
+    montage n'est noté (``stockage`` n'importe ``js`` qu'à l'appel)."""
+    from qtpy6.web import application, stockage
+
+    dossier = tmp_path / "eleve"
+    application(persistant=dossier, disque=True)
+    assert dossier.is_dir() and not stockage._montes and not stockage._natifs
+
+
 # --- W558 : renderProcessTerminated de la doublure QWebEngine (greffon spyder_python_tutor, main_widget.py:385) ----------
 def test_moteur_web_render_process_terminated(app):
     """Le tuteur branche ``page.renderProcessTerminated`` (statut, code de sortie) : le signal existe sous le nom et la

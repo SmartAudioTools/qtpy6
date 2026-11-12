@@ -54,7 +54,7 @@ def navigateur():
 
 
 def application(polices: str | os.PathLike[str] | None = None, defaut: QFont | tuple | None = None,
-                persistant: str | os.PathLike[str] | None = None) -> QApplication:
+                persistant: str | os.PathLike[str] | None = None, disque: bool = False) -> QApplication:
     """La QApplication du processus, créée au besoin et rendue ; une QApplication créée ailleurs (la SpyderApplication de
     Spyder) est préparée de même, une seule fois. Hors session graphique (ni DISPLAY ni WAYLAND_DISPLAY),
     ``QT_QPA_PLATFORM`` passe à ``offscreen`` : les tests et les exports tournent sans écran. Dans le navigateur, Qt n'a
@@ -65,7 +65,9 @@ def application(polices: str | os.PathLike[str] | None = None, defaut: QFont | t
     dans le navigateur le même chemin, rangé dans IndexedDB (``stockage.monter``), d'où reviennent les fichiers de la
     visite précédente et où le navigateur recopie seul chaque écriture. L'application y lit et y écrit des fichiers
     ordinaires, sans savoir où elle tourne ; le montage suspend le temps de la restauration, donc depuis le script ou
-    un slot. Partout, le ramasse-miettes ne passe plus qu'entre deux événements (``_ramasser``)."""
+    un slot. Avec ``disque``, l'utilisateur d'un navigateur qui le permet (Chrome, Edge) peut choisir à la place un dossier
+    réel de son disque, retrouvé d'une séance à l'autre (``stockage.monter``) ; sans effet en natif, ni sous Firefox.
+    Partout, le ramasse-miettes ne passe plus qu'entre deux événements (``_ramasser``)."""
     from qtpy6.QtGui import QFont, QFontDatabase  # noqa: PLC0415 - voir la docstring du module
     from qtpy6.QtWidgets import QApplication  # noqa: PLC0415
 
@@ -95,7 +97,7 @@ def application(polices: str | os.PathLike[str] | None = None, defaut: QFont | t
             boite_noire.demarrer(app)  # le battement de la boucle de Qt dans la boîte noire de la page
     if persistant is not None and str(persistant) not in stockage._montes:
         if navigateur():
-            stockage.monter(persistant)
+            stockage.monter(persistant, disque)
         else:
             os.makedirs(persistant, exist_ok=True)
     return QApplication.instance()

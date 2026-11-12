@@ -206,7 +206,8 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
     - doublure `chardet.detect → utf-8` (63 Mio économisés) : D6 ;
     - dossier autorisé de Chrome comme troisième emplacement de `persistant`, bouton « Réautoriser » : codé (W556),
       `application(persistant=chemin, disque=True)`, opt-in (l'automatique sur tout Chrome, écarté, changerait toutes les
-      applications) ; repli Firefox mesuré (sonde), boutons vus sous Blink ; reste la mesure sous Chrome par le professeur.
+      applications) ; repli Firefox mesuré (sonde), boutons vus sous Blink ; mesuré dans le Chromium du professeur
+      (choix, une recopie pour 101 écritures, Réautoriser après fermeture : 101 fichiers retrouvés). Fait.
       Note `2026-11-12 - Dossier Chrome comme emplacement persistant (W556).md` ;
     - couche Dropbox par élève : hors qtpy6 (SmartTeacher), raccordement professeur à décider ;
     - `EN_RETARD` : FAIT (W551, 12/11), retiré, les six fichiers du fork sont identiques à l'installé (`cmp`) ;
