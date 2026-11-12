@@ -315,14 +315,19 @@ def _executable():
 def _reglages_du_worker():
     """Le Worker d'un ``QProcess`` (``travailleur``) prend par défaut le Pyodide et les roues de la page (posés par
     ``preparer`` de qtpy6web.js) au lieu du Pyodide en ligne de ``versions.json`` : l'application n'appelle plus
-    ``travailleur.configurer`` (D4, 12/11/2026). Un ``configurer`` du script les remplace."""
-    import js  # noqa: PLC0415
+    ``travailleur.configurer`` (D4, 12/11/2026). Un ``configurer`` du script les remplace. Hors de la page (``lancer``
+    des tests natifs) : sans effet."""
+    try:
+        import js  # noqa: PLC0415
+    except ImportError:
+        return
 
     from . import travailleur  # noqa: PLC0415
 
-    if getattr(js.window, "qtpy6Pyodide", None):
-        travailleur.REGLAGES.setdefault("indexURL", js.window.qtpy6Pyodide)
-        travailleur.REGLAGES.setdefault("roues", tuple(js.window.qtpy6Roues))
+    fenetre = getattr(js, "window", None)  # un js doublé (tests) peut ne pas avoir de fenêtre
+    if getattr(fenetre, "qtpy6Pyodide", None):
+        travailleur.REGLAGES.setdefault("indexURL", fenetre.qtpy6Pyodide)
+        travailleur.REGLAGES.setdefault("roues", tuple(fenetre.qtpy6Roues))
 
 
 def lancer(script, args=(), pret=None, module=None):

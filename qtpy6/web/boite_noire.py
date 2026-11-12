@@ -21,7 +21,7 @@ def _boite():
     if sys.platform != "emscripten":
         return None
     import js  # noqa: PLC0415
-    return getattr(js.window, "qtpy6BoiteNoire", None)
+    return getattr(getattr(js, "window", None), "qtpy6BoiteNoire", None)  # js doublé des tests : sans fenêtre
 
 
 def demarrer(parent: QObject | None = None) -> None:

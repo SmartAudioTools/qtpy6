@@ -80,6 +80,15 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
      moment) : **à rejouer machine calme**, `qtpy6_essais/equipe/w545/tri.sh <étiquette> [n]` après
      `variante_app.py A|sans|coupe` (écrit `essais/spyder/site/app.zip`, PARTAGÉ). Niveau « mesuré 12/10 » ci-dessus :
      à revoir, il ne reposait que sur le triangle visible de 19:45.
+   - **Autre signature, W568 (professeur, 12/11 19:20, ×5, dans la fenêtre de W566)** : `%runfile` dans la console de la
+     page rend `SystemError: Cannot enter a promising task from inside another running promising task`, pile
+     `code_runner._exec_code:597` → webloop `run_handle`. Le noyau SURVIT : ce n'est pas le plantage GC/JSPI ci-dessus.
+     Source du message (lu, Pyodide 314.0.7 du Worker, `site/pyodide/pyodide.asm.wasm`) : `enter_promising_task`
+     (`src/core/stack_switching/pystate.c`), drapeau unique `in_task` ; `run_handle` de la WebLoop est
+     `create_once_callable(…, _may_syncify=True)`, donc une entrée promettante. Fichiers : `qtpy6/web/js/qtpy6web.js`,
+     `bloquant.py`, `threading_web.py` (et le `preambule.py` de W564 : `_attendre`, `_garde_vie`, `time.sleep`, tous en
+     `run_sync`). Essai : `sh essais/spyder/sonde_tri.sh` ou `spe_m4.py?…&bouton=1`. Niveau : signalé par le
+     professeur, pas encore reproduit ; note `notes/2026-11-12 - runfile et tache promising imbriquee (W568).md`.
 1 bis. **Reproduction minimale, puis patch de Pyodide / JSPI** (demande de l'utilisateur, 12/11 13:58-13:59 : « et on
    ne peut pas réparer Pyodide / JSPI ? », « ajoute la reproduction minimale et le patch Pyodide au TODO »). La parade
    de l'item 1 tient l'éditeur en vie ; la cause, elle, n'est que supposée (GC jeune parcourant les piles des
@@ -304,6 +313,9 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
     `getattr(js.window, "qtpy6BoiteNoire", None)`), appelé par `demarrer()` (l. 31) depuis `application()`
     (`qtpy6/web/__init__.py:95`). Le faux `js` des tests n'a pas de `window`. Sans propriétaire au tableau de bord.
     Niveau : mesuré (pytest, 14:15).
+    - **FAIT, W566, 12/11 19:25** : `_boite` lit `window` par `getattr` (faux `js` sans fenêtre) ; même cause en
+      natif dans `_reglages_du_worker` (`import js`, f75949b : deux échecs de plus) rendue sans effet hors page. Les
+      cinq rouges de `test_web.py` passent (mesuré). Note W566.
 16 ter. **[FAIT, W548, 12/11]** `test_noyau_web.py` sous Python 3.14 : `RuntimeError: There is no current event loop`
     (`asyncio.get_event_loop()` sans boucle posée, `sous_processus.doubler_zmq:251`, `preambule.py:52,156`) : rouges
     `test_popen_doublee_dans_le_navigateur`, `test_preambule_crochets_attendre_plus_tard_poster`,

@@ -54,6 +54,31 @@ Existant : la tolérance de `SO_LINGER` (jupyter_client, jalon 8a), étendue ; a
   toléré prend la valeur réelle du système quand elle existe.
 - Règle du dépôt : aucune ligne ajoutée hors de `qtpy6/web/`.
 
+## Item ajouté par le Superviseur : régression de `test_web.py` et item 16 bis
+
+Demande (Superviseur, 19:13) : « les 5 échecs test_web par `import js` en natif dans web/__init__.py:319 […] sont une
+régression à HEAD, à corriger : l'import ne se fait que dans la page […] ». Puis (19:20) : « le même getattr dans
+boite_noire.py […] et l'item 16 bis est à toi ».
+
+- État de départ, mesuré : 5 rouges dans `tests/test_web.py` (2 par `ModuleNotFoundError: js` dans
+  `_reglages_du_worker`, 3 par `js.window` absent du faux `js` des tests, `boite_noire.py:24`, item 16 bis).
+- FAIT : `_reglages_du_worker` rend sans rien faire si `import js` échoue, et lit `window` par `getattr` ;
+  `boite_noire._boite` aussi. C'est du code de qtpy6, pas de l'application : pas de branche web ajoutée côté
+  application. Alternative écartée : poser `window` dans le faux `js` des tests — le test resterait vert pendant
+  que `lancer()` natif lèverait toujours.
+- VÉRIFIÉ (mesuré) : les cinq tests verts ; suite entière : voir l'ETAT.
+
+## Reçu dans ma fenêtre, hors de mon item (réparti par le Superviseur, 19:20)
+
+Le professeur, 19:15, après avoir ouvert spe.py dans son Firefox :
+- console : `%runfile` → `SystemError: Cannot enter a promising task from inside another running promising task.
+  This is a bug in Pyodide.` (pile : `ast.parse` ← `code_runner._exec_code:597` ← `runfile`, `webloop.run_handle`),
+  cinq fois → W568 ;
+- « j'ai vu une petit zone en bas à droite grise avec une roue qui tournait disant qu'elle cherchait les variable
+  d'environemnet » → W569 (item 18) ;
+- « j'ai réussit avec faire un saut ou deux avec le singe, mais avec un seul image ou deux qui ce sont mis à jour » ;
+  « le jeu tourne mais rame complètement » → W565.
+
 ## RESTE
 
 - Vérification par le professeur dans son Firefox.
