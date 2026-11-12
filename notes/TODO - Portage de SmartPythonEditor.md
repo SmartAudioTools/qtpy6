@@ -269,6 +269,10 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
     Chrome : W552 (12/11), Blink de QtWebEngine (Chrome 140, sonde --chromium, dans le bac) : 7, 8a, 8b, 8c,
     QWebEngineView (panneaux), Pyxel passent ; jalon 5 : rechargement et IDBFS passent, puis arrêt
     dans `CodeEditor.setPlainText` IDENTIQUE sous Firefox (régression commune depuis le 10/10, à reprendre au jalon 5) ;
+    **fait, W562 (12/11)** : cause hors dépôt (fork reconstruit le 11/10 : `BaseEditMixin.cursor_position_changed`
+    masqué par l'alias du signal, signal connecté à lui-même), corrigée dans qtpy6 par `_SignalAlias` (W547, 4ca1a7f) ;
+    jalon 5 phase 2 jusqu'au bout (relu, ouvert, enregistré, téléchargé) sous Firefox 158 ET Blink (Chrome 140), mesuré.
+    Note `2026-11-12 - Régression du jalon 5, setPlainText (W562).md` ;
     propre à Blink : `cannot join current thread` (`threading_web.py:174`) à la fermeture de jalon7. Reste : Chrome de
     bureau avec GPU. Note `2026-11-12 - Jalons sous Chrome (W552).md`.
 16. **Outillage** : `_fait` de la sonde par compare-and-set (`qtpy6/web/sonde.py`, rencontré aux jalons 3 et 5) ; test
