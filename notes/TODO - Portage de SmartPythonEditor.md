@@ -104,6 +104,11 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
      mesurée : `_garde_vie.run_forever` reste dans `run_sync` toute la vie du noyau (« pendant une suspension » = toujours).
    - Coût : chaque essai de c. est une reconstruction de Pyodide-PySide6 (durée à relever à la première). Ne commence
      c. qu'avec b. prouvée.
+   - **Erreur fatale à 333 s, sans Exécuter** (W558, 12/11, non attribué ; `sous_processus.py` est à W548) : essai
+     `--visible` du professeur, page laissée ouverte : Firefox « Script terminated by timeout » puis « Pyodide has
+     suffered a fatal error » ; pile : `kernel_handler.py:106 run` → `sous_processus.py:101 read1` → `fils._attendre`
+     → `bloquant._suspendre` → `bloquant.py:446 un_coup_` (lecture bloquante du canal noyau).
+     Journal : `/DATA/Python/qtpy6_essais/w558/capture_tuteur.console.log`. Niveau : mesuré une fois.
 2. **[FAIT W546, 12/11] Les widgets web de Spyder gèlent la page au démarrage de la console.** Obtenir la console sans `--no-web-widgets`.
    - FAIT (note `2026-11-12 - Widgets web, gel au démarrage (W546).md`) : le gel était l'`alert()` de `loading.html`
      (image en `'file:///…'` dans un script, non servie) ; `_urls_script` dans `moteur_web.py` ; 8c 5/5 avec widgets
@@ -222,6 +227,9 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
     la page ne rend plus rien après la liste des greffons ; volet pylint à activer dans la configuration pour Docteur.
     Hors champ : claude, konsole, tortoisehg, window_controls, viztracer, line_profiler. Commit 150070b : archive du site
     saine (sources seules, écriture atomique, `--sortie`), pylsp de W548 compris.
+    - **`spyder_collab` ABSENT, dialogue d'erreur au démarrage** (W558, 12/11, à attribuer) : `ImportError: cannot
+      import name 'QNetworkInterface' from 'qtpy.QtNetwork'` (`spyder_collab/network.py:43`, avec QTcpServer,
+      QTcpSocket) ; vu dans les deux essais `--visible` du professeur (`/DATA/Python/qtpy6_essais/w558/capture_main.console.log`).
 15. **Chrome** : jalons 8a à 8c, Pyxel, `QWebEngineView` mesurés sous Firefox seul ; phase 2 du jalon 5 jamais lancée
     sous Blink (branches de la sonde écrites). Niveau : non mesuré.
 16. **Outillage** : `_fait` de la sonde par compare-and-set (`qtpy6/web/sonde.py`, rencontré aux jalons 3 et 5) ; test
