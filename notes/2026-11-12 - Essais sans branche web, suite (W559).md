@@ -96,6 +96,9 @@ Relevé (releve) : importeurs dans le fork (hors tests) et `essais/roues/lib`, d
 
 ## RESTE
 
-- Alias qtpy en natif : cinq lignes au professeur (SmartPythonEditor natif est en PyQt5 et Python 3.12, qtpy6 absent
-  de son environnement ; l'alias ne sert que PySide6/PyQt6).
+- Alias qtpy en natif. Erreur corrigée (19:02) : j'avais dit « PyQt5 » d'après `qt_bindings.txt` et le paquet PyQt5
+  présent ; le professeur : « pour moi SmartPythonEditor tourne en PySide6 » — exact, `SmartPythonEditor.sh` →
+  `qt_api_env.sh` pose `QT_API=PySide6` (PySide6 installé dans le venv). Ce qui reste : qtpy6 absent du venv
+  SmartPythonEditor (Python 3.12) ; poser `_qtpy.installer()` avant le premier `import qtpy` (lanceur `-m`, `.pth`,
+  ou `spyder/app/start.py` du fork) ; mesurer le démarrage natif complet (greffons, qtconsole, qtawesome) avec l'alias.
 - `socket.SO_REUSEADDR` dans la page (ci-dessus).
