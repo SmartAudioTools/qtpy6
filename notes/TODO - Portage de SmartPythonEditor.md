@@ -158,6 +158,12 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
      méthodes cèdent la place (`_Alias`, l. 100).
    - Deux voies, à trancher (D1) : corriger le générateur du fork (session du fork ou utilisateur) ; ou que qtpy6
      cesse d'aliasser les signaux. Niveau : mesuré (core dump sans le contournement, faisabilité « Points ouverts »).
+   **[FAIT, W547, 12/11, 4ca1a7f]** D1 tranché par le professeur (17:20) : D. L'alias de signal est un descripteur
+   (`_SignalAlias`) qui cède au nom Python de la MRO comme `_Alias` (cas mixin de W562 : `BaseEditMixin` après
+   `QPlainTextEdit`), sinon rend le signal camelCase ; avertissement `SignalAliasMasked` à la définition d'une
+   sous-classe qui masque un alias, PySide6 seul (sous PyQt6, lire les enveloppes sip en création plante, mesuré).
+   `delattr` retiré de `jalon7.py`. Mesuré : témoin sans plantage, tests W547 et W562 verts. Niveau dans la page :
+   jalon 5 rejoué par W562 (en attente). Note `2026-11-12 - Jalon 7 sans contournement (W547).md`.
 4. **Ce que les essais font encore « propre au web » hors instrumentation** (règle du `CLAUDE.md`).
    - a. `PySide6.QtCore` complété par les classes de qtpy6 et `PySide6.QtWebEngine*` posés vers les doublures :
      `essais/spyder/preparer.py:69-86`, parce que le `qtpy` du fork lit PySide6 directement. Existant : rien dans
@@ -212,6 +218,11 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
 9. **Le son de Pyxel** : renvoi au TODO son, premier item. Existant : `memoire_partagee.reconcilier()`,
    `preambule._doubler_sleep` (`qtpy6/web/preambule.py:70`) ; aucun `AudioContext` dans `qtpy6/` (grep → 0).
    Niveau : supposé (piste, rien d'écrit).
+   - **W557, 12/11 18:00 — BLOQUÉ** (note `2026-11-12 - Son de Pyxel dans la page (W557).md`, journaux
+     `qtpy6_essais/w557/sonN.*`) : `qtpy6/web/son_web.py` commité INERTE (AudioContext doublé dans le Worker, anneau
+     SAB, AudioWorklet dans la page) ; débranché de `pyxel_web`, absent du tuple de `travailleur.py`. Le Worker reçoit l'anneau (mesuré) ; c'est le premier appel du mixeur SDL (`onaudioprocess` → `dynCall`)
+     hors du flux de SDL qui tue le noyau : depuis la minuterie, « index out of bounds » (même GC coupé) ; depuis
+     `reconcilier()` (dans `time.sleep`), le Worker se fige sans trace. Aucun échantillon n'a atteint la page.
 10. **Fenêtre d'erreur fugitive de l'explorateur** (`directoryLoaded` → `initStyleOption`, `index.model()` None) :
     TODO son, avant-dernier item. Doublure de `QFileSystemModel` à écrire côté qtpy6 (aucune dans `qtpy6/web/`).
     Niveau : lu dans la pile relevée, cause supposée.
@@ -291,6 +302,10 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
       lancement du Worker), puis « Connexion au noyau… » sans fin : le noyau n'est JAMAIS connecté. Reste : doublure de
       `create_subprocess_shell`/environnement (`sous_processus.py`, à W560 depuis 536b1a4), connexion du noyau à relever,
       `ProcessusWeb.finished(int, ExitStatus)` (travailleur.py:232, demandé par le Superviseur). Note `notes/2026-11-12 - Alert de l'iframe et environnement de l'exécution (W560).md`.
+    - **FAIT, W560, 12/11 17:54, mesuré dans Firefox** : `psutil_web` `Process().terminal()` non None (Spyder reprend
+      `os.environ`, décision du professeur 17:41 : 18 variables) et `net_if_addrs()` = `lo` 127.0.0.1 (le vide faisait
+      avertir jupyter_client sur la sortie d'erreur du noyau, affiché comme erreur du noyau). Noyau prêt vers 30 s,
+      `print('W560', 6 * 7)` rend `W560 42`. Aussi : `ProcessusWeb.finished(int, ExitStatus)`.
 
 ## Décisions à prendre par l'utilisateur
 
