@@ -8,7 +8,7 @@ Relevé de l'usage réel (SmartPython et fork Spyder, 11/10/2026), fichier:ligne
   :1079 cpu_count(logical=True) ; :1080 virtual_memory()._asdict() ; :1351 NoSuchProcess ; :1361 Process().children() ;
   :1325-1340 terminate(), kill(), send_signal() sur les enfants.
 - spyder_kernels/console/kernelapp.py:20,47 : pid_exists(parent) — le noyau s'arrête si le parent n'existe pas.
-- jupyter_client/localinterfaces.py:165-172 : net_if_addrs() (vide ici, le repli sans psutil est ensuite utilisé).
+- jupyter_client/localinterfaces.py:165-172 : net_if_addrs() (l'interface locale « lo », 127.0.0.1).
 - spyder/plugins/ipythonconsole/utils/manager.py:60-82 : Process(pid), children(recursive=True), send_signal,
   AccessDenied, NoSuchProcess, wait_procs(timeout, callback).
 - spyder/plugins/completion/providers/languageserver/{client.py:381-388, transport/main.py:124-148} : pid_exists,
@@ -45,6 +45,9 @@ PID_PAGE = 1  # la page : le parent de la page et de ses workers (os.getpid() va
 
 
 # --- Exceptions ---------------------------------------------------------------------------------------------------
+
+TERMINAL_PAGE = "/dev/pts/0"  # le terminal factice de la page, rendu par Process().terminal()
+
 
 class Error(Exception):
     """Racine des erreurs de psutil."""
@@ -141,7 +144,10 @@ class Process:
         return PID_PAGE if self.pid != PID_PAGE else 0
 
     def terminal(self) -> str | None:
-        return None
+        """La page a l'environnement de l'utilisateur, comme un programme lancé d'un terminal : Spyder
+        (``utils/environ.py:121``) reprend alors ``os.environ`` au lieu d'interroger un shell de connexion, absent ici."""
+        self._vivant()
+        return TERMINAL_PAGE if self.pid == os.getpid() else None
 
     def children(self, recursive: bool = False) -> list[Process]:
         self._vivant()
@@ -221,8 +227,14 @@ def virtual_memory() -> Any:
     return _MemoireVirtuelle(total, total, 0.0, 0, total, 0, 0, 0, 0, 0, 0)
 
 
+_AdresseReseau = namedtuple("snicaddr", "family address netmask broadcast ptp")
+
+
 def net_if_addrs() -> dict[str, list[Any]]:
-    return {}
+    """L'interface locale seule, comme une machine sans réseau : vide, jupyter_client lèverait ``NoIPAddresses`` et
+    l'écrirait sur la sortie d'erreur du noyau, que Spyder affiche comme une erreur du noyau."""
+    import socket  # noqa: PLC0415
+    return {"lo": [_AdresseReseau(socket.AF_INET, "127.0.0.1", "255.0.0.0", None, None)]}
 
 
 # --- Installation -------------------------------------------------------------------------------------------------

@@ -38,7 +38,7 @@ def SUITE_ENV18(main, rapport):  # noqa: N802
 
         @functools.wraps(origine)
         def trace(*args, **kwargs):
-            note(f"-> {nom}")
+            note(f"-> {nom}" + (f" {str(args[1:])[:1500]}" if nom == "show_kernel_error" else ""))
             try:
                 r = origine(*args, **kwargs)
             except BaseException as e:
@@ -54,6 +54,9 @@ def SUITE_ENV18(main, rapport):  # noqa: N802
     tracer(module_mw.IPythonConsoleWidget, "get_cached_kernel")
     tracer(module_client.ClientWidget, "connect_kernel")
     tracer(module_client.ClientWidget, "show_kernel_error")
+    from spyder.api.asyncdispatcher import AsyncDispatcher
+    environ.get_user_environment_variables().connect(
+        AsyncDispatcher.QtSlot(lambda f: note(f"environnement : {len(f.result())} variables")))
     debut = time.monotonic()
     client = widget.create_new_client()
     note(f"create_new_client rendu : {type(client).__name__}")
@@ -62,12 +65,21 @@ def SUITE_ENV18(main, rapport):  # noqa: N802
         page = getattr(client, "info_page", None)
         quoi = ("env" if page is client.env_loading_page else "noyau" if page is client.kernel_loading_page
                 else "vide" if page is client.blank_page else "autre")
-        note(f"veille : page d'attente = {quoi}")
+        kh = getattr(client, "kernel_handler", None)
+        etat = getattr(kh, "connection_state", None)
+        sw = client.shellwidget
+        texte = sw._control.toPlainText()
+        note(f"veille : page d'attente = {quoi} ; noyau {etat} ; console cachée {sw.isHidden()} ; "
+             f"résultat {'W560 42' in texte} ; fin de la console {texte[-120:]!r}")
+        if str(etat) == "spyder_kernel_ready" and "In [1]" in texte and not veiller.lance:
+            veiller.lance = True
+            sw.execute("print('W560', 6 * 7)")
         if time.monotonic() - debut > 60:
             minuterie.stop()
             note("FIN délai")
             rapport()
 
+    veiller.lance = False
     minuterie = QTimer(main)
     minuterie.timeout.connect(veiller)
     minuterie.start(3000)

@@ -55,7 +55,8 @@ def run(args, *, input=None, capture_output=False, stdout=None, stderr=None, tim
     p.closeWriteChannel()
 
     def brancher(resoudre):  # ``finished`` par le connect de PyQt : le relais de bloquant le reporterait d'un tour
-        bloquant._connect_qt[0](p.finished, resoudre) if bloquant._connect_qt else p.finished.connect(resoudre)
+        fin = lambda code, _statut: resoudre(code)  # noqa: E731
+        bloquant._connect_qt[0](p.finished, fin) if bloquant._connect_qt else p.finished.connect(fin)
         if timeout is not None:
             QTimer.singleShot(int(timeout * 1000), lambda: resoudre(None))
     code = bloquant._suspendre(brancher)
@@ -179,7 +180,7 @@ class Popen:
         elif hasattr(voulu, "write"):  # un fichier : sa part ; sinon (DEVNULL, hérité) la sortie est jetée
             voulu.write(octets)
 
-    def _fini(self, code: int) -> None:
+    def _fini(self, code: int, _statut=None) -> None:
         self._arrive(self._p.readAllStandardOutput(), self.stdout, self._sorties[0])
         self._arrive(self._p.readAllStandardError(), self.stderr, self._sorties[1])
         self.returncode = code if self._signale is None else -self._signale

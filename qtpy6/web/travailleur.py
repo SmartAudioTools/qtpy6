@@ -48,7 +48,7 @@ from qtpy6.web.preambule import _vers_python
 REGLAGES = {}  # configurer() : indexURL, roues, filtre
 _URL_WORKER = None
 _FICHIERS_WORKER = ("preambule.py", "zmq_web.py", "threading_web.py", "psutil_web.py", "pyxel_web.py",
-                    "memoire_partagee.py", "socket_web.py")  # de qtpy6/web, ce que le préambule du worker importe
+                    "memoire_partagee.py", "socket_web.py", "son_web.py")  # de qtpy6/web, ce que le préambule du worker importe
 
 
 def _nouveau_worker():
@@ -224,12 +224,11 @@ class ProcessusWeb(QObject):
     copies : ce que l'enfant écrit ne revient pas. Ce que ``write`` envoie est son stdin, qu'il lit comme sur le bureau
     (``input()``, ``sys.stdin.readline()`` attendent : JSPI, ``run_sync``) ; ``closeWriteChannel`` lui donne la fin de
     fichier ; ce qu'il imprime se lit par ``readAllStandardOutput`` et ``readAllStandardError`` après les signaux
-    ``readyRead…``, ou tout par la sortie standard avec ``MergedChannels`` ; ``finished(code)`` quand il se termine, ou
+    ``readyRead…``, ou tout par la sortie standard avec ``MergedChannels`` ; ``finished(code, statut)`` quand il se termine, ou
     après ``kill``. Un ``start`` après ``kill`` en relance un neuf, comme un vrai processus."""
 
     readyReadStandardOutput = Signal()
     readyReadStandardError = Signal()
-    finished = Signal(int)
     errorOccurred = Signal(object)
 
     # Les énumérations de Qt, valeurs comprises, et leurs membres aussi à plat sur la classe comme PySide6 les sert
@@ -244,6 +243,7 @@ class ProcessusWeb(QObject):
     InputChannelMode = enum.IntEnum("InputChannelMode", dict(ManagedInputChannel=0, ForwardedInputChannel=1))
     locals().update({m.name: m for e in (ProcessChannelMode, ProcessError, ProcessState, ExitStatus, ProcessChannel,
                                          InputChannelMode) for m in e})
+    finished = Signal(int, ExitStatus)  # comme QProcess ; après ExitStatus, qu'il nomme
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -356,7 +356,7 @@ class ProcessusWeb(QObject):
         self._mourir()
         # comme QProcess : ``finished`` après le retour de ``kill`` ; ``self`` en contexte : rien si l'objet est détruit
         # entre-temps (client LSP de Spyder, jalon 8d : « Signal source has been deleted »)
-        QTimer.singleShot(0, self, lambda: self.finished.emit(0))
+        QTimer.singleShot(0, self, lambda: self.finished.emit(0, self.ExitStatus.CrashExit))
 
     close = kill  # ``QProcess.close`` tue le processus (client LSP de Spyder : ``transport.close()``)
 
@@ -386,7 +386,7 @@ class ProcessusWeb(QObject):
         if "fin" in m:
             self._mourir()
             self._code_sortie = m["fin"]
-            self.finished.emit(m["fin"])
+            self.finished.emit(m["fin"], self.ExitStatus.NormalExit)
         elif "erreur" in m:  # Pyodide injoignable, JSPI absent : le processus n'a pas pu naître
             self._erreur(0, m["erreur"])
 

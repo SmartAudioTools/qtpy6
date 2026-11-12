@@ -154,7 +154,7 @@ class FauxProcessus(travailleur.ProcessusWeb):
 
     def kill(self):
         self.tue = True
-        self.finished.emit(0)  # le vrai le fait au tour suivant
+        self.finished.emit(0, self.ExitStatus.CrashExit)  # le vrai le fait au tour suivant
 
 
 @pytest.fixture
@@ -210,7 +210,7 @@ def test_popen_stdout_lectures_et_fin(popen):
     assert p.stdout.readline() == b"ab\n"
     assert p.stdout.read1(1) == b"c" and p.stdout.read1() == b"d" and p.stderr.read1() == b"err"
     proc._arrive("sortie", "fin")
-    proc.finished.emit(3)
+    proc.finished.emit(3, proc.ExitStatus.NormalExit)
     assert p.stdout.read() == b"fin" and p.stdout.read1() == b"" and p.stdout.readline() == b""
     assert (p.poll(), p.returncode, p.wait()) == (3, 3, 3)
     assert not psutil_web.pid_exists(p.pid)
@@ -266,7 +266,7 @@ def test_popen_sorties_redirigees(popen):
 
 def test_popen_contexte(popen):
     with popen(CMD, stdout=subprocess.PIPE, stdin=subprocess.PIPE) as p:
-        FauxProcessus.dernier.finished.emit(0)
+        FauxProcessus.dernier.finished.emit(0, FauxProcessus.ExitStatus.NormalExit)
     assert p.stdout.closed and p.stdin.closed
 
 
@@ -336,6 +336,23 @@ def test_kill_puis_destruction_sans_finished_orphelin(faux_js, capfd):
     for _ in range(5):
         app.processEvents()
     assert "Signal source has been deleted" not in capfd.readouterr().err
+
+
+def test_finished_code_et_exitstatus_comme_qprocess(faux_js):
+    """``finished(int, QProcess.ExitStatus)`` comme QProcess : un slot à deux paramètres (Spyder en branche) reçoit
+    ``NormalExit`` à la fin du programme, ``CrashExit`` après ``kill``."""
+    from qtpy6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    recus = []
+    p = travailleur.ProcessusWeb()
+    p.finished.connect(lambda code, statut: recus.append((code, statut)))
+    p.start(sys.executable, ["x.py"])
+    p._recevoir(types.SimpleNamespace(data=types.SimpleNamespace(to_py=lambda: {"fin": 3})))
+    p.start(sys.executable, ["x.py"])
+    p.kill()
+    for _ in range(5):
+        app.processEvents()
+    assert recus == [(3, p.ExitStatus.NormalExit), (0, p.ExitStatus.CrashExit)]
 
 
 def test_page_recoit_zmq_du_worker():

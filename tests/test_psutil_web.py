@@ -146,7 +146,9 @@ def test_process_courant():
     assert isinstance(p.name(), str) and p.name()
     assert isinstance(p.cmdline(), list)
     assert isinstance(p.ppid(), int)
-    assert p.terminal() is None
+    # la page est le terminal de l'utilisateur : Spyder (utils/environ.py:121) reprend alors os.environ au lieu de
+    # lancer un shell de connexion qui n'existe pas ici (item 18, « Exécuter » attendait l'environnement)
+    assert p.terminal() == psutil_web.TERMINAL_PAGE
     with p.oneshot():
         assert p.pid == os.getpid()
 
@@ -154,6 +156,7 @@ def test_process_courant():
 def test_process_factice_kill_terminate_wait():
     psutil_web.inscrire(900)
     p = psutil_web.Process(900)
+    assert p.terminal() is None  # un enfant (noyau, pylsp) n'a pas de terminal
     p.terminate()
     assert not p.is_running() and not psutil_web.pid_exists(900)
     assert p.wait(timeout=1) is None
@@ -213,7 +216,11 @@ def test_machine():
     assert memoire.total >= memoire.available >= 0
     assert 0 <= memoire.percent <= 100 and memoire.used >= 0
     assert set(memoire._asdict()) >= {"total", "available", "percent", "used", "free"}
-    assert psutil_web.net_if_addrs() == {}
+    # l'interface locale seule : vide, jupyter_client (localinterfaces.py:88) lève NoIPAddresses, avertit sur la sortie
+    # d'erreur du noyau, et Spyder prend cet avertissement pour une erreur du noyau (item 18, « Exécuter »)
+    import socket
+    (adresse,) = psutil_web.net_if_addrs()["lo"]
+    assert (adresse.family, adresse.address, adresse.netmask) == (socket.AF_INET, "127.0.0.1", "255.0.0.0")
 
 
 def test_version():
