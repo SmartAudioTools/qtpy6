@@ -303,3 +303,58 @@ def test_reseau_web_fermetures(app, boucle_locale):
     perdu.abort()
     _pomper(lambda: False, n=5)
     assert erreurs == []
+
+
+# --- W566 : le serveur « open files » de Spyder dans la page (mainwindow.py:1524, start_open_files_server) -------------
+def test_serveur_open_files_sans_so_reuseaddr(boucle_locale, monkeypatch):
+    """Le ``_socket`` de Pyodide n'a pas ``SO_REUSEADDR`` et refuse l'option (Emscripten : ENOPROTOOPT) ; la doublure
+    pose la constante et tient l'option pour sans objet, puis le serveur de Spyder lie, écoute et accepte."""
+    import errno
+    import socket
+
+    from qtpy6.web import socket_web
+
+    monkeypatch.delattr(socket, "SO_REUSEADDR")
+    monkeypatch.setattr(socket, "socket", socket.socket)
+    monkeypatch.setattr(socket_web, "_installe", False)
+    monkeypatch.setattr(socket_web, "boucle_locale", False)  # installer() sans select ni os doublés
+    socket_web.installer()
+    monkeypatch.setattr(socket_web, "boucle_locale", True)
+
+    class Refus(socket_web._Socket):  # le setsockopt d'Emscripten
+        def setsockopt(self, niveau, option, *valeur):
+            raise OSError(errno.ENOPROTOOPT, "Protocol not available")
+
+    class SocketPyodide(socket_web.Socket, Refus):
+        pass
+
+    serveur = SocketPyodide(socket.AF_INET, socket.SOCK_STREAM)
+    serveur.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    serveur.bind(("127.0.0.1", 20128))
+    serveur.listen(20)
+    client = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
+    client.connect(("127.0.0.1", 20128))
+    client.sendall(b"spe.py")
+    requete, _ = serveur.accept()
+    assert requete.recv(1024) == b"spe.py"
+    requete.sendall(b" ")
+    assert client.recv(1) == b" "
+    with pytest.raises(OSError):  # une option réelle refusée reste une erreur
+        SocketPyodide(socket.AF_INET, socket.SOCK_STREAM).setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+    for s in (client, requete, serveur):
+        s.close()
+
+
+# --- W567 : l'alias qtpy en natif, posé par un .pth paresseux du venv (SmartPythonEditor, sans toucher Spyder) ----------
+def test_alias_qtpy_pth_paresseux(tmp_path):
+    import subprocess
+    from qtpy6 import _qtpy
+    chemin = _qtpy.ecrire_pth(tmp_path)
+    assert chemin.parent == tmp_path and chemin.suffix == '.pth'
+    code = ("import site, sys; site.addsitedir(sys.argv[1]); "
+            "avant = 'qtpy6' in sys.modules or 'PySide6' in sys.modules; "
+            "import qtpy, qtpy.QtCore; from qtpy6 import _qtpy; "
+            "print(avant, qtpy.__file__ == _qtpy.__file__, qtpy.QtCore.Signal is not None, "
+            "len([f for f in sys.meta_path if getattr(f, 'qtpy6_differe', False)]))")
+    sortie = subprocess.run([sys.executable, '-c', code, str(tmp_path)], capture_output=True, text=True, timeout=60)
+    assert sortie.stdout.split() == ['False', 'True', 'True', '0'], sortie.stderr

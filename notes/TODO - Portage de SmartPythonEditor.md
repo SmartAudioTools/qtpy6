@@ -326,6 +326,16 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
       `os.environ`, décision du professeur 17:41 : 18 variables) et `net_if_addrs()` = `lo` 127.0.0.1 (le vide faisait
       avertir jupyter_client sur la sortie d'erreur du noyau, affiché comme erreur du noyau). Noyau prêt vers 30 s,
       `print('W560', 6 * 7)` rend `W560 42`. Aussi : `ProcessusWeb.finished(int, ExitStatus)`.
+19. **Rapporteur d'erreur de Spyder à l'ouverture de spe.py** (W559, 12/11 18:59, note « Essais sans branche web, suite
+    (W559) ») : `mainwindow.py:1526 start_open_files_server` → `AttributeError: module 'socket' has no attribute
+    'SO_REUSEADDR'`. Mesuré (W566, chaînes de `pyodide.asm.wasm`) : `SO_REUSEADDR` et `SO_REUSEPORT` absents du
+    `_socket` de Pyodide, les autres options présentes. Existant : `socket_web.Socket` (bind/listen/accept sur la boucle
+    locale, `setsockopt` tolérant pour `SO_LINGER`). Fichiers : `qtpy6/web/socket_web.py`, `tests/test_doublures.py`
+    (section W566). Essai : `test_serveur_open_files_sans_so_reuseaddr`, puis sonde Firefox sur `spe.py` (pas de
+    rapporteur), puis le professeur dans son Firefox.
+    - **FAIT, W566, 12/11 19:10, mesuré (sonde Firefox)** : `installer()` pose les deux constantes, `setsockopt` tient
+      les options de liaison pour sans objet ; plus de rapporteur à l'ouverture de spe.py. Reste : vu par le professeur.
+      Note `notes/2026-11-12 - socket SO_REUSEADDR dans la page (W566).md`.
 
 ## Décisions à prendre par l'utilisateur
 

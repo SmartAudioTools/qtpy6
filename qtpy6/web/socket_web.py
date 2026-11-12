@@ -37,6 +37,9 @@ _select_reel = _select_module.select
 boucle_locale = sys.platform == "emscripten"  # les tests natifs le posent
 _HOTES_LOCAUX = {"127.0.0.1", "localhost", "::1", "0.0.0.0", "::", ""}
 _installe = False
+# Le ``_socket`` de Pyodide n'a ni SO_REUSEADDR ni SO_REUSEPORT (mesuré, W566) ; valeurs de Linux, posées par installer()
+_CONSTANTES_ABSENTES = {"SO_REUSEADDR": 2, "SO_REUSEPORT": 15}
+_OPTIONS_DE_LIAISON = {socket.SO_LINGER, *(getattr(socket, n, v) for n, v in _CONSTANTES_ABSENTES.items())}
 
 
 def port_libre() -> int:
@@ -84,7 +87,8 @@ class Socket(_Socket):
         try:
             super().setsockopt(niveau, option, *valeur)
         except OSError:
-            if option != socket.SO_LINGER and self._mode is None:  # sans objet : la socket n'est pas réellement liée
+            # sans objet : la socket n'est pas réellement liée, ou c'est une option de liaison (Emscripten la refuse)
+            if self._mode is None and not (niveau == socket.SOL_SOCKET and option in _OPTIONS_DE_LIAISON):
                 raise
 
     def fileno(self) -> int:
@@ -530,6 +534,9 @@ def installer() -> None:
         return
     _installe = True
     socket.socket = Socket
+    for nom, valeur in _CONSTANTES_ABSENTES.items():  # Spyder : setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+        if not hasattr(socket, nom):
+            setattr(socket, nom, valeur)
     if not boucle_locale:
         return
     doubler_terminal()
