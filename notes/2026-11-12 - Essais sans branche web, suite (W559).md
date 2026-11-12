@@ -43,6 +43,23 @@ Brief : reste des items 4 et 13 du TODO Portage (D4, D6, 4c, 4d, Interpréteur),
   'roues': (jedi, parso)}` sans aucun appel ; noyau prêt 16,6 s, `1+1 → Out[1]: 2`, jalon 8c 5/5
   (`qtpy6_essais/w559/sonde_d4_w559.log`). La doublure chardet n'est pas exercée par 8c ; 4c non relancé dans la page.
 
+## 4d, par cas (18:25)
+
+Relevé (releve) : importeurs dans le fork (hors tests) et `essais/roues/lib`, dépendances déclarées.
+- **jellyfish, bcrypt** : déclarés (`setup.py:277,290`), importés par AUCUN module → doublures retirées de `preparer.py`.
+  Mesuré, natif : `walk_packages(spyder)` importé en entier, 5 échecs dont aucun ne les nomme, ni l'un ni l'autre dans
+  `sys.modules` après.
+- **pickleshare** (`module_completion.py:16`), **three_merge** (`lsp_mixin.py:28`), **inflection** (`qstylizer/style.py:6`) :
+  importés au niveau module sans try ; pur Python → **roue dans l'archive** (`essais/roues/`, comme qstylizer), puis
+  doublure retirée. Bloqué : PyPI injoignable depuis le bac (`RemoteDisconnected` sur `/simple/pickleshare/`) et aucune
+  copie sur le disque ; le professeur doit télécharger (commande dans l'ETAT).
+- **keyring** : 9 importeurs, dont `config/manager.py:530,549,649` sans try (options `secure`) et
+  `remoteclient/widgets/container.py:16` au niveau module. Un navigateur n'a pas de trousseau : la vraie roue (et ses
+  jaraco.*) lèverait `NoKeyringError` à la première option secrète. Choix : **doublure qtpy6** `keyring` en mémoire de
+  la page (`qtpy6/web/`, posée par `lancer()`, comme chardet_web) — non codé ; en natif, le vrai keyring de
+  SmartPythonEditor (la doublure de `preparer.py` ne sert que le SmartPython de l'essai, qui ne l'a pas).
+- **métadonnées de pylint** : non traité.
+
 ## RESTE
 
 - 4d, relevé seulement : `pickleshare`, `three_merge`, `inflection`, `keyring`, `jellyfish`, `bcrypt` absents du

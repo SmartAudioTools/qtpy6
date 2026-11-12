@@ -37,8 +37,7 @@ class PickleShareDB(dict):
 
 doublure("pickleshare", PickleShareDB=PickleShareDB)        # en attendant la roue pure
 doublure("three_merge", merge=lambda a, b, c: a)             # idem
-doublure("jellyfish", levenshtein_distance=lambda a, b: 0)   # extension C, sans roue Pyodide
-doublure("bcrypt")                                           # extension C, remoteclient seulement
+# jellyfish et bcrypt : plus de doublure (W559, 12/11/2026) : déclarés par setup.py du fork, importés par aucun module.
 doublure("keyring", __path__=[], get_password=lambda *a: None, set_password=lambda *a: None)
 doublure("keyring.errors", NoKeyringError=type("NoKeyringError", (Exception,), {}))
 # zmq et psutil (extensions C, sans roue Pyodide) : plus de doublure ici depuis le jalon 8a (11/10/2026), celles de qtpy6
