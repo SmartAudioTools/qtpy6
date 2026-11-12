@@ -190,9 +190,16 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
 16. **Outillage** : `_fait` de la sonde par compare-and-set (`qtpy6/web/sonde.py`, rencontré aux jalons 3 et 5) ; test
     unitaire de la règle « slot à QEvent sur place » de `bloquant.py` dans `tests/test_web.py` ; `SystemError: Cannot
     enter a promising task` résiduels (Pyxel, « Point ouvert immédiat »). Niveau : lu.
-    **W553, 12/11** : compare-and-set et test de bloquant FAITS (deux tests, échouent sans) ; SystemError : pile
-    relevée (pompe `tourner` → `callPromising`), suite de la corruption GC (item 1, transmis à W545), repro à relancer
-    sur site stable. `notes/2026-11-12 - Outillage sonde et bloquant (W553).md`.
+    **[FAIT, W553, 12/11, e40d9f5]** compare-and-set et test de bloquant (deux tests, échouent sans) ; SystemError :
+    pile relevée (pompe `tourner` → `callPromising`), suite de la corruption GC (item 1, transmis à W545) ; reste : repro
+    à relancer sur site stable. `notes/2026-11-12 - Outillage sonde et bloquant (W553).md`.
+16 bis. **Trois tests de `tests/test_web.py` échouent depuis 82f2793** (boîte noire démarrée par `application()`),
+    relevé par W553 le 12/11 : `test_application_persistant_dans_le_navigateur`, `test_police_fixe_dans_le_navigateur`,
+    `test_coller_passe_par_qt`. Même message dans le sous-processus `en_navigateur` : `AttributeError:
+    'types.SimpleNamespace' object has no attribute 'window'`, levé par `qtpy6/web/boite_noire.py:24` (`_boite` :
+    `getattr(js.window, "qtpy6BoiteNoire", None)`), appelé par `demarrer()` (l. 31) depuis `application()`
+    (`qtpy6/web/__init__.py:95`). Le faux `js` des tests n'a pas de `window`. Sans propriétaire au tableau de bord.
+    Niveau : mesuré (pytest, 14:15).
 17. **Modules PySide6 non compilés** : renvoi à `notes/TODO - Modules PySide6 non compilés.md`. Aucun n'est importé par
     SmartPythonEditor au 11/10 (cette note). `QtPrintSupport` est lié depuis le 10/10 (faisabilité, jalon 6).
 
