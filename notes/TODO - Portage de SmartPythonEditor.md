@@ -255,6 +255,11 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
     W550 (12/11) : NON reproduite en quatre essais (modèle seul, slot reporté ou non, Spyder entier, `spe_monkey` jeu
     lancé : il casse avant, item 1). Reste : reproduire jeu tournant (après item 1, ou Chrome), pile entière ; pas de
     doublure sans cause. Note `2026-11-12 - QFileSystemModel et dossier Chrome (W550).md`, essai `essais/fsmodel/`.
+    - **REPRODUIT chez le professeur, 12/11 19:52** (relevé par W566), au simple démarrage de spe.py dans son Firefox
+      (site du 19:03, sans jeu lancé). Pile entière : `qtpy6_essais/equipe/w566/trace_professeur_explorateur_1952.txt`.
+      Elle passe par `bloquant.py:354 __call__` → `_relayer:368` → `executer:377`, puis par `explorer.py:1009`
+      (lambda `resizeColumnToContents(0)`) → `initStyleOption:184/193` `model.isDir` sur un modèle None. Piste à établir :
+      un relais de `bloquant` qui rejoue le lambda alors que le modèle n'est plus là. Non attribué.
 11. **Interruption d'un calcul qui ne dort jamais.** Aujourd'hui : signal livré au prochain `time.sleep` (a4ee0c6).
     Pour un vrai arrêt : `setInterruptBuffer` sur SharedArrayBuffer (grep → 0). La page EST isolée depuis f02c16c
     (`sw.js`, `isoler`) : voir « Contradictions ». Niveau : lu.
