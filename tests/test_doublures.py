@@ -56,3 +56,64 @@ def test_moteur_web_render_process_terminated(app):
         crash = QWebEnginePage.RenderProcessTerminationStatus.CrashedTerminationStatus
         page.renderProcessTerminated.emit(crash, 11)
         assert sorted(recus) == [("page", crash, 11), ("vue", crash, 11)]
+
+
+# --- W560 : alert() et console.* de l'iframe vers javaScriptAlert / javaScriptConsoleMessage (tuteur, _DebugPage) --------
+def _page_relais(app, classe_page=None):
+    from qtpy6.web.moteur_web import QWebEnginePage, QWebEngineView
+
+    vue = QWebEngineView()
+    page = (classe_page or QWebEnginePage)(vue)
+    vue.setPage(page)
+    return vue, page
+
+
+def test_moteur_web_relais_alert_console(app):
+    """Le tuteur surcharge ``javaScriptAlert`` et ``javaScriptConsoleMessage`` (``main_widget.py:372-380``) : la page
+    posée par ``setHtml`` porte, avant tout autre script et après le doctype, le relais qui remplace ``alert`` et
+    ``console.*`` de l'iframe ; le relais appelle les méthodes surchargées avec la signature Qt."""
+    from unittest.mock import MagicMock
+
+    with navigateur_double(document=MagicMock(), window=MagicMock()):
+        from qtpy6.web.moteur_web import QWebEnginePage
+
+        recus = []
+
+        class _DebugPage(QWebEnginePage):
+            def javaScriptConsoleMessage(self, level, message, line, source):
+                recus.append((level.name, message, line, source))
+
+            def javaScriptAlert(self, origin, msg):
+                recus.append(("alert", origin.toString(), msg))
+
+        vue, page = _page_relais(app, _DebugPage)
+        page.setHtml("<!DOCTYPE html><html><head><script>alert(1)</script></head></html>")
+        srcdoc = str(page._cadre.srcdoc)
+        assert srcdoc.startswith("<!DOCTYPE html><html><head><script>")
+        assert srcdoc.index("qtpy6_relais") < srcdoc.index("alert(1)")
+        relais = page._cadre.qtpy6_relais
+        relais("alert", "Assertion Failure", 0, "")
+        relais("error", "boum", 12, "viz.js")
+        relais("warn", "attention", 3, "viz.js")
+        relais("log", "info", 0, "")
+        assert recus == [("alert", page.url().toString(), "Assertion Failure"),
+                         ("ErrorMessageLevel", "boum", 12, "viz.js"),
+                         ("WarningMessageLevel", "attention", 3, "viz.js"),
+                         ("InfoMessageLevel", "info", 0, "")]
+
+
+def test_moteur_web_alert_par_defaut(app):
+    """Sans surcharge, ``javaScriptAlert`` ouvre une QMessageBox comme Qt, sans ``exec()`` (le relais est appelé par
+    le navigateur, entrée non suspendable : ``open()`` ne bloque pas) ; ``javaScriptConsoleMessage`` ne fait rien."""
+    from unittest.mock import MagicMock
+
+    from qtpy6.QtWidgets import QMessageBox
+
+    with navigateur_double(document=MagicMock(), window=MagicMock()):
+        vue, page = _page_relais(app)
+        page.setHtml("<p>x</p>")
+        page._cadre.qtpy6_relais("error", "boum", 1, "")
+        page._cadre.qtpy6_relais("alert", "Bonjour", 0, "")
+        boites = [b for b in vue.findChildren(QMessageBox) if b.text() == "Bonjour"]
+        assert len(boites) == 1 and boites[0].isVisible()
+        boites[0].close()

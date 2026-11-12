@@ -26,9 +26,9 @@ import os
 import re
 from typing import Any, Callable
 
-from qtpy6.QtCore import QObject, QUrl, Signal
+from qtpy6.QtCore import QObject, Qt, QUrl, Signal
 from qtpy6.QtGui import QAction, QColor, QIcon
-from qtpy6.QtWidgets import QApplication
+from qtpy6.QtWidgets import QApplication, QMessageBox, QWidget
 
 from .calque import Calque
 
@@ -159,6 +159,29 @@ def _urls_css(css: str, base: QUrl) -> str:
     return re.sub(r"""url\(\s*(["']?)([^"')]+)\1\s*\)""", remplacer, css)
 
 
+# Posé en tête de chaque page de même origine (``setHtml``, fichier local) : ``alert`` et ``console.*`` de l'iframe vont
+# aux méthodes de la page (``javaScriptAlert``, ``javaScriptConsoleMessage``, surchargeables comme dans Qt), les erreurs
+# non rattrapées aussi ; ``console.*`` garde son effet dans la console du navigateur. Sans ce relais, ``alert()`` ouvrirait
+# le dialogue du navigateur, qui suspend la page entière, Qt compris.
+_RELAIS = (
+    '<script>(function(){var r=window.frameElement&&window.frameElement.qtpy6_relais;if(!r)return;'
+    'window.alert=function(m){r("alert",m===undefined?"":String(m),0,"")};'
+    '["log","info","debug","warn","error"].forEach(function(n){var o=console[n];console[n]=function(){'
+    'try{r(n,Array.prototype.map.call(arguments,String).join(" "),0,"")}catch(e){}return o.apply(console,arguments)}});'
+    'window.addEventListener("error",function(e){r("error","Uncaught "+e.message,e.lineno||0,e.filename||"")});'
+    '})();</script>')
+
+
+def _avec_relais(html: str) -> str:
+    """``html`` avec ``_RELAIS`` avant tout autre script : après ``<head>``, sinon ``<html>``, sinon le doctype (jamais
+    avant lui : la page passerait en mode quirks), sinon en tête."""
+    for motif in (r"<head\b[^>]*>", r"<html\b[^>]*>", r"<!doctype\b[^>]*>"):
+        m = re.search(motif, html, re.I)
+        if m is not None:
+            return html[:m.end()] + _RELAIS + html[m.end():]
+    return _RELAIS + html
+
+
 _BALISE = re.compile(r"<(?:script|link|img|source|embed|audio|video)\b[^>]*>", re.I)
 _ATTRIBUT = re.compile(r"""\b(src|href)(\s*=\s*)(["'])(.*?)\3""", re.I | re.S)
 
@@ -207,6 +230,9 @@ class QWebEnginePage(QObject):
         FindBackward = 1
         FindCaseSensitively = 2
 
+    class JavaScriptConsoleMessageLevel(enum.Enum):
+        InfoMessageLevel, WarningMessageLevel, ErrorMessageLevel = range(3)
+
     class RenderProcessTerminationStatus(enum.Enum):
         NormalTerminationStatus, AbnormalTerminationStatus, CrashedTerminationStatus, KilledTerminationStatus = range(4)
 
@@ -239,6 +265,7 @@ class QWebEnginePage(QObject):
         cadre.style.cssText = "position: fixed; z-index: 10; border: 0; display: none; background: white"
         self._charge_proxy = create_proxy(self._charge)
         self._clic_proxy = create_proxy(self._clic)
+        cadre.qtpy6_relais = self._relais_proxy = create_proxy(self._relais)
         cadre.addEventListener("load", self._charge_proxy)
         js.document.body.append(cadre)
         self.destroyed.connect(lambda *_: cadre.remove())
@@ -264,7 +291,7 @@ class QWebEnginePage(QObject):
         self._url = QUrl(url)
         self._commencer()
         self._cadre.removeAttribute("src")
-        self._cadre.srcdoc = _ressources(html, self._url)
+        self._cadre.srcdoc = _avec_relais(_ressources(html, self._url))
         self.urlChanged.emit(QUrl(self._url))
 
     def _aller(self, entree: tuple[QUrl, str | None]) -> None:
@@ -358,6 +385,28 @@ class QWebEnginePage(QObject):
         url = self._url.resolved(QUrl(cible)) if self._url.isValid() else QUrl(cible)
         if self.acceptNavigationRequest(url, self.NavigationType.NavigationTypeLinkClicked, True):
             self.load(url)
+
+    def _relais(self, genre: str, message: str, ligne: int, source: str) -> None:
+        """Appelé par ``_RELAIS`` dans l'iframe : ``alert`` ou un niveau de ``console``."""
+        if genre == "alert":
+            self.javaScriptAlert(QUrl(self._url), str(message))
+            return
+        L = self.JavaScriptConsoleMessageLevel
+        niveau = {"warn": L.WarningMessageLevel, "error": L.ErrorMessageLevel}.get(str(genre), L.InfoMessageLevel)
+        self.javaScriptConsoleMessage(niveau, str(message), int(ligne), str(source) or self._url.toString())
+
+    def javaScriptAlert(self, securityOrigin: QUrl, msg: str) -> None:
+        """Comme Qt, une boîte d'information ; ouverte par ``open()`` : le navigateur appelle le relais dans une entrée
+        qui ne peut pas suspendre, où ``exec()`` ne bloquerait pas (``bloquant.py``)."""
+        parent = self.parent() if isinstance(self.parent(), QWidget) else None
+        boite = QMessageBox(QMessageBox.Icon.Information, f"Javascript Alert - {securityOrigin.toString()}", msg,
+                            QMessageBox.StandardButton.Ok, parent)
+        boite.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        boite.open()
+
+    def javaScriptConsoleMessage(self, level: JavaScriptConsoleMessageLevel, message: str, lineNumber: int,
+                                 sourceID: str) -> None:
+        """Sans effet, comme Qt hors journal ``js`` : le message reste dans la console du navigateur."""
 
     def acceptNavigationRequest(self, url: QUrl, type_: NavigationType, isMainFrame: bool) -> bool:
         return True
