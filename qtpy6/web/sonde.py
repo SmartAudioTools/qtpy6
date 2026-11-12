@@ -118,7 +118,9 @@ def attendre(navigateur, etat, fin, pilote=False):
             return lu
         if pilote and lu in GESTES:
             if GESTES[lu](navigateur) is not False:  # False : un geste qui ne se répond pas (recharger)
-                navigateur.execute_script(f"window.etat = '{lu}_fait'")
+                # Compare-and-set : la page a pu reprendre pendant le geste (sur l'événement d'un dialogue) et demander
+                # déjà le suivant ; un « _fait » posé par-dessus l'effacerait, et chacun attendrait l'autre (jalons 3 et 5).
+                navigateur.execute_script(f"if (window.etat === '{lu}') window.etat = '{lu}_fait'")
             continue
         time.sleep(0.2 if pilote else 0.5)
     return "délai dépassé"

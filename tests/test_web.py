@@ -915,6 +915,29 @@ def test_slot_direct_garde_expediteur():
 
 
 @greenlet_seul
+def test_slot_a_qevent_sur_place():
+    # Un QEvent en argument (Spyder : sig_key_pressed.emit(event) dans keyPressEvent) ne vit que le temps du dispatch, et
+    # l'émetteur lit son accept() juste après l'emit : même hors entrée promettante, le slot s'exécute sur place
+    # (``bloquant._relayer``) ; reporté, il lirait un objet détruit et la touche serait traitée deux fois.
+    sortie = simule("""
+        from qtpy6.QtCore import QObject, Signal, QEvent
+        class A(QObject):
+            s = Signal(object)
+        def recu(e):
+            e.accept()
+            print("recu", e.type().name)
+        a = A()
+        a.s.connect(recu)
+        e = QEvent(QEvent.Type.User)
+        e.ignore()
+        a.s.emit(e)  # hors entrée promettante : un argument ordinaire serait reporté
+        print("apres emit", e.isAccepted())
+        tourner()
+    """)
+    assert sortie.splitlines() == ["recu User", "apres emit True"]
+
+
+@greenlet_seul
 def test_animation_par_image_survit_au_slot_reporte():
     # Lancée hors entrée promettante, le « Running » de start() atteint _etat après la pause intérieure : l'animation doit
     # quand même aller au bout (la descente vers une question de SmartTeacher restait figée à 0).
@@ -1699,3 +1722,36 @@ def test_molette_un_roulement_par_image():
     wheel saturait le thread de la page, file de 4,8 s, retard et inertie (SmartTeacher W525, 10/11/2026)."""
     recu = molette_rafale()
     assert recu == {"n": 1, "somme": 180}, recu
+
+
+def test_sonde_fait_ne_recouvre_pas_le_geste_suivant(monkeypatch):
+    """La page reprend pendant le geste (sur l'événement d'un dialogue) et demande déjà le suivant : le « _fait » de la
+    sonde ne doit pas l'effacer, sinon chacun attend l'autre jusqu'au délai (jalons 3 et 5 de la faisabilité)."""
+    import re
+    from qtpy6.web import sonde
+
+    class Page:  # window.etat seul, et les deux formes d'écriture que la sonde envoie
+        etat, gestes = "fichier", []
+
+        def execute_script(self, code):
+            if code == "return window.etat":
+                if self.etat == "cliquer_fait":
+                    self.etat = "fini"
+                return self.etat
+            if m := re.fullmatch(r"if \(window\.etat === '(\w+)'\) window\.etat = '(\w+)'", code):
+                if self.etat == m[1]:
+                    self.etat = m[2]
+            elif m := re.fullmatch(r"window\.etat = '(\w+)'", code):
+                self.etat = m[1]
+            else:
+                raise AssertionError(code)
+
+    def fichier(page):  # la page reprend sur le dialogue et demande aussitôt un clic
+        page.gestes.append("fichier")
+        page.etat = "cliquer"
+
+    monkeypatch.setitem(sonde.GESTES, "fichier", fichier)
+    monkeypatch.setitem(sonde.GESTES, "cliquer", lambda page: page.gestes.append("cliquer"))
+    page = Page()
+    assert sonde.attendre(page, "fini", time.time() + 2, pilote=True) == "fini"
+    assert page.gestes == ["fichier", "cliquer"]
