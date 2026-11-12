@@ -177,6 +177,14 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
    - Existant : `FD = 14` (`qtpy6/web/zmq_web.py:114`) ; aucune doublure de `QSocketNotifier` (grep → 0).
    - Fichiers : `zmq_web.py`, une doublure `QSocketNotifier` à poser sous `qtpy6.QtCore`. Essai : `jalon8d.py` à écrire.
    - Niveau : lu dans les sources. Le jalon n'est pas défini plus loin dans la note.
+   **[FAIT, W548, 12/11]** jalon8d : 5/5 dans Firefox en 26,6 s (sonde). Détail : initialize 16,2 s, diagnostic 0,6 s,
+   complétion `path` 8,6 s, tas 42 → 119 Mio. Sur le bureau : 5/5 en 15,2 s. Doublures : TCP de boucle locale,
+   select/selectors, termios/fcntl, `os` sur fd (`socket_web.py`), ops `flux_*` (`zmq_web.py`), `QSocketNotifier`
+   (`QtCore.py`), parent vivant et fin de soi (`psutil_web.py`), `error`, `exitCode` et `processId` de ProcessusWeb.
+   Premier lot dans 93a38e9 (sous le message de W549), le reste au commit W548 suivant. Dépendances levées : PAQUETS
+   pylsp (W551, 150070b) et pexpect, ptyprocess, importlib_metadata, zipp (W548). `notes/2026-11-12 - Jalon 8d, pylsp
+   dans un Worker (W548).md`. Reste : le risque, lu et non mesuré, d'un `accept` suspendu pour toujours, qui interdit
+   à un slot de suspendre (`bloquant.py:152`).
 7. **Hébergement : un lien pour les élèves.** spe.py tourne par la sonde et dans le Chromium de l'utilisateur ; le lien
    reste à faire (zmq, « config de référence », Points ouverts). Manifeste d'application écarté pour l'instant, « à
    ajouter à l'hébergement ». Niveau : mesuré (Firefox sonde, Chromium par l'utilisateur pour `print`).
@@ -245,8 +253,19 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
     `getattr(js.window, "qtpy6BoiteNoire", None)`), appelé par `demarrer()` (l. 31) depuis `application()`
     (`qtpy6/web/__init__.py:95`). Le faux `js` des tests n'a pas de `window`. Sans propriétaire au tableau de bord.
     Niveau : mesuré (pytest, 14:15).
+16 ter. **[FAIT, W548, 12/11]** `test_noyau_web.py` sous Python 3.14 : `RuntimeError: There is no current event loop`
+    (`asyncio.get_event_loop()` sans boucle posée, `sous_processus.doubler_zmq:251`, `preambule.py:52,156`) : rouges
+    `test_popen_doublee_dans_le_navigateur`, `test_preambule_crochets_attendre_plus_tard_poster`,
+    `test_preambule_installe_zmq_et_threading_sans_qt`, `test_preambule_recevoir_page`, `test_preambule_sleep_livre_les_signaux`.
+    Correctif : boucle courante, sinon boucle neuve posée. 34/34 sous 3.14 et 3.13. Le « No module named 'js' »
+    (`memoire_partagee`) était corrigé par W557. Niveau : mesuré (pytest, 15:14).
 17. **Modules PySide6 non compilés** : renvoi à `notes/TODO - Modules PySide6 non compilés.md`. Aucun n'est importé par
     SmartPythonEditor au 11/10 (cette note). `QtPrintSupport` est lié depuis le 10/10 (faisabilité, jalon 6).
+18. **« Exécuter » de Spyder « tourne dans le vide en cherchant les variables d'environnement »** (professeur, 12/11 15:05,
+    essai `--visible` consigné par W558 à l'item 2 bis). Hypothèse à vérifier : `spyder/utils/environ.py`
+    (`get_user_environment_variables` lance un shell par sous-processus, lu avec délai) sous la doublure QProcess ;
+    attendu : la même ligne des deux côtés, doublure qui rend `os.environ` sans sous-processus dans la page
+    (règle CLAUDE.md). Distinct de l'item 1 (%runfile tue le noyau) : ici le noyau n'est pas atteint.
 
 ## Décisions à prendre par l'utilisateur
 

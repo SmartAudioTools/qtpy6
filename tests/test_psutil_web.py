@@ -178,11 +178,30 @@ def test_wait_procs():
     assert morts == [a] and vivants == [b] and vus == [a]
 
 
-def test_processus_courant_ne_se_tue_pas():
+def test_processus_courant_se_termine_par_systemexit():
+    """terminate()/kill() sur soi-même : le worker sort (transport LSP de Spyder, quand son parent disparaît)."""
     p = psutil_web.Process()
-    with pytest.raises(psutil_web.AccessDenied):
+    with pytest.raises(SystemExit) as fin:
+        p.terminate()
+    assert fin.value.code == 128 + 15
+    with pytest.raises(SystemExit) as fin:
         p.kill()
+    assert fin.value.code == 128 + 9
+    with pytest.raises(psutil_web.AccessDenied):
+        p.send_signal(2)  # un autre signal ne tue pas
     assert psutil_web.pid_exists(os.getpid())
+
+
+def test_parent_est_la_page_vivante():
+    """ppid() rend le pid de la page, que pid_exists dit vivant (sinon le transport LSP s'arrête aussitôt)."""
+    parent = psutil_web.Process().ppid()
+    assert parent == psutil_web.PID_PAGE and parent != os.getpid()
+    assert psutil_web.pid_exists(parent) and psutil_web.Process(parent).is_running()
+    psutil_web.reinitialiser()
+    assert psutil_web.pid_exists(parent)
+    with pytest.raises(psutil_web.AccessDenied):
+        psutil_web.Process(parent).kill()
+    assert psutil_web.pid_exists(parent)
 
 
 def test_machine():

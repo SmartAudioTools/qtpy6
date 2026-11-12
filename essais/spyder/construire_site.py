@@ -45,6 +45,7 @@ PAQUETS = ("spyder qtpy IPython asttokens chardet colorama decorator diff_match_
            "dateutil jupyter_client jupyter_core msgpack platformdirs pyuca tornado watchdog jinja2 markupsafe "  # jalon 6 : mainwindow + 33 plugins
            "ipykernel comm cloudpickle matplotlib_inline "  # jalon 8a : le noyau (relevé de sys.modules au démarrage)
            "pylint astroid isort tomlkit dill "  # W551 : pylint, pour spyder_code_analysis
+           "pexpect ptyprocess importlib_metadata zipp "  # jalon 8d : le transport LSP (fdpexpect), W548
            "pylsp pylsp_jsonrpc pluggy docstring_to_markdown pyflakes").split() + list(GREFFONS)  # jalon 8d : serveur pylsp, W548
 DISTRIBUTIONS = ["qstylizer", "ipython_pygments_lexers", "typing_extensions", "six", "mccabe", "pycodestyle"]  # modules d'un seul fichier : --paquet prendrait site-packages
 FORK = Path("/DATA/Python/FORKS/SmartPythonEditor")

@@ -279,6 +279,8 @@ def oublier(destination: Any) -> None:
     """L'interpréteur ``destination`` est mort : la page cesse de répondre à sa place aux battements de cœur."""
     for port in [p for p, d in _echos.items() if d == destination]:
         del _echos[port]
+    for port in [p for p, d in _distants.items() if d == destination and destination is not None]:
+        del _distants[port]  # ses ports : un connect y est refusé (ECONNREFUSED), plus relayé vers un mort
     for conn, (client, serveur, _) in list(_relais_flux.items()):  # ses connexions TCP : l'autre bout voit la fin
         if destination in (client, serveur):
             del _relais_flux[conn]
@@ -310,6 +312,8 @@ def _recevoir_flux(origine: Any, message: dict[str, Any]) -> None:
         relais[2] += operation == "flux_fin"
         if operation == "flux_refus" or relais[2] >= 2:
             del _relais_flux[conn]
+    elif operation == "flux_accepte":  # un connect abandonné (délai dépassé) : l'autre bout apprend la fin
+        poster(origine, _op(op="flux_fin", conn=conn))
 
 
 def recevoir(origine: str | None, message: dict[str, Any]) -> None:

@@ -294,6 +294,50 @@ def test_vers_python_ramene_les_octets_et_les_conteneurs():
     assert all(type(f) is bytes for f in resultat["frames"])
 
 
+def test_error_et_exitcode_comme_qprocess(faux_js):
+    """``error()`` vaut UnknownError tant que rien n'a échoué, ``exitCode()`` 0 puis le code de sortie du Worker (le
+    client LSP de Spyder les lit quand le transport s'arrête)."""
+    p = travailleur.ProcessusWeb()
+    assert p.error() == p.ProcessError.UnknownError and p.exitCode() == 0
+    p.start(sys.executable, ["x.py"])
+    p._recevoir(types.SimpleNamespace(data=types.SimpleNamespace(to_py=lambda: {"fin": 143})))
+    assert p.exitCode() == 143 and p.error() == p.ProcessError.UnknownError
+    q = travailleur.ProcessusWeb()
+    q.start(sys.executable, ["x.py"])
+    q._recevoir(types.SimpleNamespace(data=types.SimpleNamespace(to_py=lambda: {"erreur": "JSPI absent"})))
+    assert q.error() == q.ProcessError.FailedToStart
+
+
+def test_processid_comme_qprocess(faux_js):
+    """``processId()`` : 0 hors exécution, sinon un pid que psutil_web dit vivant (client LSP de Spyder : initialize)."""
+    from qtpy6.web import psutil_web
+    p, q = travailleur.ProcessusWeb(), travailleur.ProcessusWeb()
+    assert p.processId() == 0
+    p.start(sys.executable, ["x.py"])
+    q.start(sys.executable, ["x.py"])
+    pid = p.processId()
+    assert pid > 0 and pid != q.processId() and psutil_web.pid_exists(pid)
+    p.kill()
+    assert p.processId() == 0 and not psutil_web.pid_exists(pid)
+    q._recevoir(types.SimpleNamespace(data=types.SimpleNamespace(to_py=lambda: {"fin": 0})))
+    assert q.processId() == 0
+
+
+def test_kill_puis_destruction_sans_finished_orphelin(faux_js, capfd):
+    """Le client LSP de Spyder tue le processus puis le détruit : le ``finished`` différé de ``kill`` ne doit pas partir
+    vers un objet détruit (mesuré dans Firefox, jalon 8d : « Signal source has been deleted », travailleur.py:356)."""
+    from qtpy6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    p = travailleur.ProcessusWeb()
+    p.start(sys.executable, ["x.py"])
+    p.kill()
+    shiboken6 = pytest.importorskip("shiboken6")
+    shiboken6.delete(p)  # détruit avant que le minuteur à 0 ms parte (dans la page : DeferredDelete au même tour)
+    for _ in range(5):
+        app.processEvents()
+    assert "Signal source has been deleted" not in capfd.readouterr().err
+
+
 def test_page_recoit_zmq_du_worker():
     zmq_web.reinitialiser()
     p = travailleur.ProcessusWeb()

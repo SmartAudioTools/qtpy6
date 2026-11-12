@@ -48,8 +48,23 @@ def _attendre(condition: Callable[[], bool], delai_ms: int | None) -> bool:
     return condition()
 
 
+def _boucle() -> asyncio.AbstractEventLoop:
+    """La boucle courante (la WebLoop de Pyodide dans le Worker) ; sans boucle posée, une neuve, posée : depuis Python
+    3.14, ``get_event_loop()`` lève au lieu d'en créer une (« There is no current event loop »)."""
+    try:
+        return asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+    try:
+        return asyncio.get_event_loop()
+    except RuntimeError:
+        neuve = asyncio.new_event_loop()
+        asyncio.set_event_loop(neuve)
+        return neuve
+
+
 def _plus_tard(fonction: Callable[[], Any], delai_ms: int = 0) -> None:
-    asyncio.get_event_loop().call_later(delai_ms / 1000, fonction)
+    _boucle().call_later(delai_ms / 1000, fonction)
 
 
 def _livrer_signaux() -> None:
@@ -153,7 +168,7 @@ def installer(dossier_web: str, boucle: asyncio.AbstractEventLoop | None = None)
     pyxel_web.installer()  # au premier import pyxel : init, flip, run du Worker
     memoire_partagee.installer()  # SharedMemory(name=…) : un segment créé par la page
     psutil_web.installer()  # ipykernel l'importe au chargement ; le noyau surveille son parent (JPY_PARENT_PID)
-    boucle = boucle or asyncio.get_event_loop()
+    boucle = boucle or _boucle()
     threading_web.partager_boucle(boucle)  # les boucles qu'ipykernel crée par fil
     _garde_vie(boucle)
     _doubler_sleep()

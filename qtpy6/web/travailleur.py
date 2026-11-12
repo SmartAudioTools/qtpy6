@@ -280,6 +280,7 @@ class ProcessusWeb(QObject):
         import js  # noqa: PLC0415
         from pyodide.ffi import create_proxy, to_js  # noqa: PLC0415
 
+        self._code_sortie = 0  # comme QProcess : exitCode remis à zéro au démarrage (l'erreur, elle, reste)
         cible, argv = _commande(arguments)
         cwd = os.path.abspath(self.dossier_travail or os.getcwd())
         dossier = a_zipper = os.path.dirname(os.path.abspath(cible))
@@ -291,6 +292,8 @@ class ProcessusWeb(QObject):
             self.worker, _RESERVE = _RESERVE[0], None
         else:
             self.worker = _nouveau_worker()
+        self._pid = next(ProcessusWeb._pids)
+        _psutil_web("inscrire", self._pid)
         self._recepteur = create_proxy(self._recevoir)
         self.worker.onmessage = self._recepteur
         zip_ = to_js(_zipper([a_zipper, cwd, tempfile.gettempdir()], REGLAGES.get("filtre"),
@@ -323,6 +326,20 @@ class ProcessusWeb(QObject):
     def state(self) -> "ProcessusWeb.ProcessState":
         return self.ProcessState.Running if self.worker is not None else self.ProcessState.NotRunning
 
+    def error(self) -> "ProcessusWeb.ProcessError":
+        """Comme QProcess : UnknownError tant que rien n'a échoué, FailedToStart si le Worker n'a pas pu naître."""
+        return getattr(self, "_derniere_erreur", self.ProcessError.UnknownError)
+
+    def exitCode(self) -> int:
+        """Comme QProcess : 0 tant que le Worker n'a pas fini, puis son code de sortie."""
+        return getattr(self, "_code_sortie", 0)
+
+    _pids = itertools.count(30000)  # les pid factices des Workers (ceux de Popen partent de 40000)
+
+    def processId(self) -> int:
+        """Comme QProcess : le pid tant que le Worker tourne (vivant pour psutil_web), 0 sinon."""
+        return getattr(self, "_pid", 0) if self.worker is not None else 0
+
     def readAllStandardOutput(self):
         return self._vider("sortie")
 
@@ -337,7 +354,9 @@ class ProcessusWeb(QObject):
         if self.worker is None:
             return
         self._mourir()
-        QTimer.singleShot(0, lambda: self.finished.emit(0))  # comme QProcess : ``finished`` après le retour de ``kill``
+        # comme QProcess : ``finished`` après le retour de ``kill`` ; ``self`` en contexte : rien si l'objet est détruit
+        # entre-temps (client LSP de Spyder, jalon 8d : « Signal source has been deleted »)
+        QTimer.singleShot(0, self, lambda: self.finished.emit(0))
 
     close = kill  # ``QProcess.close`` tue le processus (client LSP de Spyder : ``transport.close()``)
 
@@ -349,6 +368,7 @@ class ProcessusWeb(QObject):
     def _mourir(self) -> None:
         self.worker.terminate()
         self.worker = None
+        _psutil_web("retirer", getattr(self, "_pid", 0))
         zmq_web = sys.modules.get("qtpy6.web.zmq_web")
         if zmq_web is not None:  # plus de battement de cœur répondu pour lui : jupyter_client le voit mort
             zmq_web.oublier(self)
@@ -365,6 +385,7 @@ class ProcessusWeb(QObject):
                 self._arrive(canal, m[canal])
         if "fin" in m:
             self._mourir()
+            self._code_sortie = m["fin"]
             self.finished.emit(m["fin"])
         elif "erreur" in m:  # Pyodide injoignable, JSPI absent : le processus n'a pas pu naître
             self._erreur(0, m["erreur"])
@@ -376,8 +397,18 @@ class ProcessusWeb(QObject):
         (self.readyReadStandardOutput if canal == "sortie" else self.readyReadStandardError).emit()
 
     def _erreur(self, _, texte):
+        self._derniere_erreur = self.ProcessError.FailedToStart
         self._arrive("sortie_erreur", f"\n■ {texte}\n")
         self.kill()  # le worker ne servira plus : le prochain ``start`` en relance un
+
+
+def _psutil_web(fonction: str, pid: int) -> None:
+    """``psutil_web.inscrire`` / ``retirer`` du pid d'un Worker, si la doublure est là."""
+    try:
+        from . import psutil_web  # noqa: PLC0415
+    except ImportError:
+        return
+    getattr(psutil_web, fonction)(pid)
 
 
 def _commande(arguments) -> "tuple[str, list[str]]":

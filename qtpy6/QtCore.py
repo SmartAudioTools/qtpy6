@@ -43,6 +43,10 @@ if sys.platform == 'emscripten':
     from .web import sous_processus
     sous_processus.doubler()  # subprocess.run et Popen : le même worker, attendu par JSPI
     sous_processus.doubler_zmq()  # zmq, threading, psutil : le noyau Jupyter d'un worker parle à la page
+    # QSocketNotifier on a zmq_web socket's FD (Spyder's LSP client), here and in the binding's module that qtpy reads.
+    import importlib
+    from .web import socket_web
+    socket_web.doubler_qsocketnotifier(globals(), importlib.import_module(f'{_binding.API_NAME}.QtCore'))
     # One thread, and no nested event loop: cooperative threads, and exec() suspended by JSPI.
     from .web import bloquant, fils
     fils.doubler(globals())

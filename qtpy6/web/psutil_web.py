@@ -18,7 +18,9 @@ Relevé de l'usage réel (SmartPython et fork Spyder, 11/10/2026), fichier:ligne
 
 Le modèle : un registre de pids « vivants » : le pid courant, et des pids factices inscrits par d'autres doublures
 (``inscrire`` / ``retirer`` : un Popen doublé s'en sert). ``kill`` / ``terminate`` / ``send_signal`` d'un pid factice le
-retirent du registre ; le processus courant, lui, ne se tue pas (AccessDenied)."""
+retirent du registre. Le parent de tout processus est la page (``PID_PAGE``, toujours vivante, intuable : AccessDenied) ;
+``terminate`` / ``kill`` du processus courant lèvent SystemExit (128 + signal), comme un worker qui sort ; un autre
+signal envoyé à soi-même lève AccessDenied."""
 
 from __future__ import annotations
 
@@ -39,6 +41,7 @@ STATUS_ZOMBIE = "zombie"
 _MEMOIRE_TOTALE = 4 * 1024 ** 3  # rien à mesurer dans le navigateur : une machine de 4 Gio, entièrement disponible
 
 _vivants: set[int] = set()
+PID_PAGE = 1  # la page : le parent de la page et de ses workers (os.getpid() vaut 42 partout sous Pyodide)
 
 
 # --- Exceptions ---------------------------------------------------------------------------------------------------
@@ -86,11 +89,11 @@ def reinitialiser() -> None:
 
 
 def pid_exists(pid: int) -> bool:
-    return int(pid) == os.getpid() or int(pid) in _vivants
+    return int(pid) in (os.getpid(), PID_PAGE) or int(pid) in _vivants
 
 
 def pids() -> list[int]:
-    return sorted({os.getpid(), *_vivants})
+    return sorted({PID_PAGE, os.getpid(), *_vivants})
 
 
 # --- Processus ----------------------------------------------------------------------------------------------------
@@ -135,7 +138,7 @@ class Process:
 
     def ppid(self) -> int:
         self._vivant()
-        return 0
+        return PID_PAGE if self.pid != PID_PAGE else 0
 
     def terminal(self) -> str | None:
         return None
@@ -164,7 +167,9 @@ class Process:
 
     def send_signal(self, sig: int) -> None:
         self._vivant()
-        if self.pid == os.getpid():
+        if self.pid == os.getpid() and sig in (9, 15):
+            raise SystemExit(128 + sig)
+        if self.pid in (os.getpid(), PID_PAGE):
             raise AccessDenied(self.pid)
         retirer(self.pid)
 

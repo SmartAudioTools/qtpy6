@@ -24,6 +24,7 @@ import select as _select_module
 import selectors
 import socket
 import sys
+import types
 import weakref
 from collections import deque
 from typing import Any
@@ -109,6 +110,8 @@ class Socket(_Socket):
     def listen(self, backlog: int = 0) -> None:
         if self._mode != "lie":
             return super().listen(backlog)
+        if zmq_web._ecoutes.get(self._adresse[1], self) is not self:
+            raise OSError(errno.EADDRINUSE, os.strerror(errno.EADDRINUSE))
         self._mode = "ecoute"
         zmq_web._ecoutes[self._adresse[1]] = self
         if zmq_web.en_travailleur:  # la page apprend où joindre ce port (l'op ``bind`` de zmq)
@@ -161,7 +164,12 @@ class Socket(_Socket):
             self._vers = destination
             zmq_web._flux[self._conn] = self
             poster(destination, zmq_web._op(op="flux_connect", port=port, conn=self._conn, adresse=list(self._adresse)))
-            self._attendre(lambda: self._etat != "attente")
+            try:
+                self._attendre(lambda: self._etat != "attente")
+            except socket.timeout:  # abandonnée : une acceptation tardive reçoit flux_fin (zmq_web._recevoir_flux)
+                zmq_web._flux.pop(self._conn, None)
+                self._etat = "fermee"
+                raise
         if self._etat == "refusee":
             zmq_web._flux.pop(self._conn, None)
             raise ConnectionRefusedError(errno.ECONNREFUSED, os.strerror(errno.ECONNREFUSED))
@@ -265,8 +273,11 @@ class Socket(_Socket):
             self._finir()
             zmq_web._flux.pop(self._conn, None)
             self._etat = "fermee" if self._etat == "etablie" else self._etat
-        elif self._mode == "ecoute" and zmq_web._ecoutes.get(self._adresse[1]) is self:
-            del zmq_web._ecoutes[self._adresse[1]]
+        elif self._mode == "ecoute":
+            if zmq_web._ecoutes.get(self._adresse[1]) is self:
+                del zmq_web._ecoutes[self._adresse[1]]
+            while self._attente:  # les connexions arrivées, jamais acceptées : le client voit la fin
+                self._attente.popleft().close()
         if self._mode is not None:
             self._signaler()
         super()._real_close()
@@ -276,7 +287,8 @@ class Socket(_Socket):
     def _lisible(self) -> bool:
         if self._mode == "ecoute":
             return bool(self._attente) or self._closed
-        return self._mode == "connexion" and (bool(self._tampon) or self._fin_recue or self._etat != "etablie")
+        return self._mode == "connexion" and (bool(self._tampon) or self._fin_recue
+                                             or self._etat not in ("etablie", "attente"))
 
     def _ecrivable(self) -> bool:
         return self._mode == "connexion" and self._etat != "attente"
@@ -427,6 +439,87 @@ def doubler_qsocketnotifier(ns: dict[str, Any], module: Any) -> type:
     return QSocketNotifier
 
 
+# --- Le descripteur lu par os (fstat, read, write, close) ---------------------------------------------------------
+
+_os_reel = {nom: getattr(os, nom) for nom in ("fstat", "read", "write", "close")}
+
+
+def _socket_de(fd: Any) -> Socket | None:
+    objet = zmq_web._par_fd.get(fd) if isinstance(fd, int) else None
+    return objet if isinstance(objet, Socket) else None
+
+
+def _fstat(fd, *a, **k):
+    s = _socket_de(fd)
+    if s is None:
+        return _os_reel["fstat"](fd, *a, **k)
+    import stat  # noqa: PLC0415
+    return os.stat_result((stat.S_IFSOCK | 0o777, 0, 0, 1, os.getuid(), os.getgid(), 0, 0, 0, 0))
+
+
+def _read(fd, n):
+    s = _socket_de(fd)
+    return _os_reel["read"](fd, n) if s is None else s.recv(n)
+
+
+def _write(fd, donnees):
+    s = _socket_de(fd)
+    return _os_reel["write"](fd, donnees) if s is None else s.send(donnees)
+
+
+def _close(fd):
+    s = _socket_de(fd)
+    return _os_reel["close"](fd) if s is None else s.close()
+
+
+def doubler_os() -> None:
+    """``os.fstat``, ``os.read``, ``os.write`` et ``os.close`` sur le descripteur d'une socket de ce module (que le
+    système ne connaît pas) : la socket, comme sur le bureau. La passerelle LSP de Spyder lit pylsp par
+    ``pexpect.fdpexpect.fdspawn(socket)`` (W548)."""
+    os.fstat, os.read, os.write, os.close = _fstat, _read, _write, _close
+
+
+# --- Terminal (termios, fcntl, resource) --------------------------------------------------------------------------
+
+def _refuser(*_a, **_k):
+    raise OSError(errno.ENOTTY, os.strerror(errno.ENOTTY))
+
+
+def doubler_terminal(noms: tuple[str, ...] | None = None) -> None:
+    """Pose ``termios``, ``fcntl`` et ``resource`` là où l'interpréteur ne les a pas (Pyodide : aucun des trois), pour
+    que s'importent ``pty``, ``tty`` et ``ptyprocess`` : la passerelle LSP de Spyder importe ``pexpect.fdpexpect`` sans
+    s'en servir en TCP (W548). Un appel lève ``ENOTTY``, ce que rend un descripteur qui n'est pas un terminal. ``noms`` :
+    ceux à doubler (les tests natifs) ; par défaut, les absents."""
+    import importlib.util  # noqa: PLC0415
+    if noms is None:
+        noms = tuple(n for n in ("termios", "fcntl", "resource")
+                     if n not in sys.modules and importlib.util.find_spec(n) is None)
+    for nom in noms:
+        module = types.ModuleType(nom)
+        if nom == "termios":
+            class error(Exception):  # noqa: N801 - le nom de termios
+                pass
+
+            def refuser(*_a, _erreur=error, **_k):
+                raise _erreur(errno.ENOTTY, os.strerror(errno.ENOTTY))
+            module.error = error
+            module.TCSANOW, module.TCSADRAIN, module.TCSAFLUSH = 0, 1, 2  # tty : valeurs par défaut de ses fonctions
+            for fonction in ("tcgetattr", "tcsetattr", "tcsendbreak", "tcdrain", "tcflush", "tcflow",
+                             "tcgetwinsize", "tcsetwinsize"):
+                setattr(module, fonction, refuser)
+            module.__all__ = ["error", "TCSANOW", "TCSADRAIN", "TCSAFLUSH", "tcgetattr", "tcsetattr", "tcsendbreak", "tcdrain", "tcflush", "tcflow",
+                              "tcgetwinsize", "tcsetwinsize"]
+        elif nom == "fcntl":
+            for fonction in ("fcntl", "ioctl", "flock", "lockf"):
+                setattr(module, fonction, _refuser)
+        else:
+            module.error = OSError
+            module.RLIMIT_NOFILE, module.RLIM_INFINITY = 7, -1
+            module.getrlimit = lambda _ressource: (1024, 1024)
+            module.setrlimit = _refuser
+        sys.modules[nom] = module
+
+
 # --- Installation -------------------------------------------------------------------------------------------------
 
 def installer() -> None:
@@ -439,6 +532,8 @@ def installer() -> None:
     socket.socket = Socket
     if not boucle_locale:
         return
+    doubler_terminal()
+    doubler_os()
     _select_module.select = select
     for nom in ("DefaultSelector", "SelectSelector", "PollSelector"):
         if hasattr(selectors, nom):

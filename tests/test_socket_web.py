@@ -57,6 +57,7 @@ def test_bind_explicite_et_autres_options_passent_au_vrai():
 
 # --- TCP de boucle locale (``boucle_locale``, vrai sous emscripten) --------------------------------------------------
 
+import errno  # noqa: E402
 import importlib  # noqa: E402
 import selectors  # noqa: E402
 import select  # noqa: E402
@@ -78,7 +79,8 @@ def boucle_locale(monkeypatch):
     """La doublure posée comme sous emscripten ; ``socket``, ``select``, ``selectors`` et ``socketserver`` rendus après."""
     zmq_web.reinitialiser()
     for module, nom in ((socket, "socket"), (select, "select"), (selectors, "DefaultSelector"),
-                        (selectors, "SelectSelector"), (selectors, "PollSelector"), (socketserver, "_ServerSelector")):
+                        (selectors, "SelectSelector"), (selectors, "PollSelector"), (socketserver, "_ServerSelector"),
+                        (os, "fstat"), (os, "read"), (os, "write"), (os, "close")):
         monkeypatch.setattr(module, nom, getattr(module, nom))
     monkeypatch.setattr(socket_web, "boucle_locale", True)
     monkeypatch.setattr(socket_web, "_installe", False)
@@ -253,3 +255,124 @@ def test_page_cliente_d_un_worker_et_worker_mort(interpretes):
     assert client.recv(10) == b"a"
     zmq_web.oublier("w2")  # le Worker meurt : la page voit la fin du flux
     assert client.recv(10) == b""
+
+
+def test_descripteur_lu_par_os_et_fdpexpect(boucle_locale):
+    """W548 : la passerelle LSP de Spyder lit la socket TCP par ``pexpect.fdpexpect.fdspawn(socket)`` : ``os.fstat`` pour
+    valider le descripteur, ``select`` puis ``os.read`` pour lire. Dans Firefox : « The fd argument is not a valid file
+    descriptor », le descripteur de la doublure n'étant pas connu du système."""
+    from pexpect.fdpexpect import fdspawn
+    serveur = socket.socket()
+    serveur.bind(("127.0.0.1", 0))
+    serveur.listen()
+    client = socket.socket()
+    client.connect(serveur.getsockname())
+    conn, _ = serveur.accept()
+    import stat
+    assert stat.S_ISSOCK(os.fstat(client.fileno()).st_mode)
+    assert os.write(conn.fileno(), b"Content-Length: 2\r\n\r\n{}") == 23
+    lecteur = fdspawn(client)
+    lecteur.expect("\r\n\r\n", timeout=None)
+    assert lecteur.before == b"Content-Length: 2" and lecteur.read(size=2) == b"{}"
+    os.write(client.fileno(), b"ok")
+    assert os.read(conn.fileno(), 10) == b"ok"
+    os.close(conn.fileno())
+    assert os.read(client.fileno(), 10) == b""
+    client.close()
+    serveur.close()
+
+
+def test_terminal_absent_doublé():
+    """W548 : la passerelle LSP de Spyder importe ``pexpect.fdpexpect`` (pty, tty, ptyprocess), qui veulent termios, fcntl
+    et resource à l'import ; Pyodide n'a aucun des trois (« No module named 'termios' », Firefox). Doublés, l'import
+    passe, et un appel lève l'erreur d'un descripteur qui n'est pas un terminal."""
+    r = lancer("""
+        import sys
+        for nom in ("termios", "fcntl", "resource", "tty", "pty"):
+            sys.modules.pop(nom, None)
+        from qtpy6.web import socket_web
+        socket_web.doubler_terminal(("termios", "fcntl", "resource"))
+        import pty, tty, termios, fcntl, resource
+        from pty import setraw, tcgetattr
+        try:
+            termios.tcgetattr(0)
+        except termios.error as e:
+            assert tty.error is termios.error and e.args[0] == 25, e.args
+        else:
+            raise AssertionError("tcgetattr devait lever")
+        try:
+            fcntl.ioctl(0, 0, b"")
+        except OSError:
+            pass
+        else:
+            raise AssertionError("ioctl devait lever")
+        socket_web.doubler_terminal()  # natif : les vrais modules sont là, rien n'est remplacé
+        print("ok")
+    """)
+    assert r.stdout.strip() == "ok", r.stderr
+
+
+# --- Cas limites (relecture W548) -------------------------------------------------------------------------------------
+
+@pytest.fixture
+def worker_muet(boucle_locale):
+    """Un port déclaré dans un Worker « w9 » qui ne répond pas ; ce que la page lui poste est gardé."""
+    postes = []
+    threading_web.poser_crochets(poster=lambda dest, message: postes.append((dest, message)))
+    zmq_web._distants[50300] = "w9"
+    return postes
+
+
+def test_connect_expire_oublie_le_flux_et_ferme_l_acceptation_tardive(worker_muet):
+    client = socket.socket()
+    client.settimeout(0.05)
+    with pytest.raises(socket.timeout):
+        client.connect(("127.0.0.1", 50300))
+    conn = client._conn
+    assert conn not in zmq_web._flux and client._etat == "fermee"
+    worker_muet.clear()
+    zmq_web.recevoir("w9", {"op": "flux_accepte", "conn": conn})  # le Worker accepte trop tard : il voit la fin
+    assert worker_muet == [("w9", {"op": "flux_fin", "conn": conn})]
+
+
+def test_connexion_en_attente_n_est_pas_lisible(worker_muet):
+    client = socket.socket()
+    client.setblocking(False)
+    with pytest.raises(BlockingIOError):
+        client.connect(("127.0.0.1", 50300))
+    assert client._etat == "attente"
+    assert not client._lisible() and select.select([client], [], [], 0)[0] == []
+
+
+def test_fermer_l_ecoute_ferme_les_connexions_non_acceptees(boucle_locale):
+    ecoute = socket.socket()
+    ecoute.bind(("127.0.0.1", 50301))
+    ecoute.listen()
+    client = socket.socket()
+    client.connect(("127.0.0.1", 50301))
+    ecoute.close()
+    client.settimeout(0.5)
+    assert client.recv(10) == b""
+
+
+def test_listen_sur_un_port_deja_en_ecoute(boucle_locale):
+    a, b = socket.socket(), socket.socket()
+    a.bind(("127.0.0.1", 50302))
+    b.bind(("127.0.0.1", 50302))
+    a.listen()
+    with pytest.raises(OSError) as erreur:
+        b.listen()
+    assert erreur.value.errno == errno.EADDRINUSE and zmq_web._ecoutes[50302] is a
+
+
+def test_worker_mort_ses_ports_refusent(interpretes):
+    w2 = interpretes["w2"]
+    ecoute = w2.socket_web.Socket()
+    ecoute.bind(("127.0.0.1", 0))
+    ecoute.listen()
+    port = ecoute.getsockname()[1]
+    threading_web.attendre(lambda: port in zmq_web._distants, 1000)
+    zmq_web.oublier("w2")
+    assert port not in zmq_web._distants
+    with pytest.raises(ConnectionRefusedError):
+        socket.socket().connect(("127.0.0.1", port))

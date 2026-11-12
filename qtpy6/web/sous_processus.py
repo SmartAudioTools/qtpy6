@@ -237,9 +237,23 @@ def doubler_zmq() -> None:
 
     from . import bloquant, fils, socket_web, threading_web, zmq_web  # noqa: PLC0415
 
+    def boucle():
+        """La boucle courante (la WebLoop de Pyodide dans la page) ; sans boucle posée, une neuve, posée : depuis Python
+        3.14, ``get_event_loop()`` lève au lieu d'en créer une (« There is no current event loop »)."""
+        try:
+            return asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+        try:
+            return asyncio.get_event_loop()
+        except RuntimeError:
+            neuve = asyncio.new_event_loop()
+            asyncio.set_event_loop(neuve)
+            return neuve
+
     def plus_tard(fonction, delai_ms=0) -> None:
         if delai_ms:
-            asyncio.get_event_loop().call_later(delai_ms / 1000, bloquant._plus_tard, fonction)
+            boucle().call_later(delai_ms / 1000, bloquant._plus_tard, fonction)
         else:
             bloquant._plus_tard(fonction)
 
@@ -248,7 +262,7 @@ def doubler_zmq() -> None:
             destination._poster_zmq(message)
 
     threading_web.installer(fils._attendre, plus_tard)  # _attendre(condition, None) attend sans échéance
-    threading_web.partager_boucle(asyncio.get_event_loop())  # les boucles que jupyter_client crée par fil
+    threading_web.partager_boucle(boucle())  # les boucles que jupyter_client crée par fil
     zmq_web.installer(fils._attendre, plus_tard, poster)
     socket_web.installer()  # le port libre que jupyter_client choisit pour chaque canal
     try:
