@@ -173,6 +173,10 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
    sous-classe qui masque un alias, PySide6 seul (sous PyQt6, lire les enveloppes sip en création plante, mesuré).
    `delattr` retiré de `jalon7.py`. Mesuré : témoin sans plantage, tests W547 et W562 verts. Niveau dans la page :
    jalon 5 rejoué par W562 (en attente). Note `2026-11-12 - Jalon 7 sans contournement (W547).md`.
+   - **Reste, non attribué (mesuré, W567, démarrage natif avec l'alias qtpy)** : 3 `SignalAliasMasked`,
+     `TextEditBaseWidget.cursor_position_changed` (`spyder/plugins/editor/widgets/base.py`), `ArrayTable.cell_changed`
+     (`spyder/widgets/arraybuilder.py`), `ProfilerDataTree.item_expanded` (`profiler/widgets/profiler_data_tree.py`) :
+     renommage perdu dans le générateur du fork ; D1 gardé (l'avertissement reste). Ouvert à part par le Superviseur.
 4. **Ce que les essais font encore « propre au web » hors instrumentation** (règle du `CLAUDE.md`).
    - a. `PySide6.QtCore` complété par les classes de qtpy6 et `PySide6.QtWebEngine*` posés vers les doublures :
      `essais/spyder/preparer.py:69-86`, parce que le `qtpy` du fork lit PySide6 directement. Existant : rien dans
@@ -348,6 +352,16 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
     - **FAIT, W566, 12/11 19:10, mesuré (sonde Firefox)** : `installer()` pose les deux constantes, `setsockopt` tient
       les options de liaison pour sans objet ; plus de rapporteur à l'ouverture de spe.py. Reste : vu par le professeur.
       Note `notes/2026-11-12 - socket SO_REUSEADDR dans la page (W566).md`.
+20. **qtpy6 comme `qtpy` dans SmartPythonEditor natif** (reste de W559). **FAIT, W567, 12/11** : `.pth` paresseux du
+    venv (`python -m qtpy6._qtpy` → `qtpy6_qtpy.pth`, qtpy6 chargé au premier `import qtpy` seulement), aucune ligne
+    dans Spyder ni le lanceur ; `_Alias` lu par la classe porte une signature (Spyder `completion/plugin.py:577`
+    tombait sur `create_win_id`). Mesuré hors écran : 47 greffons, mêmes stderr hors 3 `SignalAliasMasked` (item 3).
+    Reste : installation durable (`installation_SmartPythonEditor.sh`, SmartOS) ; vu par le professeur. Note
+    `notes/2026-11-12 - qtpy6 comme qtpy dans SmartPythonEditor natif (W567).md`.
+21. **Vitesse : coût d'import de qtpy6 en natif** (non attribué, mesuré W567, venv SmartPythonEditor, PySide6 6.11,
+    médianes sur 10) : `import qtpy.QtCore, QtGui, QtWidgets, QtWebEngineWidgets` 760 ms par l'alias qtpy6 contre
+    165 ms par le vrai qtpy ; ~0,5 s de création d'énumérations PySide6 (~700) déclenchée par `_binding._pyside6_class`
+    qui parcourt les classes (cProfile). Coût de qtpy6 en général, pas de l'alias.
 
 ## Décisions à prendre par l'utilisateur
 

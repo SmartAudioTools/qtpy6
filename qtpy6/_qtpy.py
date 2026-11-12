@@ -26,6 +26,29 @@ def installer():
     sys.meta_path.insert(0, _Chercheur())
 
 
+# The alias in a native venv (SmartPythonEditor, 12/11/2026, W567): a .pth that `site` runs at every start of that
+# interpreter and that imports nothing; qtpy6 (and PySide6 with it: 0.5 to 1 s, measured) loads only at the first
+# ``import qtpy``. It covers every process of the venv, Spyder's restart.py and start.py included, without a line in
+# Spyder. Written once by ``python -m qtpy6._qtpy``; in the page, ``qtpy6.web.lancer()`` calls installer() itself.
+_PTH = ("import sys, types; sys.meta_path.insert(0, types.SimpleNamespace(qtpy6_differe=True, find_spec=lambda n, *a: "
+        "__import__('qtpy6._qtpy')._qtpy._relais(n) if n.partition('.')[0] == 'qtpy' else None))\n")
+
+
+def _relais(nom):
+    sys.meta_path[:] = [f for f in sys.meta_path if not getattr(f, 'qtpy6_differe', False)]
+    installer()
+    return _Chercheur().find_spec(nom)
+
+
+def ecrire_pth(dossier=None):
+    """Writes qtpy6_qtpy.pth into ``dossier`` (default: this interpreter's site-packages); returns its path."""
+    import pathlib
+    import sysconfig
+    chemin = pathlib.Path(dossier or sysconfig.get_paths()['purelib']) / 'qtpy6_qtpy.pth'
+    chemin.write_text(_PTH)
+    return chemin
+
+
 class _Chercheur(importlib.abc.MetaPathFinder, importlib.abc.Loader):
     def find_spec(self, fullname, path=None, target=None):
         if fullname == 'qtpy' or fullname.startswith('qtpy.'):
@@ -157,7 +180,7 @@ def _corriger():
     Qt.BackgroundColorRole = Qt.ItemDataRole.BackgroundColorRole = Qt.BackgroundRole
     Qt.TextColorRole = Qt.ItemDataRole.TextColorRole = Qt.ForegroundRole
     Qt.MidButton = Qt.MiddleButton
-    if getattr(Qt, 'mightBeRichText', None) is None and hasattr(QtGui.Qt, 'mightBeRichText'):
+    if getattr(Qt, 'mightBeRichText', None) is None and hasattr(getattr(QtGui, 'Qt', None), 'mightBeRichText'):  # PySide6 only
         Qt.mightBeRichText = QtGui.Qt.mightBeRichText
     for cls in (QtCore.QCoreApplication, QtGui.QGuiApplication, QtWidgets.QApplication, QtWidgets.QMenu):
         cls.exec_ = (lambda c: lambda *a, **k: _possibly_static_exec(c, *a, **k))(cls)
@@ -238,3 +261,7 @@ def _compat():
         getopenfilenames=lambda *a, **k: appel('getOpenFileNames', *a, **k),
         getsavefilename=lambda *a, **k: appel('getSaveFileName', *a, **k))
     return m
+
+
+if __name__ == '__main__':
+    print(ecrire_pth())

@@ -17,6 +17,7 @@ import importlib
 import importlib.abc
 import importlib.machinery
 import importlib.util
+import inspect
 import re
 import string
 import sys
@@ -129,7 +130,38 @@ class _Alias:
         return self._qt(obj, owner)
 
     def _qt(self, obj, owner):
+        qt = self.qt.__get__(obj, owner) if hasattr(self.qt, '__get__') else self.qt
+        if obj is not None or not callable(qt) or hasattr(qt, '__signature__') or hasattr(qt, '__code__'):
+            return qt
+        # Read on the class, a binding method has no signature (inspect.signature: ValueError); code written for
+        # Qt never met it under a snake_case name, Spyder's inspect.signature on each create_* member does
+        # (completion/plugin.py:577, W567): an honest (*args, **kwargs), still equal to the Qt method.
+        return _Signe(qt, self.name)
+
+
+class _Signe:
+    """A binding method read on the class, with a signature: called, compared, hashed and bound as the method."""
+    __slots__ = ('qt', '__name__')
+    __signature__ = inspect.Signature([inspect.Parameter('args', inspect.Parameter.VAR_POSITIONAL),
+                                       inspect.Parameter('kwargs', inspect.Parameter.VAR_KEYWORD)])
+
+    def __init__(self, qt, name):
+        self.qt, self.__name__ = qt, name
+
+    def __call__(self, *args, **kwargs):
+        return self.qt(*args, **kwargs)
+
+    def __get__(self, obj, owner=None):
         return self.qt.__get__(obj, owner) if hasattr(self.qt, '__get__') else self.qt
+
+    def __eq__(self, other):
+        return self.qt == (other.qt if isinstance(other, _Signe) else other)
+
+    def __hash__(self):
+        return hash(self.qt)
+
+    def __getattr__(self, name):  # __doc__, __qualname__, __self__…
+        return getattr(self.qt, name)
 
 
 class _SignalAlias(_Alias):

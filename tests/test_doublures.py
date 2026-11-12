@@ -358,3 +358,25 @@ def test_alias_qtpy_pth_paresseux(tmp_path):
             "len([f for f in sys.meta_path if getattr(f, 'qtpy6_differe', False)]))")
     sortie = subprocess.run([sys.executable, '-c', code, str(tmp_path)], capture_output=True, text=True, timeout=60)
     assert sortie.stdout.split() == ['False', 'True', 'True', '0'], sortie.stderr
+
+
+def test_alias_methode_signature_par_la_classe():
+    """Spyder (completion/plugin.py:577) : inspect.signature sur chaque membre ``create_*`` d'une page de réglages ;
+    l'alias ``create_win_id`` d'une méthode PySide6 (sans signature) faisait tomber le démarrage (W567)."""
+    import inspect
+    from qtpy6 import QtWidgets
+    from qtpy6._binding import _Alias
+
+    class Page(QtWidgets.QWidget):
+        def create_option(self, option, defaut=None):
+            pass
+    noms = {n for c in QtWidgets.QWidget.__mro__ for n, v in vars(c).items()
+            if isinstance(v, _Alias) and n.startswith(('create_', 'set_'))}
+    assert noms
+    for n, membre in inspect.getmembers(Page):
+        if n in noms:
+            inspect.signature(membre)  # ValueError sans signature
+    assert 'option' in inspect.signature(Page.create_option).parameters
+    w = Page()
+    Page.set_window_title(w, 'W567')  # l'appel par la classe marche toujours
+    assert w.windowTitle() == 'W567'
