@@ -117,3 +117,64 @@ def test_moteur_web_alert_par_defaut(app):
         boites = [b for b in vue.findChildren(QMessageBox) if b.text() == "Bonjour"]
         assert len(boites) == 1 and boites[0].isVisible()
         boites[0].close()
+
+
+# --- W562 : l'alias snake_case d'un SIGNAL cède au nom de l'application (Spyder, TextEditBaseWidget) ---------------------
+def test_alias_signal_cede_au_mixin(app):
+    """``class TextEditBaseWidget(QPlainTextEdit, BaseEditMixin)`` : la méthode ``BaseEditMixin.cursor_position_changed``
+    vient après Qt dans la MRO ; un alias-attribut du signal ``cursorPositionChanged`` la masquait, et
+    ``cursorPositionChanged.connect(self.cursor_position_changed)`` (spyder/plugins/editor/widgets/base.py:76) connectait
+    le signal à lui-même : ``setPlainText`` récursait sans fin (jalon 5, « too much recursion » dans la page)."""
+    from qtpy6.QtWidgets import QPlainTextEdit
+
+    class Mixin:
+        def cursor_position_changed(self):
+            self.appels += 1
+
+    class Editeur(QPlainTextEdit, Mixin):
+        appels = 0
+
+    e = Editeur()
+    assert e.cursor_position_changed.__func__ is Mixin.cursor_position_changed
+    e.cursorPositionChanged.connect(e.cursor_position_changed)
+    e.setPlainText("a\nb\n")
+    e.moveCursor(e.textCursor().MoveOperation.End)
+    assert e.appels >= 1
+    nu = QPlainTextEdit()  # sans nom de l'application, l'alias reste le signal
+    vus = []
+    nu.cursor_position_changed.connect(lambda: vus.append(1))
+    nu.setPlainText("x\n")
+    nu.moveCursor(nu.textCursor().MoveOperation.End)
+    assert vus
+
+
+# --- W547 : alias snake_case des signaux (D1, item 3 du TODO Portage) -----------------------------------------------------
+def test_alias_signal_et_slot_homonyme(app):
+    """L'alias ``text_changed`` est le signal ``textChanged`` (objet et classe) ; une méthode homonyme d'une sous-classe,
+    connectée au signal, le masque sans planter (avant D1 : code 139, ``essais/alias_signal_slot.py``) et qtpy6 le dit
+    à la définition de la classe."""
+    import warnings
+
+    from qtpy6._binding import SignalAliasMasked
+    from qtpy6.QtWidgets import QLineEdit
+
+    assert QLineEdit.text_changed is QLineEdit.textChanged
+    recus = []
+    with warnings.catch_warnings(record=True) as avertis:
+        warnings.simplefilter("always")
+
+        class Champ(QLineEdit):
+            def __init__(self):
+                super().__init__()
+                self.textChanged.connect(self.text_changed)
+
+            def text_changed(self, texte):
+                recus.append(("slot", texte))
+
+    from qtpy6 import PYSIDE6
+    assert [a.category for a in avertis] == ([SignalAliasMasked] if PYSIDE6 else [])  # PyQt6 : pas d'avertissement
+    champ, autre = Champ(), QLineEdit()
+    autre.text_changed.connect(lambda t: recus.append(("alias", t)))
+    champ.setText("abc")
+    autre.setText("xyz")
+    assert recus == [("slot", "abc"), ("alias", "xyz")]

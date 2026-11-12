@@ -64,15 +64,6 @@ try:
             return inspect.Signature()
 
     inspect.signature = signature_
-    # Contournement d'ESSAI : le renommage des trois slots homonymes d'un signal (fork, commit 591fdf005 du 09/10/2026)
-    # a été perdu à la reconstruction du fork du 11/10 (SmartPythonEditor_generator ne le reprend pas) ; sans lui, la
-    # méthode `cursor_position_changed` de Spyder se résout en signal (alias qtpy6) et `setPlainText` boucle sans fin.
-    from qtpy6.QtWidgets import QPlainTextEdit, QTableWidget, QTreeWidget
-    for classe, alias in ((QPlainTextEdit, "cursor_position_changed"), (QTableWidget, "cell_changed"),
-                          (QTreeWidget, "item_expanded")):
-        for c in classe.__mro__:
-            if alias in vars(c):
-                delattr(c, alias)
     # Help et OnlineHelp : QtWebEngine sur le bureau, la doublure QWebEngineView de qtpy6 dans la page (preparer.py).
     # Sans --new-instance (W547, item 5 du TODO Portage) : le serveur d'instance unique (post_visible_setup) démarre son
     # threading.Thread comme sur le bureau ; dans la page, c'est la doublure threading_web.Thread de qtpy6.

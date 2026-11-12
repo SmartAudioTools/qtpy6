@@ -2,11 +2,13 @@
 (un slot, PEP 8) du nom de l'alias snake_case qu'un signal reçoit de qtpy6 (_binding._pyside6_class) et la connecte à ce
 signal. Trouvé en portant Spyder (cursor_position_changed, plugins/editor/widgets/base.py), reproduit ici sans Spyder.
 
-    QT_QPA_PLATFORM=offscreen $P essais/alias_signal_slot.py          # plante (core dump), aucune exception
+    QT_QPA_PLATFORM=offscreen $P essais/alias_signal_slot.py          # avant D1 : plantait (code 139)
     QT_QPA_PLATFORM=offscreen $P essais/alias_signal_slot.py --sans   # sans qtpy6 : « slot : abc », pas de plantage
 
-Doit cesser de planter le jour où qtpy6 n'aliasse plus les signaux (ou les protège) : c'est le test qui échoue sans le
-correctif. Note : notes/2026-10-09 - Portage de SmartPythonEditor…, « Points ouverts »."""
+Corrigé par D1 (W547, 12/11/2026, choix du professeur) : l'alias est un descripteur (`_binding._SignalAlias`) ; la
+méthode homonyme le masque dans sa classe et qtpy6 avertit (`SignalAliasMasked`) ; « slot : abc », pas de plantage.
+Test : `tests/test_doublures.py::test_alias_signal_et_slot_homonyme`. Note : notes/2026-11-12 - Jalon 7 sans
+contournement (W547)."""
 import sys
 
 if "--sans" not in sys.argv:

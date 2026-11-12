@@ -4,7 +4,21 @@ Demande : ordre du professeur, 12/11 14:04, « mets des workers sur tous les ite
 brief `qtpy6_essais/equipe/briefs/Worker_547.md` : `jalon7.py` sans `delattr` (l. 67-75) ni `--new-instance` (l. 79), fermeture
 mesurée jusqu'au bout. Mesures et scripts : `/DATA/Python/qtpy6_essais/equipe/w547/`.
 
-## Item 3 — D1, alias snake_case des signaux : EN ATTENTE DU PROFESSEUR
+## Item 3 — D1, alias snake_case des signaux : TRANCHÉ D (professeur, 17:20), POSÉ
+
+Choix du professeur (12/11 17:20, après « D … garde A possible ? ») : D, qui contient A (le camelCase marche tel quel).
+Posé dans `qtpy6/_binding.py` : `_SignalAlias(_Alias)` cède au nom Python de la MRO comme les alias de méthodes (cas
+mixin de W562 : `BaseEditMixin.cursor_position_changed` après `QPlainTextEdit`), sinon rend le signal camelCase de
+l'objet ou de la classe (`QLineEdit.text_changed is QLineEdit.textChanged`) ; `QObject.__init_subclass__` avertit
+(`SignalAliasMasked`) quand une sous-classe masque un alias de signal. Mesuré : témoin `essais/alias_signal_slot.py`
+sans plantage ; tests `test_alias_signal_et_slot_homonyme` (W547) et `test_alias_signal_cede_au_mixin` (W562) verts ;
+suite entière 275 passent, 4 échecs `test_web.py` étrangers (import de `son_web.preparer_page` dans la page).
+Limite mesurée : l'avertissement est PySide6 seul — sous PyQt6, `__init_subclass__` est appelé sur les enveloppes
+sip en cours de création et les lire plante (même `cls.__module__`) ; l'alias, lui, marche sous les deux.
+`jalon7.py` : `delattr` des trois alias retiré. Non rejoué dans la page (W562 rejoue le jalon 5 sur ce commit).
+Écartées : A (perd le snake_case), B (ne soigne qu'un symptôme), C (D sans l'avertissement), E (`sig_`).
+
+Historique de la question :
 
 Relevé du 12/11 (`noms_alias_signaux.py`, `appels.txt`) : 279 alias de signaux posés par `_binding._pyside6_class`
 (l. 152-155). Appelants d'un alias de signal (`.<alias>.connect|emit|disconnect`) dans qtpy6, SmartTeacher et `FORKS/` :

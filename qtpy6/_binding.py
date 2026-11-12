@@ -20,6 +20,7 @@ import importlib.util
 import re
 import string
 import sys
+import warnings
 
 from . import API_NAME, PYQT6, PYSIDE6
 
@@ -125,7 +126,51 @@ class _Alias:
                         pass
             else:
                 self.plain.add(owner)  # measured: 1.9 µs per access without it, 0.15 for the camelCase name
+        return self._qt(obj, owner)
+
+    def _qt(self, obj, owner):
         return self.qt.__get__(obj, owner) if hasattr(self.qt, '__get__') else self.qt
+
+
+class _SignalAlias(_Alias):
+    """The snake_case alias of a signal: gives way to the application like
+    `_Alias` (Spyder's BaseEditMixin.cursor_position_changed, a mixin after
+    QPlainTextEdit), else the camelCase signal of the object (or of the class) -
+    never the Signal object set under a second name: PySide6 crashes when a
+    subclass method of that name is connected to the signal
+    (essais/alias_signal_slot.py, code 139). Such a method masks the alias in its
+    class, as a C++ method masks a base name: qtpy6 warns when the class is
+    defined (_signal_masked). `qt` is the camelCase name."""
+    __slots__ = ()
+
+    def _qt(self, obj, owner):
+        return getattr(owner if obj is None else obj, self.qt)
+
+
+class SignalAliasMasked(UserWarning):
+    """A subclass attribute masks the snake_case alias of a Qt signal."""
+
+
+def _signal_masked(cls, **kwargs):
+    """`QObject.__init_subclass__`: warns for each attribute of `cls`, other than
+    a signal, that masks the snake_case alias of a signal of a base class.
+    PySide6 only: PyQt6 calls it on its own wrappers while it creates them, and
+    reading them then crashes (measured, even `cls.__module__`)."""
+    for name, attr in vars(cls).items():
+        if type(attr).__name__ in ('Signal', 'pyqtSignal') or not name[0].islower():
+            continue
+        for base in cls.__mro__[1:]:
+            found = vars(base).get(name)
+            if found is not None:
+                if isinstance(found, _SignalAlias):
+                    warnings.warn(f"{cls.__module__}.{cls.__qualname__}.{name} masks the alias of the signal "
+                                  f"{base.__name__}.{found.qt}: {found.qt} still gives the signal",
+                                  SignalAliasMasked, stacklevel=2)  # the class statement
+                break
+    super(_QObject, cls).__init_subclass__(**kwargs)
+
+
+_QObject = None  # the binding's QObject, once prepared
 
 
 def _pyside6_class(cls):
@@ -136,6 +181,10 @@ def _pyside6_class(cls):
     if cls in _prepared:
         return
     _prepared.add(cls)
+    global _QObject
+    if PYSIDE6 and cls.__name__ == 'QObject' and cls.__module__.endswith('.QtCore'):
+        _QObject = cls
+        cls.__init_subclass__ = classmethod(_signal_masked)
     members = dict(vars(cls))
     for name, attr in members.items():
         if isinstance(attr, type):
@@ -151,8 +200,8 @@ def _pyside6_class(cls):
         elif name[0].islower() and '_' not in name:
             snake = snake_case(name)
             if snake != name and snake not in members:
-                signal = type(attr).__name__ in ('Signal', 'pyqtSignal')  # connected by its object: kept as is
-                setattr(cls, snake, attr if signal else _Alias(attr, snake))
+                signal = type(attr).__name__ in ('Signal', 'pyqtSignal')
+                setattr(cls, snake, _SignalAlias(name, snake) if signal else _Alias(attr, snake))
 
 
 class _Finder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
