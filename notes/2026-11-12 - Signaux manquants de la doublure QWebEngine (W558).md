@@ -53,3 +53,8 @@ CLAUDE.md interdit.
   unitaire ». Trace réelle demandée au professeur (sonde `--visible`).
 - Règle : `grep -n "emscripten\|qtpy6\.web\|import js\b\|pyodide"` sur le greffon : aucune ligne ajoutée (aucune
   modification du greffon).
+- Essai à la main du professeur (sonde `--visible`, 15:05, journal `/DATA/Python/qtpy6_essais/w558/capture_main.console.log`) :
+  aucune trace Python après le démarrage, mais « Lancer » du tuteur non observé (professeur : « je n'ai pas fait
+  attention »). Le dialogue d'erreur au démarrage est l'ImportError `QNetworkInterface` de `spyder_collab/network.py:43`
+  (19,06 s, connu, item 14). « J'ai essayé de lancer le script qui était ouvert, et ça a tourné dans le vide en cherchant
+  les variables d'environnement » : Exécuter de Spyder, hors de cet item, signalé au Superviseur.

@@ -126,6 +126,9 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
    **[FAIT, W558, 12/11]** signal et énumération `RenderProcessTerminationStatus` sur la page et la vue, jamais émis ;
    test rouge puis vert (`tests/test_doublures.py`). Relevé des autres attributs appelés : aucun autre manque (mainFrame
    en branche QtWebKit morte). Reste : la trace dans la page (sonde arrêtée après la liste des greffons, item 14).
+   Essai du professeur (`--visible`, 15:05) : « Lancer » du tuteur non observé ; dialogue d'erreur au démarrage =
+   ImportError `QNetworkInterface` de `spyder_collab/network.py:43` (connu, item 14) ; « Exécuter » de Spyder « tourne
+   dans le vide en cherchant les variables d'environnement » (professeur, non attribué : à inscrire comme item).
    `notes/2026-11-12 - Signaux manquants de la doublure QWebEngine (W558).md`.
 2 ter. **`javaScriptAlert` / `javaScriptConsoleMessage` surchargées mais jamais appelées par la doublure** (W558, 12/11).
    - Appelant : `_DebugPage` du tuteur (`main_widget.py:372-380`) : intercepte `alert()` de pytutor.js, « garde-fou
