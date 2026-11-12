@@ -263,7 +263,12 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
     la page ne rend plus rien après la liste des greffons ; volet pylint à activer dans la configuration pour Docteur.
     Hors champ : claude, konsole, tortoisehg, window_controls, viztracer, line_profiler. Commit 150070b : archive du site
     saine (sources seules, écriture atomique, `--sortie`), pylsp de W548 compris.
-    - **`spyder_collab` ABSENT, dialogue d'erreur au démarrage** (W558, 12/11, à attribuer) : `ImportError: cannot
+    - **[FAIT, W563, 12/11]** doublure `qtpy6/QtNetwork.py` → `qtpy6/web/reseau_web.py` (QTcpServer, QTcpSocket,
+      QNetworkInterface sur la boucle locale de `socket_web`) : collab INSCRIT, octet échangé et hello CollabPeer reçu
+      dans la page (mesuré, `notes/2026-11-12 - QtNetwork dans la page, spyder_collab (W563).md`). Trouvé : le « plus
+      rien » après la liste était `sys.stdout` pris par la console de Spyder (corrigé dans `greffons.py`) ; défaut
+      suivant mesuré : `spyder_code_analysis` casse sur `ProcessusWeb.waitForStarted` absent (`sous_processus.py`, W548).
+    - **`spyder_collab` ABSENT, dialogue d'erreur au démarrage** (W558, 12/11, fait par W563 ci-dessus) : `ImportError: cannot
       import name 'QNetworkInterface' from 'qtpy.QtNetwork'` (`spyder_collab/network.py:43`, avec QTcpServer,
       QTcpSocket) ; vu dans les deux essais `--visible` du professeur (`/DATA/Python/qtpy6_essais/w558/capture_main.console.log`).
 15. **Chrome** : jalons 8a à 8c, Pyxel, `QWebEngineView` mesurés sous Firefox seul ; phase 2 du jalon 5 jamais lancée

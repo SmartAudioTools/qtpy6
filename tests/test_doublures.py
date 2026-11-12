@@ -178,3 +178,128 @@ def test_alias_signal_et_slot_homonyme(app):
     champ.setText("abc")
     autre.setText("xyz")
     assert recus == [("slot", "abc"), ("alias", "xyz")]
+
+
+# --- W563 : QtNetwork dans la page, QTcpServer / QTcpSocket / QNetworkInterface (greffon spyder_collab, network.py:43) --
+@pytest.fixture
+def boucle_locale(monkeypatch):
+    """La boucle locale de socket_web (vraie sous emscripten), posée pour un test natif, registres de ports vidés."""
+    from qtpy6.web import socket_web, zmq_web
+
+    zmq_web.reinitialiser()
+    monkeypatch.setattr(socket_web, "boucle_locale", True)
+    yield
+    zmq_web.reinitialiser()
+
+
+def _pomper(condition, n=50):
+    from qtpy6.web import threading_web
+
+    for _ in range(n):
+        if condition():
+            return True
+        threading_web.pomper()
+    return condition()
+
+
+def test_qtnetwork_natif_vraie_classe():
+    """En natif, ``qtpy6.QtNetwork`` (et ``qtpy.QtNetwork``) rend les classes de la liaison."""
+    import importlib
+
+    from qtpy6 import API_NAME, QtNetwork
+    vrai = importlib.import_module(f"{API_NAME}.QtNetwork")
+    assert QtNetwork.QTcpServer is vrai.QTcpServer and QtNetwork.QNetworkInterface is vrai.QNetworkInterface
+
+
+def test_reseau_web_un_octet(app, boucle_locale):
+    """Ce que fait spyder_collab dans la page : le serveur écoute sur ``QHostAddress.Any``, le client s'y connecte,
+    un octet passe dans chaque sens par les signaux Qt (connected, newConnection, readyRead), puis la déconnexion."""
+    from qtpy6.QtNetwork import QAbstractSocket, QHostAddress
+    from qtpy6.web.reseau_web import QTcpServer, QTcpSocket
+
+    serveur = QTcpServer()
+    assert serveur.listen(QHostAddress.SpecialAddress.Any, 47820) and serveur.isListening()
+    assert serveur.serverPort() == 47820
+    arrivees, evenements = [], []
+    serveur.newConnection.connect(lambda: arrivees.append(serveur.nextPendingConnection()))
+    client = QTcpSocket()
+    client.connected.connect(lambda: evenements.append("connected"))
+    client.disconnected.connect(lambda: evenements.append("disconnected"))
+    client.connectToHost("127.0.0.1", 47820)
+    assert _pomper(lambda: arrivees and evenements)
+    assert evenements == ["connected"] and client.state() == QAbstractSocket.SocketState.ConnectedState
+    cote_serveur = arrivees[0]
+    assert cote_serveur.peerAddress().toString() == "127.0.0.1" and not serveur.hasPendingConnections()
+
+    lus = []
+    cote_serveur.readyRead.connect(lambda: lus.append(("serveur", bytes(cote_serveur.readAll()))))
+    client.readyRead.connect(lambda: lus.append(("client", bytes(client.readAll()))))
+    assert client.write(b"x") == 1
+    assert _pomper(lambda: lus)
+    assert cote_serveur.write(b"y") == 1
+    assert _pomper(lambda: len(lus) == 2)
+    assert lus == [("serveur", b"x"), ("client", b"y")]
+
+    fins = []
+    cote_serveur.disconnected.connect(lambda: fins.append("serveur"))
+    client.disconnectFromHost()
+    assert _pomper(lambda: fins)
+    assert evenements == ["connected", "disconnected"] and client.state() == QAbstractSocket.SocketState.UnconnectedState
+    serveur.close()
+    assert not serveur.isListening()
+
+
+def test_reseau_web_refus_et_port_pris(app, boucle_locale):
+    """Personne n'écoute : ``errorOccurred(ConnectionRefusedError)`` à une tâche suivante (spyder_collab réessaie) ;
+    un second ``listen`` sur le même port échoue avec un ``errorString``."""
+    from qtpy6.QtNetwork import QAbstractSocket, QHostAddress
+    from qtpy6.web.reseau_web import QTcpServer, QTcpSocket
+
+    client, erreurs = QTcpSocket(), []
+    client.errorOccurred.connect(erreurs.append)
+    client.connectToHost("localhost", 47821)
+    assert erreurs == []  # jamais synchrone, comme Qt
+    assert _pomper(lambda: erreurs)
+    assert erreurs == [QAbstractSocket.SocketError.ConnectionRefusedError] and client.error() == erreurs[0]
+    assert client.state() == QAbstractSocket.SocketState.UnconnectedState and client.errorString()
+
+    premier, second = QTcpServer(), QTcpServer()
+    assert premier.listen(QHostAddress.SpecialAddress.Any, 47822)
+    assert not second.listen(QHostAddress.SpecialAddress.Any, 47822) and second.errorString()
+
+
+def test_reseau_web_interfaces():
+    """``local_addresses`` de spyder_collab : interfaces actives hors boucle locale, IPv4. La page n'a que la boucle
+    locale (aucune adresse joignable : le collab le dit) ; noms à plat et dans l'énumération, comme Qt."""
+    from qtpy6.web.reseau_web import QNetworkInterface
+
+    assert QNetworkInterface.IsUp is QNetworkInterface.InterfaceFlag.IsUp
+    (interface,) = QNetworkInterface.allInterfaces()
+    assert interface.flags() & QNetworkInterface.IsUp and interface.flags() & QNetworkInterface.IsLoopBack
+    assert [e.ip().toString() for e in interface.addressEntries()] == ["127.0.0.1"]
+
+
+def test_reseau_web_fermetures(app, boucle_locale):
+    """Écarts à Qt relevés à la relecture : un second ``listen`` est refusé ; ``close`` du serveur ferme les connexions
+    jamais reprises (le client voit ``disconnected``) ; « localhost » donne une adresse ; un refus programmé puis
+    ``abort`` n'émet rien."""
+    from qtpy6.QtNetwork import QHostAddress
+    from qtpy6.web.reseau_web import QTcpServer, QTcpSocket
+
+    serveur = QTcpServer()
+    assert serveur.listen(QHostAddress.SpecialAddress.Any, 47823)
+    assert not serveur.listen(QHostAddress.SpecialAddress.Any, 47824) and serveur.serverPort() == 47823
+    client, fins = QTcpSocket(), []
+    client.disconnected.connect(lambda: fins.append("client"))
+    client.connectToHost("localhost", 47823)
+    assert _pomper(serveur.hasPendingConnections)
+    assert client.peerAddress().toString() == "127.0.0.1"
+    serveur.close()
+    assert _pomper(lambda: fins) and not serveur.hasPendingConnections()
+
+    perdu, erreurs = QTcpSocket(), []
+    perdu.errorOccurred.connect(erreurs.append)
+    perdu.connectToHost("127.0.0.1", 47825)
+    perdu.abort()
+    _pomper(lambda: False, n=5)
+    assert erreurs == []

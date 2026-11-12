@@ -5,6 +5,12 @@ principale lancée. ``site/index.html?script=greffons.py`` ; sur le bureau : ``$
 Instrumentation d'essai : le relevé imprimé (« greffon … ») est ce que lit la sonde, pas du code d'application."""
 
 import os
+import sys
+
+
+def _dire(texte):
+    """Le relevé va au journal de la page : la console interne de Spyder a pris sys.stdout (rapport de jalon7)."""
+    print(texte, file=sys.__stdout__, flush=True)
 
 ICI = os.path.dirname(os.path.abspath(__file__))
 _source = open(os.path.join(ICI, "spe.py"), encoding="utf-8").read()
@@ -24,9 +30,9 @@ ECHANTILLON = "def carre(x):\n    return x * x\n\n\nimport os\nprint(carre(3))\n
 def _essayer(nom, action):
     import traceback
     try:
-        print(f"greffon {nom} : action -> {action()!r}")
+        _dire(f"greffon {nom} : action -> {action()!r}")
     except Exception as e:  # noqa: BLE001 - le relevé veut la cause, quelle qu'elle soit
-        print(f"greffon {nom} : action CASSE {type(e).__name__}: {e}")
+        _dire(f"greffon {nom} : action CASSE {type(e).__name__}: {e}")
         traceback.print_exc()
 
 
@@ -35,11 +41,14 @@ def SUITE_GREFFONS(main, rapport):  # noqa: N802
     from qtpy6.QtCore import QTimer
     SUITE_SPE(main, lambda: None)  # noqa: F821 - défini par la source de spe.py
     for nom, paquet in GREFFONS.items():
-        print(f"greffon {paquet} ({nom}) : {'INSCRIT' if main.get_plugin(nom, error=False) else 'ABSENT'}")
+        _dire(f"greffon {paquet} ({nom}) : {'INSCRIT' if main.get_plugin(nom, error=False) else 'ABSENT'}")
+    collab = main.get_plugin("spyder_collab", error=False)
+    if collab:  # avant editor.load, après lequel la page ne rend plus rien (item 14)
+        _essayer("spyder_collab", lambda: _collab(collab))
     fichier = os.path.join(tempfile.mkdtemp(prefix="greffons-"), "essai.py")
     with open(fichier, "w", encoding="utf-8") as f:
         f.write(ECHANTILLON)
-    main.get_plugin("editor").load(fichier)
+    QTimer.singleShot(3000, lambda: main.get_plugin("editor").load(fichier))  # l'échange du collab passe avant (W563)
     etapes = []
     analyse = main.get_plugin("smartos_code_analysis", error=False)
     if analyse:
@@ -50,9 +59,6 @@ def SUITE_GREFFONS(main, rapport):  # noqa: N802
     st = main.get_plugin("smartteacher", error=False)
     if st:
         etapes.append(("spyder_smartteacher", lambda: _smartteacher(st)))
-    collab = main.get_plugin("spyder_collab", error=False)
-    if collab:
-        etapes.append(("spyder_collab", lambda: _collab(collab)))
 
     def suivante():
         if etapes:
@@ -62,7 +68,7 @@ def SUITE_GREFFONS(main, rapport):  # noqa: N802
         else:
             _bilan(main)
             rapport()
-    QTimer.singleShot(1000, suivante)
+    QTimer.singleShot(4000, suivante)
 
 
 def _tuteur(main, tuteur):
@@ -81,20 +87,39 @@ def _smartteacher(st):
 
 
 def _collab(collab):
-    return "méthodes : " + ", ".join(n for n in dir(collab) if not n.startswith("__") and n.islower()
-                                    and n not in dir(object))[:600]
+    """QtNetwork dans la page (W563) : un octet QTcpSocket → QTcpServer, puis le transport du greffon lui-même (un
+    CollabPeer hôte, un invité sur 127.0.0.1 : la trame hello décodée par l'hôte devient ``sig_join_request``)."""
+    from qtpy.QtNetwork import QHostAddress, QTcpServer, QTcpSocket
+    from spyder_collab.network import CollabPeer, local_addresses
+
+    serveur, client = QTcpServer(collab), QTcpSocket(collab)
+    ecoute = serveur.listen(QHostAddress.SpecialAddress.Any, 47830)
+
+    def arrivee():
+        bout = serveur.nextPendingConnection()
+        bout.readyRead.connect(lambda: _dire(f"greffon spyder_collab : octet reçu {bytes(bout.readAll())!r}"))
+
+    serveur.newConnection.connect(arrivee)
+    client.connected.connect(lambda: client.write(b"x"))
+    client.connectToHost("127.0.0.1", 47830)
+    hote, invite = CollabPeer("hote", "Prof", collab), CollabPeer("invite", "Eleve", collab)
+    hote.sig_join_request.connect(lambda site, nom, ip: _dire(f"greffon spyder_collab : demande de {nom} ({site}, {ip})"))
+    invite.sig_error.connect(lambda m: _dire(f"greffon spyder_collab : erreur invité {m}"))
+    heberge = hote.host(47831)
+    invite.join("127.0.0.1", 47831)
+    return f"écoute={ecoute}, hôte={heberge}, adresses={local_addresses()}"
 
 
 def _bilan(main):
     pylint = main.get_plugin("pylint", error=False)
     if pylint is not None:
         w = pylint.get_widget()
-        print(f"greffon spyder_code_analysis : pylint en cours={w.is_running()} ; "
+        _dire(f"greffon spyder_code_analysis : pylint en cours={w.is_running()} ; "
               f"sortie={str(getattr(w, 'output', ''))[:400]!r}")
     tuteur = main.get_plugin("python_tutor", error=False)
     if tuteur is not None:
         w = tuteur.get_widget()
-        print(f"greffon spyder_python_tutor : vue web={type(getattr(w, '_web', None)).__name__} "
+        _dire(f"greffon spyder_python_tutor : vue web={type(getattr(w, '_web', None)).__name__} "
               f"prête={getattr(w, '_web_ready', None)}")
 
 
