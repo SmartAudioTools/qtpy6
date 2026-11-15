@@ -1,7 +1,8 @@
 """The binding's QtPdfWidgets, whose QPdfView selects text on the desktop (drag, Ctrl+C: Qt's own has no selection)
 and follows the document's internal links (a table of contents: Qt's own does not), and setMasks pixelates
 zones of the pages (an answer the reader must not see yet), setCopyZones limits selection and copy to zones (the
-code of a document) and setCopyFilter rewrites what is copied;
+code of a document), setCopyFilter rewrites what is copied and setUrlLinks makes the links to some URL schemes
+clickable (``urlActivated``), with a tooltip;
 in the browser, where Qt-WASM has no QtPdf, qtpy6.web.pdf's QPdfView, drawn by pdf.js, whose text selects and copies
 as in the browser's PDF viewer."""
 import sys
@@ -12,9 +13,10 @@ if sys.platform == 'emscripten':
     from .web.pdf import QPdfView  # noqa: F401
 else:
     _binding.load(globals(), 'QtPdfWidgets')
-    from .QtCore import QModelIndex, QPoint, QPointF, QRect, QRectF, QSize, QSizeF, Qt
+    from .QtCore import QModelIndex, QPoint, QPointF, QRect, QRectF, QSize, QSizeF, Qt, Signal
     from .QtGui import QColor, QGuiApplication, QImage, QKeySequence, QPainter, QPolygonF
     from .QtPdf import QPdfLinkModel
+    from .QtWidgets import QToolTip
 
     _QPdfView = QPdfView  # noqa: F821
 
@@ -26,6 +28,7 @@ else:
         LINK_MARGIN = 12  # points left above a link's destination (same in the browser: pdf_vue.js)
         MASK_BLOCK = 12  # side of a mask's blocks, in the page's points: unreadable at any zoom (same in pdf_vue.js)
         COPY_MARGIN = 3  # points a selected line's box may go past its copy zone (same in pdf_vue.js)
+        urlActivated = Signal(str)  # a click on a link to a URL of setUrlLinks: the URL, as written in the PDF
 
         def __init__(self, parent=None):
             super().__init__(parent)  # PyQt6 wants the parent, even None
@@ -38,6 +41,7 @@ else:
             self._masks = {}  # setMasks: {page: [QRectF in the page's points]}
             self._blocks = {}  # {(page, index of the mask): QImage, one pixel per block}, read once
             self._copy_zones = self._copy_filter = None  # setCopyZones, setCopyFilter
+            self._url_schemes, self._url_tip, self._tip_shown = (), None, None  # setUrlLinks ; the URL whose tooltip is shown
             self.viewport().setCursor(Qt.CursorShape.IBeamCursor)
             self.viewport().setMouseTracking(True)  # the pointing hand over a link
             self.verticalScrollBar().rangeChanged.connect(self._clamp)
@@ -87,6 +91,15 @@ else:
             """The selected text as Ctrl+C copies it ("" without a selection)."""
             text = self._selection[1].text() if self._selection is not None else ""
             return self._copy_filter(text) if text and self._copy_filter is not None else text
+
+        def setUrlLinks(self, schemes, toolTip=None):
+            """The links to a URL whose scheme is in ``schemes`` (``["myapp"]``) are clickable: a click emits
+            ``urlActivated(url)``, nothing is opened; ``toolTip(url)``, if given, returns the rich text shown while the
+            pointer is over one. Other URLs stay ignored (a document does not leave the view). Same in the browser."""
+            self._url_schemes, self._url_tip = tuple(schemes or ()), toolTip
+
+        def urlLinks(self):
+            return list(self._url_schemes)
 
         def _masked(self, page, selection):
             """Whether ``selection`` (a QPdfSelection of ``page``) touches a mask, or leaves the copy zones (one line's
@@ -242,21 +255,23 @@ else:
                 self._links.setPage(page)
             # the link of the area under the point, read at the centre of its own rectangle
             link = next((self._links.linkAt(own.center()) for area, own, _ in self._areas[page] if area.contains(point)), None)
-            if link is None or not link.isValid() or not link.url().isEmpty() or (
-                    self._limit is not None and link.page() >= self._limit):
+            if link is None:
                 return None
-            return link
+            if not link.url().isEmpty():  # setUrlLinks (QPdfLink.isValid() is False for a link to a URL: no target page)
+                return link if link.url().scheme() in self._url_schemes else None
+            return None if not link.isValid() or self._limit is not None and link.page() >= self._limit else link
 
         def _link_areas(self, page):
             """[(clickable QRectF, the link's own QRectF, its target page)] in the page's points: a link alone on its
             line takes the whole line, as wide as the page minus its left margin on both sides, and not only its text
-            (a table of contents: the end of a short title was not clickable). Same rule in the browser (``pdf_vue.js``)."""
+            (a table of contents: the end of a short title was not clickable); a link to a URL (target -1) keeps its own
+            rectangle. Same rule in the browser (``pdf_vue.js``)."""
             self._links.setPage(page)
             rectangle, target = QPdfLinkModel.Role.Rectangle.value, QPdfLinkModel.Role.Page.value
             links = [(self._links.data(index, rectangle), self._links.data(index, target))
                      for index in (self._links.index(row, 0) for row in range(self._links.rowCount(QModelIndex())))]
             width = self.document().pagePointSize(page).width()
-            return [(r if any(o is not r and o.top() < r.bottom() and r.top() < o.bottom() for o, _ in links) else
+            return [(r if t < 0 or any(o is not r and o.top() < r.bottom() and r.top() < o.bottom() for o, _ in links) else
                      QRectF(r.left(), r.top(), max(r.width(), width - 2 * r.left()), r.height()), r, t) for r, t in links]
 
         def _follow(self, link):
@@ -271,7 +286,10 @@ else:
         def mousePressEvent(self, event):
             link = self._link(event.position().toPoint()) if event.button() == Qt.MouseButton.LeftButton else None
             if link is not None:
-                self._follow(link)
+                if link.url().isEmpty():
+                    self._follow(link)
+                else:
+                    self.urlActivated.emit(link.url().toString())
                 event.accept()
                 return
             if event.button() == Qt.MouseButton.LeftButton:
@@ -291,6 +309,14 @@ else:
             else:
                 link = self._link(event.position().toPoint())
                 self.viewport().setCursor(Qt.CursorShape.PointingHandCursor if link is not None else Qt.CursorShape.IBeamCursor)
+                url = link.url().toString() if link is not None and not link.url().isEmpty() else None
+                if url != self._tip_shown:  # setUrlLinks: the tooltip of the URL under the pointer, shown once
+                    self._tip_shown = url
+                    tip = url and self._url_tip and self._url_tip(url)
+                    if tip:
+                        QToolTip.showText(event.globalPosition().toPoint(), tip, self.viewport())
+                    else:
+                        QToolTip.hideText()
             super().mouseMoveEvent(event)
 
         def mouseReleaseEvent(self, event):

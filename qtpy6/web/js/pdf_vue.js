@@ -52,6 +52,8 @@
 .qtpy6-pdf .liens { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
 .qtpy6-pdf .liens a { position: absolute; pointer-events: auto; cursor: pointer; }
 .qtpy6-pdf .liens .voile { position: absolute; background: rgba(255 255 255 / 0.63); }
+.qtpy6-pdf-bulle { position: fixed; z-index: 2147483647; pointer-events: none; max-width: 32em; padding: 4px 8px;
+                   background: #ffffe1; color: #000; border: 1px solid #767676; font: 13px sans-serif; }
 .qtpy6-pdf .page canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
 .qtpy6-pdf .textLayer { position: absolute; text-align: initial; inset: 0; overflow: clip; opacity: 1; line-height: 1;
   text-size-adjust: none; forced-color-adjust: none; transform-origin: 0 0; caret-color: CanvasText; z-index: 0;
@@ -191,6 +193,31 @@
       this.filtre = fonction;
     }
 
+    adresses(schemas, bulle, clic) {  // setUrlLinks : les liens vers ces schémas d'URL, leur infobulle et leur clic
+      this.schemas = [...schemas];
+      this.bulle = bulle;
+      this.clic = clic;
+      if (this.doc) this.mettreEnPage();
+    }
+
+    montrerBulle(adresse, e) {
+      const html = this.bulle?.(adresse);
+      if (!html) return;
+      this.cacherBulle();
+      const bulle = this.infobulle = document.createElement("div");
+      bulle.className = "qtpy6-pdf-bulle";
+      bulle.innerHTML = html;
+      document.body.append(bulle);
+      const { width, height } = bulle.getBoundingClientRect();  // près du pointeur, sans sortir de la fenêtre
+      bulle.style.left = `${Math.max(0, Math.min(e.clientX + 12, innerWidth - width - 4))}px`;
+      bulle.style.top = `${e.clientY + 16 + height < innerHeight ? e.clientY + 16 : Math.max(0, e.clientY - height - 8)}px`;
+    }
+
+    cacherBulle() {
+      this.infobulle?.remove();
+      this.infobulle = null;
+    }
+
     masquer(liste) {  // [[page, x, y, l, h], …]
       this.masques = new Map();
       for (const [page, ...zone] of liste ?? []) this.masques.set(page, [...(this.masques.get(page) ?? []), zone]);
@@ -203,8 +230,9 @@
       if (this.doc) this.mettreEnPage();
     }
 
-    // Les liens internes de la page (pas les URL : une épreuve ne sort pas de la page), vers une page montrée ; ceux vers
-    // une page cachée sont voilés de blanc. Un lien seul sur sa ligne la prend toute, large comme la page moins sa marge
+    // Les liens internes de la page, vers une page montrée ; ceux vers une page cachée sont voilés de blanc. Une URL
+    // n'est un lien que si son schéma est dans setUrlLinks (une épreuve ne sort pas de la page) : son clic va à
+    // urlActivated, son survol montre l'infobulle, sur son propre rectangle (même règle sur ordinateur). Un lien seul sur sa ligne la prend toute, large comme la page moins sa marge
     // gauche de chaque côté, et pas seulement son texte (un sommaire : la fin d'un titre court n'était pas cliquable) ;
     // même règle sur ordinateur (QtPdfWidgets.py).
     async lier(page, viewport, cadre, generation) {
@@ -214,6 +242,18 @@
       const seul = a => !annotations.some(b => b !== a && Math.min(b.rect[1], b.rect[3]) < Math.max(a.rect[1], a.rect[3])
                                                          && Math.min(a.rect[1], a.rect[3]) < Math.max(b.rect[1], b.rect[3]));
       for (const a of annotations) {
+        const adresse = a.dest ? null : a.url ?? a.unsafeUrl;  // pdf.js ne garde en url que les schémas qu'il sait sûrs
+        if (adresse && this.schemas?.includes(adresse.split(":")[0])) {
+          const [[x1, y1], [x2, y2]] = [a.rect.slice(0, 2), a.rect.slice(2)].map(([x, y]) => viewport.convertToViewportPoint(x, y));
+          const lien = document.createElement("a");
+          Object.assign(lien.style, { left: `${Math.min(x1, x2)}px`, top: `${Math.min(y1, y2)}px`,
+                                      width: `${Math.abs(x2 - x1)}px`, height: `${Math.abs(y2 - y1)}px` });
+          lien.addEventListener("click", e => { e.preventDefault(); this.cacherBulle(); this.clic?.(adresse); });
+          lien.addEventListener("mouseenter", e => this.montrerBulle(adresse, e));
+          lien.addEventListener("mouseleave", () => this.cacherBulle());
+          liens.append(lien);
+          continue;
+        }
         if (!a.dest) continue;
         const dest = typeof a.dest === "string" ? await this.doc.getDestination(a.dest) : a.dest;
         if (!dest) continue;
@@ -290,6 +330,7 @@
     }
 
     detruire() {
+      this.cacherBulle();
       this.generation++;
       this.visibles.disconnect();
       this.taille.disconnect();

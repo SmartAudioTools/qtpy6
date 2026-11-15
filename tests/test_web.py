@@ -576,6 +576,65 @@ def test_pdf_masques_dans_le_navigateur(app, tmp_path, moteur):
         serveur.shutdown()
 
 
+_URL_PAGE = """<!doctype html><meta charset="utf-8"><body style="margin:0"><script type="module">
+const source = await (await fetch("js/pdf_vue.js")).text();
+const { ouvrir, vue } = eval(source)(new URL("js/pdfjs/pdf.min.mjs", location).href,
+                                     new URL("js/pdfjs/pdf.worker.min.mjs", location).href);
+const octets = new Uint8Array(await (await fetch("copie.pdf")).arrayBuffer());
+window.essayer = async () => {
+  const v = vue(), clics = [];
+  v.placer(0, 0, 600, 900, true);
+  v.adresses(["appli"], url => `<b>${url}</b>`, url => clics.push(url));
+  await v.afficher(ouvrir(octets.slice()));
+  let liens;
+  for (let i = 0; i < 200 && !(liens = v.div.querySelectorAll(".page .liens a")).length; i++) await new Promise(r => setTimeout(r, 50));
+  const lien = liens[0], { left, top } = lien.getBoundingClientRect();
+  lien.dispatchEvent(new MouseEvent("mouseenter", { clientX: left + 2, clientY: top + 2 }));
+  const bulle = document.querySelector(".qtpy6-pdf-bulle")?.innerHTML;
+  lien.dispatchEvent(new MouseEvent("mouseleave"));
+  const cachee = !document.querySelector(".qtpy6-pdf-bulle");
+  lien.click();
+  const n = liens.length;
+  v.detruire();
+  return { n, bulle, cachee, clics };
+};
+window.pret = true;
+</script>"""
+
+
+@pytest.mark.parametrize("moteur", MOTEURS)
+def test_pdf_liens_vers_une_url_dans_le_navigateur(app, tmp_path, moteur):
+    """``setUrlLinks`` dans le navigateur (``pdf_vue.js`` seul) : le lien vers un schéma choisi est cliquable et montre
+    son infobulle au survol, que pdf.js range en ``unsafeUrl`` ; celui vers https reste ignoré."""
+    import functools
+    import http.server
+    import threading
+
+    texte = QtGui.QTextDocument()
+    texte.set_html('<p><a href="appli://question/q1">0,5 / 1</a></p><p><a href="https://example.org">dehors</a></p>')
+    ecrivain = QtGui.QPdfWriter(str(tmp_path / "copie.pdf"))
+    texte.print_(ecrivain) if hasattr(texte, "print_") else texte.print(ecrivain)
+    (tmp_path / "js").symlink_to(RACINE / "qtpy6" / "web" / "js")
+    (tmp_path / "index.html").write_text(_URL_PAGE, encoding="utf-8")
+
+    class Silencieux(http.server.SimpleHTTPRequestHandler):
+        def log_message(self, *_):
+            pass
+
+    serveur = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Silencieux, directory=str(tmp_path)))
+    threading.Thread(target=serveur.serve_forever, daemon=True).start()
+    navigateur = ouvrir(moteur, f"http://127.0.0.1:{serveur.server_port}/index.html")
+    try:
+        debut = time.time()
+        while not navigateur.execute_script("return window.pret") and time.time() - debut < 30:
+            time.sleep(0.1)
+        r = navigateur.execute_script("return essayer().catch(e => ({ erreur: String(e) }))")
+        assert r == {"n": 1, "bulle": "<b>appli://question/q1</b>", "cachee": True, "clics": ["appli://question/q1"]}, r
+    finally:
+        navigateur.quit()
+        serveur.shutdown()
+
+
 def test_pdf_limite_de_pages_en_natif(app, tmp_path):
     """``setPageLimit`` : la barre de défilement s'arrête au bas de la dernière page montrée, et quand les pages
     montrées finissent plus haut que la vue, la suite est recouverte du fond."""
@@ -680,6 +739,47 @@ def test_pdf_lien_seul_sur_sa_ligne(app, tmp_path):
     assert {page for _, _, page in vue._link_areas(0)} == {cible.page()} and cible.page() > 0
     assert lien(court.center().x(), court) is None
     assert plus_sombre() > avant + 30, (avant, plus_sombre())
+    vue.close()
+
+
+def test_pdf_liens_vers_une_url_en_natif(app, tmp_path):
+    """``setUrlLinks`` : un lien vers une URL d'un schéma choisi se clique (``urlActivated``, rien ne s'ouvre), sur son
+    seul rectangle, et montre l'infobulle donnée au survol ; un autre schéma reste ignoré, comme avant."""
+    from qtpy6.QtPdf import QPdfDocument
+    from qtpy6.QtPdfWidgets import QPdfView
+    from qtpy6.QtTest import QTest
+
+    chemin = str(tmp_path / "copie.pdf")
+    texte = QtGui.QTextDocument()
+    texte.set_html('<p><a href="appli://question/q%3E1">0,5 / 1</a></p><p><a href="https://example.org">dehors</a></p>')
+    texte.print_(QtGui.QPdfWriter(chemin)) if hasattr(texte, "print_") else texte.print(QtGui.QPdfWriter(chemin))
+    document = QPdfDocument(None)
+    document.load(chemin)
+    vue = QPdfView(None)
+    vue.setDocument(document)
+    vue.setPageMode(QPdfView.PageMode.MultiPage)
+    vue.setZoomMode(QPdfView.ZoomMode.FitToWidth)
+    vue.resize(400, 500)
+    vue.show()
+    app.processEvents()
+    page = vue._pages()[0]
+    echelle = page.width() / document.pagePointSize(0).width()
+    aire, propre = sorted(((a, r) for a, r, _ in vue._link_areas(0)), key=lambda x: x[1].top())[0]
+    assert aire == propre, "un lien vers une URL garde son rectangle, même seul sur sa ligne"
+    point = page.topLeft() + QtCore.QPoint(round(propre.center().x() * echelle), round(propre.center().y() * echelle))
+    dehors = sorted((r for _, r, _ in vue._link_areas(0)), key=lambda r: r.top())[1]
+    point_dehors = page.topLeft() + QtCore.QPoint(round(dehors.center().x() * echelle), round(dehors.center().y() * echelle))
+    assert vue._link(point) is None, "sans setUrlLinks, une URL n'est pas un lien"
+    actives, bulles = [], []
+    vue.urlActivated.connect(actives.append)
+    vue.setUrlLinks(["appli"], lambda url: bulles.append(url) or f"<b>{url}</b>")
+    assert vue._link(point) is not None and vue._link(point_dehors) is None
+    QTest.mouseMove(vue.viewport(), point)
+    QTest.mouseClick(vue.viewport(), QtCore.Qt.MouseButton.LeftButton, pos=point)
+    assert actives and actives[0].startswith("appli://question/q"), actives
+    assert bulles == actives[:1], ("l'infobulle de l'URL survolée, une fois", bulles)
+    QTest.mouseClick(vue.viewport(), QtCore.Qt.MouseButton.LeftButton, pos=point_dehors)
+    assert len(actives) == 1, "un autre schéma reste ignoré"
     vue.close()
 
 

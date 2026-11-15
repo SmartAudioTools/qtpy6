@@ -121,6 +121,7 @@ class QPdfView(Calque):
         Custom, FitToWidth, FitInView = range(3)
 
     documentChanged = Signal(object)
+    urlActivated = Signal(str)  # comme en natif : un clic sur un lien vers une URL de setUrlLinks
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -128,6 +129,7 @@ class QPdfView(Calque):
         self._vue = vue = _js().vue()
         self._limite, self._masques = None, {}
         self._zones_copie = self._filtre = None  # setCopyZones, setCopyFilter
+        self._schemas, self._bulle, self._rappels = (), None, ()  # setUrlLinks ; les proxys, gardés autant que la vue
         self._marges, self._ecart = QMargins(6, 6, 6, 6), 3  # les défauts de QPdfView
         self.destroyed.connect(lambda *_: vue.detruire())
 
@@ -182,6 +184,19 @@ class QPdfView(Calque):
 
         self._filtre = fonction and create_proxy(fonction)  # gardé : le proxy vit autant que la vue
         self._vue.filtrer(self._filtre)
+
+    def setUrlLinks(self, schemas, infobulle=None):
+        """Comme en natif : les liens vers une URL d'un de ces schémas émettent ``urlActivated(url)`` au clic,
+        ``infobulle(url)`` donne le texte riche montré au survol ; les autres URL restent ignorées."""
+        from pyodide.ffi import create_proxy, to_js  # noqa: PLC0415
+
+        self._schemas, self._bulle = tuple(schemas or ()), infobulle
+        self._rappels = (create_proxy(lambda url: (infobulle(url) or "") if infobulle else ""),
+                         create_proxy(lambda url: self.urlActivated.emit(str(url))))
+        self._vue.adresses(to_js(list(self._schemas)), *self._rappels)
+
+    def urlLinks(self):
+        return list(self._schemas)
 
     def documentMargins(self):
         return QMargins(self._marges)
