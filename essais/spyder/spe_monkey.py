@@ -80,6 +80,7 @@ def init_h(*a, **k):
     _t(("init", a, k))
     return _init(*a, **k)
 M = dict(u=0.0, d=0.0, sd=0.0, sr=0.0, n=0, t=time.monotonic())
+_bc, _lot = js.BroadcastChannel.new("qtpy6-vsync"), []  # horloge du noyau : (image, instant absolu) vers la page, par 30
 def sleep_m(s):
     t = time.monotonic(); _sleep(s); M["sd"] += s; M["sr"] += time.monotonic() - t
 def run_m(update, draw):
@@ -88,6 +89,9 @@ def run_m(update, draw):
     def d():
         t = time.monotonic(); draw(); M["d"] += time.monotonic() - t
         M["n"] += 1
+        _lot.append([M["n"], js.performance.timeOrigin + js.performance.now()])
+        if len(_lot) >= 30:
+            _bc.postMessage(js.JSON.parse(str(_lot))); _lot.clear()
         if M["n"] % 60 == 0:
             T = time.monotonic(); dt = T - M["t"]
             _t(dict(images=M["n"], ips=round(60 / dt, 1), ms_image=round(dt * 1000 / 60, 1),
@@ -107,11 +111,13 @@ document.addEventListener("focusout", e => {
 }, true);"""
 _ICI = os.path.dirname(os.path.abspath(__file__))
 _source = open(os.path.join(_ICI, "spe.py"), encoding="utf-8").read()
-_avant = 'travailleur.configurer("./pyodide-qt/")'
 _fin = "\n\nexec(compile(open(os.path.join(os.path.dirname"
-assert _source.count(_avant) == 1 and _source.count(_fin) == 1
-_source = _source.replace(_avant, f'travailleur.configurer("./pyodide/", roues=[{ROUE!r}])')
-_source = _source.replace(_fin, '''
+assert _source.count(_fin) == 1
+# Le noyau sur le Pyodide ordinaire (3.14) avec la roue de Pyxel : spe.py n'appelle plus ``configurer`` depuis W559 (D4).
+_source = _source.replace(_fin, f'''
+from qtpy6.web import travailleur  # noqa: E402
+travailleur.configurer("./pyodide/", roues=[{ROUE!r}])
+''' + '''
 _SUITE_SPE = SUITE
 
 
@@ -124,6 +130,101 @@ def SUITE(main, rapport):  # noqa: N802
     except BaseException:
         import traceback
         js.console.log("MONKEY " + traceback.format_exc())
+
+
+VSYNC_JS = """
+window.vsync = {raf: [], passes: [], presentations: [], peint: 0, ecrit: 0, ecarts: [], noyau: []};
+requestAnimationFrame(function f(t) { vsync.raf.push(t); requestAnimationFrame(f); });
+// Une écriture du canevas montre le dernier numéro peint : présenté au balayage de l image en cours (Qt-WASM n écrit
+// qu au requestAnimationFrame ; l écart à l instant de l image, gardé, le vérifie).
+for (const proto of [CanvasRenderingContext2D.prototype, OffscreenCanvasRenderingContext2D.prototype])
+  for (const nom of ["putImageData", "drawImage"]) {
+    const vrai = proto[nom];
+    proto[nom] = function (...a) {
+      if (vsync.peint !== vsync.ecrit) {
+        const t = document.timeline.currentTime;
+        vsync.presentations.push([t, vsync.peint]); vsync.ecarts.push(performance.now() - t); vsync.ecrit = vsync.peint;
+      }
+      return vrai.apply(this, a);
+    };
+  }
+new BroadcastChannel("qtpy6-vsync").onmessage = e => {
+  for (const [n, t] of e.data) vsync.noyau.push([n, t - performance.timeOrigin]);
+};
+"""
+
+
+def horloges(main):
+    """Instrumentation (W572, &cadence=1) : les trois horloges de Pyxel dans la page, et le nombre de balayages pendant
+    lesquels chaque image Pyxel reste à l'écran. Noyau : fin de chaque draw (BroadcastChannel) ; pont : passes du moteur
+    de mémoire partagée et tours de la minuterie du greffon, images reçues (sig_frame) ; page : chaque
+    requestAnimationFrame, et l'image où chaque numéro Pyxel arrive au canevas. Rend la fonction qui affiche le bilan
+    dans la page (cadre en haut à droite) et dans la console."""
+    import js
+    from collections import Counter
+    from pyodide.code import run_js
+    from qtpy6.QtCore import QEvent, QObject
+    from qtpy6.web import memoire_partagee
+    from spyder_pyxel.spyder.bridge_manager import get_bridge
+    run_js(VSYNC_JS)
+    memoire_partagee.ajouter_crochet(run_js("() => vsync.passes.push(performance.now())"))
+    pont, H = get_bridge(), {"recus": [], "tours": [], "dernier": 0, "ecran": None}
+    pont._timer.timeout.connect(lambda: H["tours"].append(js.performance.now()))
+
+    class Peinture(QObject):
+        def eventFilter(self, objet, e):
+            if e.type() == QEvent.Paint:
+                js.vsync.peint = H["dernier"]
+            return False
+    H["filtre"] = Peinture()
+
+    def recu(kind, frame, canal):
+        H["recus"].append((frame.number, js.performance.now()))
+        H["dernier"] = frame.number
+        if H["ecran"] is None:
+            H["ecran"] = main.get_plugin("pyxel_game").get_widget()._screens.get(canal)
+            H["ecran"].installEventFilter(H["filtre"])
+    pont.sig_frame.connect(recu)
+    cadre = js.document.createElement("pre")
+    cadre.style.cssText = ("position:fixed;top:4px;right:4px;z-index:2147483647;margin:0;padding:6px;font:12px monospace;"
+                           "background:rgba(0,0,0,.85);color:#fff;pointer-events:none;white-space:pre")
+    js.document.body.appendChild(cadre)
+
+    def ecarts(temps):
+        d = sorted(b - a for a, b in zip(temps, temps[1:]))
+        if not d:
+            return "—"
+        q = lambda p: d[min(len(d) - 1, int(p * len(d)))]
+        return f"méd {q(.5):.1f} ms, 10 % {q(.1):.1f}, 90 % {q(.9):.1f}, max {d[-1]:.1f} ({len(d) + 1})"
+
+    def bilan():
+        v = js.vsync
+        raf, pres = list(v.raf.to_py()), [tuple(x) for x in v.presentations.to_py()]
+        noyau = [t for _, t in v.noyau.to_py()]
+        hz = 1000 / sorted(b - a for a, b in zip(raf, raf[1:]))[len(raf) // 2] if len(raf) > 2 else 0
+        import bisect
+        pres = [(bisect.bisect_left(raf, t - 1), n) for t, n in pres if n and raf and raf[0] - 1 <= t <= raf[-1] + 1]
+        duree = Counter(n for n in Counter(
+            n for (i, n), (j, _) in zip(pres, pres[1:]) for _ in range(j - i)).values())
+        montres = {n for _, n in pres}
+        nums = sorted({n for n, _ in H["recus"]})
+        jamais = sum(1 for n in nums[:-1] if n not in montres)
+        perdus = (nums[-1] - nums[0] + 1 - len(nums)) if nums else 0
+        ecart = sorted(v.ecarts.to_py())
+        lignes = [f"Pyxel : balayages par image ({hz:.0f} Hz ; attendu {hz / 60:.1f} à 60 i/s)",
+                  f"  0 : {jamais + perdus:5d} {'#' * min(60, jamais + perdus)}  (reçues non montrées {jamais},"
+                  f" jamais reçues {perdus})"]
+        lignes += [f"  {k} : {duree[k]:5d} {'#' * min(60, duree[k])}" for k in sorted(duree)]
+        lignes += [f"noyau (fin de draw) : {ecarts(noyau)}",
+                   f"moteur mémoire     : {ecarts(list(v.passes.to_py())[-3000:])}",
+                   f"minuterie du pont  : {ecarts(H['tours'][-3000:])} ; {pont._timer.interval()} ms",
+                   f"reçues (sig_frame) : {ecarts([t for _, t in H['recus']])}",
+                   f"requestAnimFrame   : {ecarts(raf)}",
+                   f"écriture canevas après l image : max {ecart[-1] if ecart else 0:.1f} ms"]
+        cadre.textContent = "\\n".join(lignes)
+        js.console.log("VSYNC " + " | ".join(lignes))
+        return len(H["recus"])
+    return bilan
 
 
 def suite(main):
@@ -169,6 +270,7 @@ exec(compile(open("/home/pyodide/monkey/diag_cadence.py").read(), "/home/pyodide
         def image_page(kind, frame, canal):
             page["images"] += 1
         get_bridge().sig_frame.connect(image_page)
+        vsync = horloges(main)
 
         def battement():
             t = js.performance.now()
@@ -188,8 +290,9 @@ exec(compile(open("/home/pyodide/monkey/diag_cadence.py").read(), "/home/pyodide
                            f" ; pire retard minuterie 50 ms : {page['retard']:.0f} ms"
                            f" ; une passe {t - t0:.1f} ms sur segments {tailles}")
             page.update(images=0, t=t, retard=0.0)
-            page["releves"] += 1
-            if page["releves"] < 25:
+            page["attente"] = page.get("attente", 0) + 1
+            page["releves"] += 1 if vsync() else 0  # 25 relevés comptés à partir de la première image du jeu
+            if page["releves"] < 25 and page["attente"] < 150:
                 QTimer.singleShot(2000, relever_page)
             else:
                 js.window.etat = "fini"

@@ -73,6 +73,43 @@ def _cwd_du_jeu(avant: str) -> None:
             os.chdir(dossier)
 
 
+def _compteur_de_balayages() -> Any:
+    """Le compteur de balayages de la page (``memoire_partagee.BALAYAGES``), vu par ``Atomics`` ; ``None`` sans lui."""
+    import js  # noqa: PLC0415
+    from qtpy6.web.memoire_partagee import BALAYAGES  # noqa: PLC0415
+    segments = getattr(js.self, "qtpy6_memoires", None)
+    if segments is None or not segments.has(BALAYAGES):
+        return None
+    a = js.Int32Array.new(segments.get(BALAYAGES))
+    return lambda i: js.Atomics.load(a, i)
+
+
+def attendre_balayages(lire: Callable[[int], int], etat: dict[str, Any], dormir: Callable[[float], None] | None = None,
+                       horloge: Callable[[], float] = time.monotonic) -> bool:
+    """Synchro verticale (W572) : l'image Pyxel suivante part au balayage où elle sera montrée, pas à l'heure de
+    ``time.sleep``. Le noyau et la page comptaient chacun leur temps : à 60 i/s sur un écran de 60 Hz, une image sur trois
+    n'était jamais montrée (deux dans le même balayage) et une sur dix l'était deux fois (mesure de la note W572).
+    ``lire(0)`` : balayages comptés par la page ; ``lire(1)`` : leur période en µs. Chaque image dure ``round(hz / fps)``
+    balayages ; en retard, on repart du balayage courant. Faux si la page ne compte plus (onglet caché : plus de
+    ``requestAnimationFrame``) : l'appelant cadence alors au temps."""
+    dormir = dormir or time.sleep  # lu à l'appel : la doublure du préambule (réconcilie la mémoire partagée) vient après l'import
+    if etat.get("fige") == lire(0):  # la page ne comptait déjà plus : ne pas réattendre à chaque image
+        return False
+    etat.pop("fige", None)
+    periode = (lire(1) or 16_667) / 1e6
+    n = max(1, round(1 / etat["fps"] / periode))
+    cible = etat.get("balayage", lire(0)) + n
+    fin = horloge() + n * periode + 0.1
+    while lire(0) - cible < 0:
+        if horloge() > fin:
+            etat.pop("balayage", None)
+            etat["fige"] = lire(0)
+            return False
+        dormir(0.001)  # JSPI : la page et le moteur de mémoire tournent pendant ce temps
+    etat["balayage"] = lire(0)
+    return True
+
+
 def completer(pyxel: Any) -> None:
     """Remplace ``init``, ``flip`` et ``run`` du module ``pyxel.pyxel_binding`` exécuté."""
     import js  # noqa: PLC0415
@@ -105,12 +142,14 @@ def completer(pyxel: Any) -> None:
             boucle = etat["boucle"] = pyodide_js._module.MainLoop
             boucle.pause()
             etat["t"] = time.monotonic()
-        etat["t"] += 1 / etat["fps"]
-        attente = etat["t"] - time.monotonic()
-        if attente > 0:
-            time.sleep(attente)
-        else:  # en retard (image lourde) : on repart d'ici plutôt que d'enchaîner les images sans attendre
-            etat["t"] = time.monotonic()
+        compteur = _compteur_de_balayages()
+        if compteur is None or not attendre_balayages(compteur, etat):
+            etat["t"] += 1 / etat["fps"]
+            attente = etat["t"] - time.monotonic()
+            if attente > 0:
+                time.sleep(attente)
+            else:  # en retard (image lourde) : on repart d'ici plutôt que d'enchaîner les images sans attendre
+                etat["t"] = time.monotonic()
         boucle.func()
 
     def run_web(update: Callable[[], None], draw: Callable[[], None]) -> None:

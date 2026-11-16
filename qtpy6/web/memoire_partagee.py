@@ -68,10 +68,37 @@ def _dans_worker() -> bool:
 def enregistrer_worker(worker: Any) -> None:
     """Page : un Worker qui vient de naître reçoit les segments existants, puis chaque segment créé ensuite."""
     _WORKERS.append(worker)
+    _balayages()
     if _SEGMENTS:
         moteur = _moteur()
         for nom, sab in _SEGMENTS.items():
             moteur.envoyer(worker, nom, sab)
+
+
+BALAYAGES = "qtpy6-balayages"
+_BALAYAGES_JS = """sab => {
+  const a = new Int32Array(sab);  // [0] : balayages de l'écran comptés par la page ; [1] : leur période, en µs
+  let avant;
+  const f = t => {
+    if (avant !== undefined && t - avant < 100) Atomics.store(a, 1, Math.round((t - avant) * 1000));  // pas le retour d'un onglet caché
+    avant = t; Atomics.add(a, 0, 1); requestAnimationFrame(f);
+  };
+  requestAnimationFrame(f);
+}"""
+
+
+def _balayages() -> None:
+    """Page : le segment ``BALAYAGES``, compté à chaque ``requestAnimationFrame``, l'horloge de l'écran pour les Workers
+    (``pyxel_web`` y cale ses images au lieu de ``time.sleep`` : W572). Créé une fois, au premier Worker."""
+    import js  # noqa: PLC0415
+    if BALAYAGES in _SEGMENTS or not hasattr(js, "SharedArrayBuffer"):  # page non isolée : pas de segment du tout
+        return
+    from pyodide.code import run_js  # noqa: PLC0415
+    _GARDES.append(SharedMemory(BALAYAGES, create=True, size=8))
+    run_js(_BALAYAGES_JS)(_SEGMENTS[BALAYAGES])
+
+
+_GARDES: list[Any] = []
 
 
 def ajouter_crochet(fonction: Any) -> None:
