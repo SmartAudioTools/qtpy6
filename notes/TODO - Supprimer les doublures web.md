@@ -5,6 +5,8 @@ pour vraiment avoir le même comportement en natif et web » ; puis « oui » à
 Étude d'origine, sources et mesures : `/DATA/Python/SmartTeacher_essais/lecteur/w712/ETAT.md`. Liste des doublures :
 `web.md`, table « Nom Qt / Dans le navigateur ». Rien n'est commencé ; le classement ci-dessous est À VÉRIFIER.
 
+**Pas avant le vendredi 20/11/2026** : professeur, 16/11 20:17, « on verra ça après jeudi » (jeudi 19/11).
+
 ## 1. Étude chiffrée (à faire en premier, sans code)
 Pour chacune des 7 doublures : le vrai Qt-WASM peut-il la remplacer, à quel coût (points de quota, heures machine,
 Mo téléchargés), et que perd-on ? Rendu : une note `notes/AAAA-MM-JJ - Suppression des doublures, étude.md`.
