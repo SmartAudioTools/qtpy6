@@ -9,7 +9,7 @@ OffscreenCanvas avec style, screen, navigator.getGamepads, document factice ; wi
 import os
 import time
 
-ROUE = "./roues/pyxel-2.9.9-cp311-abi3-emscripten_5_0_3_wasm32.whl"
+ROUE = "./roues/qtpy6-vsync/pyxel-2.9.9-cp311-abi3-emscripten_5_0_3_wasm32.whl"  # fork qtpy6-vsync (pyxel.step), W575/W580
 ESSAI_CODE = """
 # Essai 26 : le greffon spyder_pyxel embarqué ; son amorce (reader.kernel_bootstrap_code), injectée par le panneau dans
 # ce noyau, a-t-elle installé le pont ? Puis un jeu ordinaire (pyxel.run), vu par le panneau, avec la touche Espace

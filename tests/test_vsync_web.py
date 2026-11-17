@@ -103,3 +103,63 @@ def test_page_qui_saute_des_balayages_ne_ralentit_pas_le_jeu(sautes: float) -> N
     duree = instants[-1] - instants[1]
     assert duree == pytest.approx(598 / 60, rel=0.01)
     assert all(abs(t * 60 - round(t * 60)) < 1e-3 for t in instants[1:])  # sur un balayage (période lue au µs près)
+
+
+class _Faux:
+    """Objet à attributs libres : les modules ``js``, ``pyodide_js``, ``pyodide.ffi`` simulés hors navigateur."""
+
+    def __init__(faux, **attributs: object) -> None:  # noqa: N805 (``self`` est un attribut de ``js``)
+        faux.__dict__.update(attributs)
+
+
+class FauxPyxel:
+    """Le module ``pyxel.pyxel_binding`` : ``run`` journalise (et, comme en web, pose la boucle d'emscripten), ``step``
+    seulement dans la roue du fork qtpy6-vsync."""
+
+    def __init__(self, journal: list, fork: bool) -> None:
+        self.journal = journal
+        self.init = lambda *a, **k: journal.append("init")
+        self.run = lambda u, d: journal.append("run")
+        self.flip = lambda: journal.append("flip d'origine")
+        if fork:
+            self.step = lambda: journal.append("step")
+
+
+def _completer(monkeypatch: pytest.MonkeyPatch, fork: bool) -> tuple[FauxPyxel, list]:
+    import sys
+    import types
+
+    from qtpy6.web import pyxel_web
+    journal: list = []
+    boucle = _Faux(pause=lambda: journal.append("pause"), func=lambda: journal.append("image emscripten"))
+    js = _Faux(Function=_Faux(new=lambda *a: (lambda f: f())))
+    pyodide_js = _Faux(_api=_Faux(), _module=_Faux(MainLoop=boucle))
+    ffi = types.ModuleType("pyodide.ffi")
+    ffi.create_once_callable = lambda f: f
+    pyodide = types.ModuleType("pyodide")
+    pyodide.ffi = ffi
+    for nom, module in (("js", js), ("pyodide_js", pyodide_js), ("pyodide", pyodide), ("pyodide.ffi", ffi)):
+        monkeypatch.setitem(sys.modules, nom, module)
+    monkeypatch.setattr(pyxel_web, "_compteur_de_balayages", lambda: Page(60).lire)
+    monkeypatch.setattr(pyxel_web, "attendre_balayages", lambda lire, etat: journal.append("grille") or True)
+    pyxel = FauxPyxel(journal, fork)
+    pyxel_web.completer(pyxel)
+    return pyxel, journal
+
+
+def test_roue_du_fork_flip_attend_la_grille_puis_step(monkeypatch: pytest.MonkeyPatch) -> None:
+    """W580 : avec la roue du fork (``pyxel.step``), ``flip`` web fait ce que fait le greffon natif après son attente
+    des balayages : ``pyxel.step()``, sans poser ni dérouler la boucle d'emscripten (plus de ``run`` à rappels vides)."""
+    pyxel, journal = _completer(monkeypatch, fork=True)
+    for _ in range(3):
+        pyxel.flip()
+    assert journal == ["grille", "step"] * 3
+
+
+def test_pyxel_d_origine_flip_deroule_la_boucle_d_emscripten(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sans ``step`` (roue officielle de Pyxel) : la voie W573, boucle posée une fois par ``run`` puis une image par
+    ``MainLoop.func`` à chaque pas de la grille."""
+    pyxel, journal = _completer(monkeypatch, fork=False)
+    for _ in range(3):
+        pyxel.flip()
+    assert journal == ["run", "pause"] + ["grille", "image emscripten"] * 3

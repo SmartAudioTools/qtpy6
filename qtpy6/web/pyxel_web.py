@@ -15,6 +15,8 @@ page.md, essais 1 à 21) :
   trampoline JS synchrone et ``_skip_unwind_fatal_error``), et cette boucle est aussitôt mise en pause. Chaque ``flip``
   cadence ensuite à ``fps`` par ``time.sleep`` (suspendu par JSPI : la page et le noyau restent servis) puis déroule UNE
   image en appelant la fonction d'itération d'emscripten : rendu, ``frame_count``, ``btnp`` avancent par Pyxel lui-même.
+  Avec la roue du fork qtpy6-vsync (``pyxel.step``, W574) : ni ``run`` ni boucle d'emscripten, chaque ``flip`` attend la
+  grille puis appelle ``step()``, comme le greffon natif après son attente des balayages (W580).
 - ``run`` : la boucle du bureau (update, draw, flip) en Python, sur ce ``flip``.
 Les entrées posées depuis Python entre deux ``flip`` (``set_btn``, comme le pont du greffon) sont vues normalement
 (essai 21). Une touche posée par un rappel JS PENDANT le ``sleep`` ne l'est pas (essai 20 : le rappel ne peut pas entrer
@@ -133,6 +135,7 @@ def completer(pyxel: Any) -> None:
     from pyodide.ffi import create_once_callable  # noqa: PLC0415
 
     init, run = pyxel.init, pyxel.run
+    step = getattr(pyxel, "step", None)  # roue du fork qtpy6-vsync (W574/W575) : flip sans sommeil, cadencé par nous
     trampoline = js.Function.new("f", "f()")
     etat: dict[str, Any] = {"fps": 30, "boucle": None, "t": 0.0}
 
@@ -141,14 +144,14 @@ def completer(pyxel: Any) -> None:
             del os.environ["SDL_VIDEODRIVER"]
         _canvas(width, height)
         etat["fps"] = kwargs.get("fps") or 30
-        etat["boucle"] = None
+        etat["boucle"], etat["t"] = None, time.monotonic()  # t : départ du repli au temps (voie step : pas de run)
         avant = os.getcwd()
         init(width, height, *args, **kwargs)
         _cwd_du_jeu(avant)
 
     def flip_web() -> None:
         boucle = etat["boucle"]
-        if boucle is None:
+        if boucle is None and step is None:
             api = pyodide_js._api
             api._skip_unwind_fatal_error = True  # emscripten_set_main_loop déroule la pile par une exception
             try:
@@ -166,7 +169,10 @@ def completer(pyxel: Any) -> None:
                 time.sleep(attente)
             else:  # en retard (image lourde) : on repart d'ici plutôt que d'enchaîner les images sans attendre
                 etat["t"] = time.monotonic()
-        boucle.func()
+        if step is not None:  # le même appel que le greffon natif après son attente des balayages
+            step()
+        else:
+            boucle.func()
 
     def run_web(update: Callable[[], None], draw: Callable[[], None]) -> None:
         while True:

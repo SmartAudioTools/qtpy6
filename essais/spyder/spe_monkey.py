@@ -5,7 +5,7 @@ l'éditeur et le jeu se lance dans la console, l'image dans le panneau Pyxel, à
 
 import os
 
-ROUE = "./roues/pyxel-2.9.9-cp311-abi3-emscripten_5_0_3_wasm32.whl"
+ROUE = "./roues/qtpy6-vsync/pyxel-2.9.9-cp311-abi3-emscripten_5_0_3_wasm32.whl"  # fork qtpy6-vsync (pyxel.step), W575/W580
 DIAG_JEU = """
 import js, os, traceback
 def _t(m): js.console.log("DIAG " + str(m))
