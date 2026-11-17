@@ -377,7 +377,7 @@ function sans_menu(conteneur) {
 // minuteries à 0 ms de Qt (sinon sa boucle d'envoi des événements natifs attend une minuterie qui ne viendrait jamais).
 // PySide/PyQt rendent le GIL autour de processEvents : le reprendre pour sauver l'état de Python, le rendre pendant la
 // suspension (les autres entrées en ont besoin), le reprendre et le rendre de nouveau à la reprise.
-const suspension = { promettant: false, tache: false, qtEnTache: false, suspendu: false, suspensions: 0, refus: 0, M: null };
+export const suspension = { promettant: false, tache: false, qtEnTache: false, suspendu: false, suspensions: 0, refus: 0, M: null };
 function boucles_qt() {
   globalThis.Asyncify ??= { handleAsync: f => f(), makeAsyncFunction: f => f };
   const minuteries = new Map();  // id → fonction, des setTimeout à 0 ms : le repli sans suspension en tire celles de Qt
@@ -461,7 +461,8 @@ function figer_les_evenements(M) {
 function pompe(tour, periode) {
   setTimeout(() => pomper(tour, periode), 0);
 }
-function pomper(tour, periode) {
+const FUITE = 16;  // octets de pile C laissés par chaque callPromising de Pyodide 0.29.3 (stackAlloc(4), aligné à 16)
+export function pomper(tour, periode) {  // exportée pour tests/pompe_harnais.mjs
   let encours = false;
   const tourner = () => {
     // Pyodide mort (`mourir`) : plus aucun tour, chacun refaisait la même erreur 100 fois par seconde (B1, 09/11/2026).
@@ -474,9 +475,19 @@ function pomper(tour, periode) {
     if (!(suspension.M && suspension.M.qtSuspendResumeControl)) return tour();
     encours = true;
     suspension.promettant = true;
+    // Pyodide 0.29.3 (`callPyObjectKwargsPromising`, `stackAlloc(4)`) réserve 16 octets de pile C par appel promettant et
+    // ne les rend que sur erreur : cent tours par seconde descendaient la pile de 1,7 Kio/s, ses 5 Mio épuisés en 50 min,
+    // après quoi elle écrasait les données (« memory access / table index out of bounds », Pyodide mort 45 à 54 min
+    // après l'ouverture chez les élèves, Chrome comme Firefox : B1, mesuré par W744 le 17/11/2026). Rendus à la fin du tour,
+    // seulement si la pile est exactement de FUITE sous son départ : autrement, une autre entrée a un cadre vivant dessous
+    // (rare), qu'on ne libère pas.
+    const M = suspension.M, haut = M.stackSave();
     let p;
     try { p = tour.callPromising(); } finally { suspension.promettant = false; }
-    p.catch(e => print("pompe : " + (e.message || e))).finally(() => { encours = false; suspension.promettant = false; });
+    p.catch(e => print("pompe : " + (e.message || e))).finally(() => {
+      if (haut - M.stackSave() === FUITE) M.stackRestore(haut);
+      encours = false; suspension.promettant = false;
+    });
   };
   suspension.tourner = tourner;
   const intervalle = setInterval(tourner, periode);
