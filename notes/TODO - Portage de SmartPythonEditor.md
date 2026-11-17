@@ -111,10 +111,15 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
      minimale et cause (W576).md` ; décision c. (C + reconstruction, ou même correctif en JS dans la construction du
      site, sans reconstruction) : **le professeur, 17/11 03:27 : « non directement le C »** ; patch préparé, non
      compilé : `qtpy6_essais/equipe/w576/pystate_masquer_cadres.diff`.
-   - c. Patch Pyodide dans la chaîne de construction existante (`wasm/patches/`, même voie que
-     `qtbase-wasm-defilement.patch` ; Pyodide-PySide6 0.29.3.7, release GitHub), reconstruire, rejouer a. puis le
-     triangle (`sonde_tri.sh`) SANS la parade de l'item 1 : c'est le test qui échoue sans le correctif.
-   - d. Signalement amont (Pyodide, et CPython si b. l'y situe) avec a. et c. Puis retirer la parade de l'item 1 si le
+   - c. **EN PARTIE (W579, 17/11)** : Pyodide du Worker = **314.0.7** (pas Pyodide-PySide6), reconstruit hors réseau
+     avec `wasm/patches/pyodide314-pystate-masquer-cadres.patch` (cœur 35 s ; `qtpy6_essais/equipe/w579/`). gcnu
+     **12/12 vert patché, 11/12 rouge d'origine**. Triangle sans parade : **ROUGE** patché aussi (3/3,
+     `unreachable` dans `__stack_chk_fail` : canari de pile C écrasé, seconde corruption hors GC, cause non
+     établie) ; témoin d'origine rouge 2/2. Le triangle (`spe_m4.py`) est cassé depuis D4 (W559), variante privée.
+     Note `notes/2026-11-17 - Patch pystate de Pyodide compilé et rejoué (W579).md`. Reste : appelant de
+     `__stack_chk_fail`, puis rejouer le triangle.
+   - d. Signalement amont : texte prêt, NON envoyé, dans la note W579 (gcnu + patch ; le second plantage n'y est
+     pas). Signalement amont (Pyodide, et CPython si b. l'y situe) avec a. et c. Puis retirer la parade de l'item 1 si le
      patch suffit, ou la garder en la documentant comme redondance volontaire.
    - Existant : rien dans `qtpy6/` ; `outils_wasm/pyside6/build/` et `wasm/patches/` pour la construction. Niveau :
      supposé.

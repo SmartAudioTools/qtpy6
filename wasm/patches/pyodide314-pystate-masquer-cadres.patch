@@ -1,0 +1,65 @@
+W579 (17/11/2026), Pyodide 314.0.7 : pendant la suspension d une tache JSPI, current_frame de son PyThreadState vaut NULL,
+pour que mark_stacks (GC incremental de CPython 3.14) ne suive pas sa chaine jusqu au cadre d entree, pose sur une pile C
+rendue a une autre tache. Cause et mesures : note W576 du 17/11/2026 (Plantage JSPI et GC). Prefixe pyodide314- :
+construire.sh applique pyodide-*.patch a l arbre 0.29.3, ou pystate.c differe.
+
+diff --git a/src/core/stack_switching/pystate.c b/src/core/stack_switching/pystate.c
+index 92ca6fd..5bfb162 100644
+--- a/src/core/stack_switching/pystate.c
++++ b/src/core/stack_switching/pystate.c
+@@ -198,9 +198,25 @@ exit_promising_task(void)
+ }
+ 
+ /**
+- * Return task tstate so that saveState can store it in the JS state object.
++ * What saveState stores in the JS state object: the task tstate, and its frame
++ * chain, hidden while the task is suspended.
++ *
++ * The frame chain of a suspended task goes through the entry frame of
++ * _PyEval_EvalFrameDefault, which lives on the C stack. StackState lends that
++ * part of the C stack to the other tasks until the task resumes, so the entry
++ * frame gets overwritten. The tstate stays in the interpreter's thread list,
++ * and the incremental GC (mark_stacks in Python/gc.c) walks the frames of
++ * every tstate: it would follow garbage. Hiding the chain only skips an
++ * optimisation: the references held by the frames still count as external, as
++ * in a young collection, which never walks stacks.
+  */
+-EMSCRIPTEN_KEEPALIVE PyThreadState*
++typedef struct
++{
++  PyThreadState* tstate;
++  struct _PyInterpreterFrame* current_frame;
++} SuspendedTask;
++
++EMSCRIPTEN_KEEPALIVE SuspendedTask*
+ captureThreadState(void)
+ {
+   if (handback_tstate == NULL) {
+@@ -211,14 +227,25 @@ captureThreadState(void)
+                     "to. This is a bug in Pyodide.");
+     return NULL;
+   }
++  SuspendedTask* task = PyMem_RawMalloc(sizeof(SuspendedTask));
++  if (task == NULL) {
++    PyErr_NoMemory();
++    return NULL;
++  }
+   PyThreadState* mine = pystate_threadstate_swap(handback_tstate);
+   handback_tstate = NULL;
+-  return mine;
++  task->tstate = mine;
++  task->current_frame = mine->current_frame;
++  mine->current_frame = NULL;
++  return task;
+ }
+ 
+ EMSCRIPTEN_KEEPALIVE void
+-restoreThreadState(PyThreadState* state)
++restoreThreadState(SuspendedTask* task)
+ {
+   assert(handback_tstate == NULL);
++  PyThreadState* state = task->tstate;
++  state->current_frame = task->current_frame;
++  PyMem_RawFree(task);
+   handback_tstate = pystate_threadstate_swap(state);
+ }
