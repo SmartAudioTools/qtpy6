@@ -41,5 +41,7 @@ de l'emsdk 4.0.9 de la recette Qt (`wasm/README.md`) : les deux versions d'emscr
   emcc 5.0.3, Python 3.14.8 (`FORKS/pyxel-wasm/versions.txt`).
 - Roue rebâtie (v2.9.9 non modifiée) : **218 s**, **4 778 149 octets** (kitao : 5 024 321), sha256 `d5af1112…`, même
   nom ; sonde `fini`, CADENCE 68, VSYNC 33, noyau 2 040 images à 38,9 i/s (`w575/rebatie_kitao.*`).
+- Branche `qtpy6-vsync` (W574, 61c7cad) : 176 s, 4 778 571 octets, `pyxel.step` et `pyxel.vsync` présents dans
+  Pyodide, jeu Monkey à 48,7 i/s (`w575/vsync.*`).
 - Cache d'emscripten : emcc y pose un verrou même pour lire le port SDL2 ; créé en 755 par le compte qui télécharge,
   il est copié une fois par compte (`cache-emscripten-<compte>`, 727 Mo) par `construire_pyxel.sh`.

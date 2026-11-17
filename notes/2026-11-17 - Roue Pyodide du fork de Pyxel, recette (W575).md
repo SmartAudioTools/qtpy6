@@ -50,5 +50,18 @@ ajoute `pyxel.step()` (cadencement externe) ; il faut la roue Pyodide de cette b
   `w575/rebatie_kitao.*`) : identique en usage au niveau de cette mesure. Les « Supposé » ci-dessus sont levés :
   rustup, `-Zbuild-std` et le port SDL2 passent hors ligne.
 
+## Étape 2 jouée (17/11, 03:28–03:40) : branche `qtpy6-vsync` de W574
+- W574 : arbre `/DATA/Python/FORKS/pyxel`, branche `qtpy6-vsync`, révision 61c7cad (`pyxel.step() -> None`,
+  `pyxel.vsync(enabled=True) -> int`, Cargo.lock intact). Clone privé `FORKS/pyxel-wasm/src-vsync` (pour ne rien
+  écrire dans l'arbre de W574), même `construire_pyxel.sh`.
+- **Mesuré** : la roue se construit pour emscripten en 176 s, 4 778 571 octets, sha256 `c0ae0392…`
+  (`w575/roues/pyxel-2.9.9-cp311-abi3-emscripten_5_0_3_wasm32.whl`, `w575/construire-vsync.log`). Sonde (`w575/vsync.*`) :
+  `fini`, le noyau écrit `CADENCE noyau ('step', True, True)` (`pyxel.step` et `pyxel.vsync` existent dans Pyodide),
+  et le jeu Monkey tourne : 2 220 images à 48,7 i/s, CADENCE 71, VSYNC 32. L'appel de `step` par qtpy6 n'est pas de
+  cet item (W573).
+- Instrumentation : `w575/sonde_step.py` ajoute cette ligne au `spe_monkey.py` de l'`app.zip` du site PRIVÉ seulement
+  (le fichier du dépôt n'est pas touché).
+
 ## RESTE
-Étape 1 du README par le professeur, puis construction, sonde, roue de la branche W574 (`pyxel.step` vu par la sonde).
+Rien pour cet item. Pour l'employer : remplacer la roue de `essais/spyder/roues/` (même nom) par celle de `w575/roues/`
+quand W573 appelle `pyxel.step` ; cette décision ne m'appartient pas.
