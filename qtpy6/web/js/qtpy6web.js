@@ -148,7 +148,8 @@ export function ouvrir_boite_noire() {
     if (muet && !qt_muet) {
       const s = suspension;
       noter(`la boucle de Qt ne tourne plus depuis ${((Date.now() - boite.qt) / 1000).toFixed(1)} s (page vivante ; ` +
-            `suspendu=${s.suspendu} promettant=${s.promettant} tache=${s.tache} suspensions=${s.suspensions} refus=${s.refus})`);
+            `suspendu=${s.suspendu} promettant=${s.promettant} tache=${s.tache} suspensions=${s.suspensions} refus=${s.refus})` +
+            (s.detruit ? ` ; mort en détruisant ${s.detruit} (garde des destructions différées)` : ""));
     } else if (!muet && qt_muet) noter("la boucle de Qt tourne de nouveau");
     qt_muet = muet; visible = vu;
     boite.vivant = Date.now();
@@ -377,7 +378,7 @@ function sans_menu(conteneur) {
 // minuteries à 0 ms de Qt (sinon sa boucle d'envoi des événements natifs attend une minuterie qui ne viendrait jamais).
 // PySide/PyQt rendent le GIL autour de processEvents : le reprendre pour sauver l'état de Python, le rendre pendant la
 // suspension (les autres entrées en ont besoin), le reprendre et le rendre de nouveau à la reprise.
-export const suspension = { promettant: false, tache: false, qtEnTache: false, suspendu: false, suspensions: 0, refus: 0, M: null };
+export const suspension = { promettant: false, tache: false, qtEnTache: false, suspendu: false, suspensions: 0, refus: 0, M: null, detruit: "" };
 function boucles_qt() {
   globalThis.Asyncify ??= { handleAsync: f => f(), makeAsyncFunction: f => f };
   const minuteries = new Map();  // id → fonction, des setTimeout à 0 ms : le repli sans suspension en tire celles de Qt

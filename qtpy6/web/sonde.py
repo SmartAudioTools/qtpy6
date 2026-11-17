@@ -360,11 +360,20 @@ class Blink:
         self.ws = websocket.create_connection(page["webSocketDebuggerUrl"], suppress_origin=True)
         self.n = 0
 
+    DELAI = 60  # secondes sans réponse avant d'abandonner : sans borne, une page gelée figeait la sonde (un rejeu 2 h muet)
+
     def cdp(self, methode, **params):
+        import websocket  # noqa: PLC0415
+
         self.n += 1
         self.ws.send(json.dumps({"id": self.n, "method": methode, "params": params}))
+        fin = time.monotonic() + self.DELAI  # une échéance, pas un délai par recv : un événement sans id ne la repousse pas
         while True:
-            r = json.loads(self.ws.recv())
+            try:
+                self.ws.settimeout(max(fin - time.monotonic(), 0.01))
+                r = json.loads(self.ws.recv())
+            except websocket.WebSocketTimeoutException:
+                raise TimeoutError(f"{methode} : pas de réponse en {self.DELAI} s, la page ne répond plus") from None
             if r.get("id") == self.n:
                 if "error" in r:
                     raise RuntimeError(f"{methode} : {r['error']}")

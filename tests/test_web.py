@@ -1175,6 +1175,25 @@ def test_relais_comme_une_connexion_native():
 
 
 @greenlet_seul
+def test_garde_nomme_l_objet_qu_elle_detruit():
+    # Deux morts « function signature mismatch » dans garder (16-17/11/2026) sans dire quel objet : la boîte noire le lit
+    # dans suspension.detruit, posé avant la destruction et vidé après.
+    sortie = simule("""
+        from qtpy6.QtCore import Qt
+        from qtpy6.QtWidgets import QDialog
+        bloquant._pyodide_noter_destruction = lambda texte: print("détruit :", texte)
+        d = QDialog()
+        d.setObjectName("boite")
+        d.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        d.accepted.connect(lambda: print("lu"))
+        d.show()
+        d.accept()
+        tourner()
+    """)
+    assert sortie.splitlines() == ["lu", "détruit : QDialog « boite »", "détruit :"]
+
+
+@greenlet_seul
 def test_boites_suspendues_dans_un_slot():
     sortie = simule("""
         from qtpy6.QtCore import QTimer
@@ -1822,6 +1841,25 @@ def test_molette_un_roulement_par_image():
     wheel saturait le thread de la page, file de 4,8 s, retard et inertie (SmartTeacher W525, 10/11/2026)."""
     recu = molette_rafale()
     assert recu == {"n": 1, "somme": 180}, recu
+
+
+def test_sonde_blink_abandonne_une_page_gelee(monkeypatch):
+    """Une page dont le fil principal ne rend plus la main : ``Blink.cdp`` lève ``TimeoutError`` après ``DELAI`` au lieu
+    d'attendre sans fin (un rejeu de 2 h figé sans un mot, TODO Lecteur, page morte B1)."""
+    pytest.importorskip("websocket")
+    from qtpy6.web import sonde
+
+    monkeypatch.setattr(sonde.Blink, "DELAI", 5)
+    navigateur = sonde.Blink("data:text/html,<p>gel</p>", 400, 300)
+    try:
+        assert navigateur.execute_script("return 1") == 1
+        navigateur.cdp("Runtime.evaluate", expression="setTimeout(() => { for (;;) {} }, 0)")
+        debut = time.time()
+        with pytest.raises(TimeoutError, match="ne répond plus"):
+            navigateur.execute_script("return 2")
+        assert time.time() - debut < 30
+    finally:
+        navigateur.quit()
 
 
 def test_sonde_fait_ne_recouvre_pas_le_geste_suivant(monkeypatch):

@@ -65,6 +65,19 @@ def _pyodide_signaler(actif):
             s.qtEnTache = False
 
 
+def _pyodide_noter_destruction(texte):
+    """Pose dans qtpy6web.js (``suspension.detruit``) l'objet que la garde des destructions différées détruit, ou "" une
+    fois détruit : la boîte noire le dit si Pyodide meurt pendant cette destruction (« function signature mismatch » dans
+    ``garder``, deux morts chez des élèves les 16 et 17/11/2026, non reproduites)."""
+    try:
+        import js  # noqa: PLC0415
+    except ImportError:
+        return
+    s = getattr(js, "qtpy6Suspension", None)
+    if s is not None:
+        s.detruit = texte
+
+
 _pompe = []
 
 
@@ -431,7 +444,9 @@ def doubler_qtcore(ns):
         while retenus:
             objet = retenus.pop(0)
             if not mort(objet):
+                _pyodide_noter_destruction(f"{objet.metaObject().className()} « {objet.objectName()} »")
                 detruire(objet)
+                _pyodide_noter_destruction("")
 
     global _garde
     _garde = garder
