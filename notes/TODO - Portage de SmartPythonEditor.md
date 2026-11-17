@@ -399,6 +399,11 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
     **Contrainte de l'utilisateur (12/11/2026 19:42)** : « le profilage ne devra se faire que cette nuit à un moment
     où le CPU n'est pas utilisé et en concertation avec les autres sessions ». Session neuve ; banc
     `qtpy6_essais/w567/mesurer_demarrage.py` (option cProfile à ajouter).
+    **CLOS, W581, 17/11 (le professeur, 10:19 : « oui, clos l'item »)** : l'écart ne se reproduit pas. Vrai qtpy
+    223-228 ms, qtpy6 231-267 ms (médianes de 10, charge 13) ; `finish` 11 ms ; les trois quarts du surcoût de qtpy6
+    (≈ 75 ms) viennent de la création des types PySide6, que le vrai qtpy paie aussi. Aucun code changé ; garde
+    `tests/test_import_natif.py` (≤ 2 × PySide6 entier). Note `2026-11-17 - Import de qtpy6 en natif, mesure et
+    clôture (W581).md`.
 22. **Vitesse : démarrage de spe.py dans la page** (non attribué, plan de nuit : même contrainte du 12/11 19:42 que
     l'item 21). Professeur, 12/11 19:49, dans son Firefox : « le demarage est horriblement long ». Mesuré une fois
     (W566, sonde Firefox, 12/11 19:03, machine chargée : 8 sessions et Firefox concurrents) : durée totale 62,6 s, dont
