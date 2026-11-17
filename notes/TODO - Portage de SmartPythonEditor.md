@@ -60,7 +60,12 @@ Restent hors git, ignorés (`git check-ignore`), donc perdus si le dossier est n
 
 Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources / supposé.
 
-1. **Le triangle « Exécuter » (F5, `%runfile`) tue le noyau.** Obtenir un `%runfile` qui ne plante jamais.
+1. **[FAIT, W584, 17/11] Le triangle « Exécuter » (F5, `%runfile`) tue le noyau.** Obtenir un `%runfile` qui ne plante jamais.
+   - **Clos (W584, 17/11)** : le noyau survit grâce au patch pystate de Pyodide 314.0.7 en place (item 1 bis c. :
+     gcnu 12/12 et triangle 5/5 W579 ; triangle 3/3 sans parade W583 ; écran du professeur 17:22, noyau 6/6). La parade
+     `_doubler_gc` n'a JAMAIS été appliquée (`grep -rn _doubler_gc qtpy6/` → 0 ligne, 17/11) : rien à retirer, malgré
+     l'accord du professeur du 17/11 17:20 (« Oui, retirer maintenant »). Le .diff du 12/10 reste en note historique.
+     D2 close (D, patch). Ce qui meurt ensuite dans la page relève de 1 bis (« Plantage restant, côté PAGE »).
    - Cause (TODO son, « Suite du 12/10, 18 h 45 ») : passes AUTOMATIQUES du GC de Python 3.14 + piles JSPI entrelacées
      dans le Worker (fils de `threading_web`). Correctif écrit, mesuré, mis de côté : `preambule._doubler_gc`.
    - Existant : `grep _doubler_gc qtpy6/` → rien ; le patch est `notes/2026-10-12 - doublure gc (preambule, non
@@ -133,7 +138,12 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
      **EN PLACE (W583, 17/11 12:02)** : `exemple/pyodide/pyodide.asm.{wasm,mjs}` = `w579/dist` (wasm `72077364…`), lu
      par `essais/spyder/site/pyodide` et 16 sites d'essai ; original dans `qtpy6_essais/equipe/w583/pyodide_origine_20261117/`.
      `tests/test_web.py` 65/65. Note `notes/2026-11-17 - Pyodide patché dans le site (W583).md`.
-   - d. Signalement amont : texte prêt, relu par W583 (17/11), NON envoyé, dans la note W579 (gcnu + patch ; le second plantage n'y est
+   - d. **W584, 17/11 : NE PAS envoyer le texte de W579 tel quel** — Pyodide main a déjà le correctif (`pystate.c` :
+     `captureTaskState`/`restoreTaskState` sortent `current_frame` dans un `TaskState` du tas ; PR pyodide #6466 « Fix
+     segfault in GC when suspended thread's current_frame is walked », fusionnée 17/09/2026, étiquette « needs
+     backport » ; issue #6464 close le 12/11/2026). Au plus : demander sur #6466 le rétroportage en 314.x, gcnu.mjs
+     joint. Niveau : lu (pages de recherche GitHub et `pystate.c` de main), corps des issues non ouverts.
+     Ancien texte : texte prêt, relu par W583 (17/11), NON envoyé, dans la note W579 (gcnu + patch ; le second plantage n'y est
      pas). Signalement amont (Pyodide, et CPython si b. l'y situe) avec a. et c. Puis retirer la parade de l'item 1 si le
      patch suffit, ou la garder en la documentant comme redondance volontaire.
    - Existant : rien dans `qtpy6/` ; `outils_wasm/pyside6/build/` et `wasm/patches/` pour la construction. Niveau :
@@ -142,6 +152,27 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
      puis Firefox « Script terminated by timeout » dans un rappel `requestAnimationFrame` (`callPyObject`,
      pyodide-qt 0.29.3) → `NoGilError` → `index out of bounds` l. 1620043 ; page morte. Journal
      `qtpy6_essais/equipe/w583/ecran_1722_manuel/`. Non attribué.
+     **W584, 17/11 (interrompu à la demande du professeur, 17:36 : « consigne tout dans des TODO on reprendra plus
+     tard »)** — probablement PAS un plantage : un artefact de FERMETURE de Firefox.
+     · Le professeur confirme avoir fermé la fenêtre vers 17:24 (AskUserQuestion, 17/11) ; Firefox arrêté proprement
+       (« Marionette Stopped listening » 17:24:16 alors que la sonde avait `--delai 1800`). Niveau : mesuré + dit.
+     · Hors écran (`qtpy6_essais/equipe/w584/tri.sh sans 5`, 3 passes complètes sur 5, journaux dans `w584/`) et dans
+       les 6 passes de W583 : le « Script terminated by timeout » de pyodide-qt vient TOUJOURS après « Stopped
+       listening » (fin de la sonde). Le timeout précède NoGilError puis `index out of bounds` : la corruption est la
+       conséquence du script tué en plein wasm, pas l'inverse. Niveau : mesuré (9 passes).
+     · Qui tient la pile (écran 17:22, exports de `pyside_agrege.so` par `essais/spyder/gc_jspi/noms_wasm.py`) : le rAF
+       enveloppé par `qtpy6/web/__init__.py` `_dessiner_aussitot` (`vider`) → `callPyObject` →
+       `QCoreApplication::sendPostedEvents` → `QMainWindow::event` → `QWidget::event` → `QPainter::fillRect`. Aucun
+       `gc.collect` dans la pile. Niveau : mesuré (fonctions internes sans nom : pas de section « name »).
+     · Le défaut W576 n'existe pas dans la page : CPython 3.13.2 de Pyodide-PySide6 0.29.3 n'a ni `mark_stacks` ni
+       parcours de `current_frame` dans `Python/gc.c` (0 occurrence) ; `git apply --check` du patch pyodide314 sur
+       `/DATA/Python/outils_wasm/pyside6/sources/pyodide` (tag 0.29.3) ÉCHOUE (pystate.c:198, autre conception :
+       `threadstate_freelist`). Aucune reconstruction de Pyodide-PySide6 à demander. Niveau : lu dans les sources.
+     · RESTE : (1) finir les passes 4-5 et une passe TÉMOIN sans triangle ni jeu (chargement puis fermeture) pour
+       montrer le même trio à la fermeture seule ; (2) la sonde rend rc=1 et une Traceback à chaque passe w584 (lire
+       `w584/tri_sans_*.log`) ; (3) le timeout au DÉMARRAGE (`qtpy6web.js` l. 121-132/289-300, `avancer`, avant la
+       page) à expliquer (rechargement de la sonde ?) ; (4) note `notes/… - Plantage de la page après le triangle,
+       cause (W584).md` à écrire ; ETAT `qtpy6_essais/equipe/w584/ETAT.md`.
    - Piste (W553, 12/11) : dans 9 captures du 12/10, « Cannot enter a promising task » toujours par `pomper`
      (qtpy6web.js) → callPromising, puis « NoGilError » puis « index out of bounds » (monkey, ref, tri2). Option C non
      mesurée : `_garde_vie.run_forever` reste dans `run_sync` toute la vie du noyau (« pendant une suspension » = toujours).
@@ -450,6 +481,36 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
     l'essai lance aussi un `execute()` par `QTimer`, hors usage élève). Absent de la console (boîte d'erreur de Spyder
     seulement). Niveau : vu une fois. Journal `qtpy6_essais/equipe/w583/ecran.console.log`.
 
+
+24. **Pyxel web sur l'écran réel : images perdues ou doublées (≈ 20 à 30 %), vrai vsync** (W582, EN ATTENTE : le
+    professeur, 17/11 17:36, « consigne tout dans des TODO on reprendra ce sujet plus tard » ; rien de commité ;
+    journal complet `qtpy6_essais/equipe/w582/ETAT.md`). Pyodide patché sha256 72077364 pour toutes les mesures.
+    - **Mesuré (12:55, écran du professeur, 59 Hz)** : site 79 %, témoin 70 % d'images à 1 balayage ; rappel rAF en
+      retard méd 11,2 ms ; fin de draw du noyau méd 2,0 ms après le balayage ; réception par le pont méd 8,5 ms
+      (5,4–12,8) : elle chevauche l'instant du rappel, d'où une image tantôt avant tantôt après.
+    - **Correctif essayé, NON commité**, diff `qtpy6_essais/equipe/w582/correctif_W582.diff` (encore dans la copie de
+      travail : `memoire_partagee.py`, `socket_web.py`, `__init__.py`, `pyxel_web.py`, `spe_monkey.py`,
+      `tests/test_vsync_web.py`) : (a) doublure de `os.mkfifo` (tube de spyder_pyxel) dont le lecteur est réveillé
+      au début du rappel d'image (`self.qtpy6_avant_image`), `QSocketNotifier` qui émet aussitôt, `os.stat` du tube
+      vu du Worker ; (b) `memoire_partagee.reconcilier()` juste après `step()` dans `flip_web` (l'image attendait le
+      sommeil de l'image suivante). Tests 30/30 (test du tube rouge à HEAD).
+    - **Résultats, machine jamais calme** (le professeur, 17:26 : « la machine n'est pas assez calme pour conclure
+      quoi que ce soit ») : 16:31, charge ~6 : témoin 81 %, (a)+(b) 79 %, (b) seul 69 % ; avant, sous charge 7 à 33 :
+      témoin 32 à 63 %. Le témoin varie plus que tout effet mesuré : RIEN n'est conclu.
+    - **À la reprise, d'abord** : six passes alternées à charge < 2 (témoin, site, publication ×2 ; sites prêts :
+      `w582/construire_site.py [publication]`, page `w582/ecran_professeur.sh [site|publication|temoin]`).
+    - **Piste la plus proche du matériel** (avis du Superviseur, 17:33, raisonnement non mesuré) : OffscreenCanvas
+      transféré au Worker, rAF du Worker (Firefox le donne dans un DedicatedWorker), `pyxel.step()` puis blit du
+      tampon Pyxel : ni page, ni Qt, ni mémoire partagée entre le dessin et le compositeur. Pièges : le rAF du Worker
+      ne doit pas rentrer dans Python pendant un `callPromising` en vol (garde de 796dfde) ; le canevas DOM posé
+      par-dessus celui de Qt-WASM, suivi en géométrie et visibilité par la doublure du widget du jeu (règle CLAUDE.md) ;
+      vérifier que la roue du fork rend le tampon sans contexte WebGL. Avant toute doublure : sondage d'UNE heure
+      (rAF Worker + blit, images perdues/doublées sur 1000 rappels, machine calme).
+    - **Repli** : file d'une image, une sortie par rappel rAF (+16 ms de latence) ; ne corrige que les doublons.
+    - Pourquoi pas comme en 1992 (question du professeur) : l'horloge est déjà propagée (le Worker connaît la grille
+      des balayages) ; ce qui manque, c'est l'échéance : 4 ordonnanceurs en chaîne (Worker, fil de la page partagé avec
+      Qt et Python, Firefox, KWin), aucun ne garantit d'arriver avant le balayage.
+
 ## Décisions à prendre par l'utilisateur
 
 - **D1. Alias snake_case des signaux de qtpy6.** Options : (a) qtpy6 cesse d'aliasser les signaux (`_binding.py:154`) :
@@ -462,7 +523,8 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
   gardé partout et mis en pause par `gc.disable()` autour de chaque bascule de pile JSPI seulement (demande de
   l'utilisateur, 12/11 13:56 : « garder l'incrémental pour éviter de longues pauses ») ; C si la mesure la tient.
   **Décidé par l'utilisateur, 12/11 14:01 : (D) « correction de Pyodide et JSPI », item 1 bis ; la parade de l'item 1
-  n'est qu'un secours provisoire en attendant le patch, à retirer ensuite.**
+  n'est qu'un secours provisoire en attendant le patch, à retirer ensuite.** **Close (W584, 17/11)** : patch en place,
+  parade jamais appliquée, rien à retirer (item 1).
 - **D3. Widgets web** (zmq, « Correctif propre, à décider ») : doublure `QWebEngineView` assez légère pour la page de
   chargement, ou qtpy6 annonce l'absence de WebEngine (`WEBENGINE` de Spyder faux, Help et OnlineHelp en repli).
 - **D4. Liste des roues du Worker** (faisabilité, jalon 4, « propre au web » 1) : réglage commun sur
