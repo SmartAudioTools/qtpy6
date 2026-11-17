@@ -22,6 +22,7 @@ dans Python pendant que la cellule est suspendue)."""
 
 from __future__ import annotations
 
+import math
 import os
 import sys
 import time
@@ -74,39 +75,54 @@ def _cwd_du_jeu(avant: str) -> None:
 
 
 def _compteur_de_balayages() -> Any:
-    """Le compteur de balayages de la page (``memoire_partagee.BALAYAGES``), vu par ``Atomics`` ; ``None`` sans lui."""
+    """Le segment ``memoire_partagee.BALAYAGES`` de la page : ``lire(0)`` balayages comptés, ``lire(1)`` période en µs
+    (``Atomics``), ``lire(2)`` instant absolu du dernier balayage compté, en s ; ``None`` sans lui."""
     import js  # noqa: PLC0415
     from qtpy6.web.memoire_partagee import BALAYAGES  # noqa: PLC0415
     segments = getattr(js.self, "qtpy6_memoires", None)
     if segments is None or not segments.has(BALAYAGES):
         return None
-    a = js.Int32Array.new(segments.get(BALAYAGES))
-    return lambda i: js.Atomics.load(a, i)
+    sab = segments.get(BALAYAGES)
+    a, instant = js.Int32Array.new(sab, 0, 2), js.Float64Array.new(sab, 8, 1)
+    return lambda i: js.Atomics.load(a, i) if i < 2 else instant[0]
 
 
-def attendre_balayages(lire: Callable[[int], int], etat: dict[str, Any], dormir: Callable[[float], None] | None = None,
-                       horloge: Callable[[], float] = time.monotonic) -> bool:
-    """Synchro verticale (W572) : l'image Pyxel suivante part au balayage où elle sera montrée, pas à l'heure de
-    ``time.sleep``. Le noyau et la page comptaient chacun leur temps : à 60 i/s sur un écran de 60 Hz, une image sur trois
-    n'était jamais montrée (deux dans le même balayage) et une sur dix l'était deux fois (mesure de la note W572).
-    ``lire(0)`` : balayages comptés par la page ; ``lire(1)`` : leur période en µs. Chaque image dure ``round(hz / fps)``
-    balayages ; en retard, on repart du balayage courant. Faux si la page ne compte plus (onglet caché : plus de
-    ``requestAnimationFrame``) : l'appelant cadence alors au temps."""
+def _horloge() -> float:
+    """Le temps absolu du navigateur, en s : le même dans la page et dans le Worker (``timeOrigin`` + ``now``)."""
+    import js  # noqa: PLC0415
+    return (js.performance.timeOrigin + js.performance.now()) / 1000
+
+
+def attendre_balayages(lire: Callable[[int], float], etat: dict[str, Any], dormir: Callable[[float], None] | None = None,
+                       horloge: Callable[[], float] | None = None) -> bool:
+    """Synchro verticale : l'image Pyxel suivante part sur un balayage de l'écran, pas à l'heure de ``time.sleep``.
+    W572 : le noyau et la page comptaient chacun leur temps ; à 60 i/s sur un écran de 60 Hz, une image sur trois
+    n'était jamais montrée. W573 : caler le noyau sur le COMPTEUR des rappels ``requestAnimationFrame`` le faisait
+    tourner à la vitesse de la page, qui en saute quand son fil est chargé (écran réel : 35 i/s au lieu de 60, le jeu au
+    ralenti) ; il se cale donc sur la GRILLE de l'écran, l'instant du dernier balayage et la période, qui ne dépendent
+    pas des sauts. Chaque image dure ``round(hz / fps)`` balayages ; en retard de plus d'une demi-période, on repart du
+    balayage suivant. Un seul sommeil, sans scrutation (un sommeil de 1 ms en dure 2,6 dans le Worker, mesure W573).
+    Faux si la page ne balaie plus depuis 100 ms (onglet caché, fil figé) : l'appelant cadence alors au temps."""
     dormir = dormir or time.sleep  # lu à l'appel : la doublure du préambule (réconcilie la mémoire partagée) vient après l'import
-    if etat.get("fige") == lire(0):  # la page ne comptait déjà plus : ne pas réattendre à chaque image
+    horloge = horloge or _horloge
+    compte = lire(0)
+    if etat.get("fige") == compte:  # la page ne comptait déjà plus : ne pas réattendre à chaque image
         return False
     etat.pop("fige", None)
     periode = (lire(1) or 16_667) / 1e6
     n = max(1, round(1 / etat["fps"] / periode))
-    cible = etat.get("balayage", lire(0)) + n
-    fin = horloge() + n * periode + 0.1
-    while lire(0) - cible < 0:
-        if horloge() > fin:
-            etat.pop("balayage", None)
-            etat["fige"] = lire(0)
-            return False
-        dormir(0.001)  # JSPI : la page et le moteur de mémoire tournent pendant ce temps
-    etat["balayage"] = lire(0)
+    dernier, maintenant = lire(2), horloge()
+    if maintenant - dernier > 0.1:
+        etat.pop("cible", None)
+        etat["fige"] = compte
+        return False
+    cible = etat.get("cible")
+    rang = round(((maintenant if cible is None else cible + n * periode) - dernier) / periode)
+    if dernier + rang * periode < maintenant - periode / 2:  # image lourde : on repart du balayage suivant
+        rang = math.ceil((maintenant - dernier) / periode)
+    cible = etat["cible"] = dernier + rang * periode
+    if cible > maintenant:
+        dormir(cible - maintenant)  # JSPI : la page et le moteur de mémoire (qui envoie l'image) tournent pendant ce temps
     return True
 
 

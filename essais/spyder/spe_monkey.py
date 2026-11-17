@@ -83,6 +83,20 @@ M = dict(u=0.0, d=0.0, sd=0.0, sr=0.0, n=0, t=time.monotonic())
 _bc, _lot = js.BroadcastChannel.new("qtpy6-vsync"), []  # horloge du noyau : (image, instant absolu) vers la page, par 30
 def sleep_m(s):
     t = time.monotonic(); _sleep(s); M["sd"] += s; M["sr"] += time.monotonic() - t
+    _somm.append(time.monotonic() - t)
+_somm, _rev = [], []  # W573 : durée réelle de chaque sommeil ; réveils (balayage lu, instant absolu, sommeils de l attente)
+import qtpy6.web.pyxel_web as _pw
+_ab = _pw.attendre_balayages
+def ab_m(lire, etat, *a, **k):
+    n0 = len(_somm); r = _ab(lire, etat, *a, **k)
+    if r:
+        _rev.append([lire(0), js.performance.timeOrigin + js.performance.now(), len(_somm) - n0, etat.get("cible", 0) * 1000])
+        if len(_rev) >= 30:
+            js.BroadcastChannel.new("qtpy6-reveil").postMessage(js.JSON.parse(str(_rev))); _rev.clear()
+    return r
+_pw.attendre_balayages = ab_m
+def somm_q():
+    d = sorted(_somm[-600:]); return [round(d[int(p * (len(d) - 1))] * 1000, 2) for p in (.1, .5, .9)] if d else []
 def run_m(update, draw):
     def u():
         t = time.monotonic(); update(); M["u"] += time.monotonic() - t
@@ -96,7 +110,7 @@ def run_m(update, draw):
             T = time.monotonic(); dt = T - M["t"]
             _t(dict(images=M["n"], ips=round(60 / dt, 1), ms_image=round(dt * 1000 / 60, 1),
                     ms_update=round(M["u"] * 1000 / 60, 1), ms_draw=round(M["d"] * 1000 / 60, 1),
-                    ms_sommeil_demande=round(M["sd"] * 1000 / 60, 1), ms_sommeil_reel=round(M["sr"] * 1000 / 60, 1)))
+                    ms_sommeil_demande=round(M["sd"] * 1000 / 60, 1), ms_sommeil_reel=round(M["sr"] * 1000 / 60, 1), sommeil_1ms_reel_q10_50_90=somm_q()))
             M.update(u=0.0, d=0.0, sd=0.0, sr=0.0, t=T)
     return _run(u, d)
 pyxel.init, pyxel.run, time.sleep = init_h, run_m, sleep_m
@@ -135,6 +149,19 @@ def SUITE(main, rapport):  # noqa: N802
 VSYNC_JS = """
 window.vsync = {raf: [], passes: [], presentations: [], peint: 0, ecrit: 0, ecarts: [], noyau: []};
 requestAnimationFrame(function f(t) { vsync.raf.push(t); requestAnimationFrame(f); });
+// W573 : chaque top de balayage (valeur du compteur BALAYAGES après TOUS les rappels de l image, instant de l image,
+// instant de la lecture), les réveils du Worker, la durée et la fin (depuis le début de l image) de chaque écriture.
+Object.assign(vsync, {tops: [], reveils: [], ecr_duree: [], ecr_fin: []});
+requestAnimationFrame(function g(t) {
+  setTimeout(() => {
+    const s = self.qtpy6_memoires && self.qtpy6_memoires.get("qtpy6-balayages");
+    if (s) vsync.tops.push([Atomics.load(new Int32Array(s), 0), t, performance.now()]);
+  }, 0);
+  requestAnimationFrame(g);
+});
+new BroadcastChannel("qtpy6-reveil").onmessage = e => {
+  for (const [k, t, n, c] of e.data) vsync.reveils.push([k, t - performance.timeOrigin, n, c ? c - performance.timeOrigin : null]);
+};
 // Une écriture du canevas montre le dernier numéro peint : présenté au balayage de l image en cours (Qt-WASM n écrit
 // qu au requestAnimationFrame ; l écart à l instant de l image, gardé, le vérifie).
 for (const proto of [CanvasRenderingContext2D.prototype, OffscreenCanvasRenderingContext2D.prototype])
@@ -145,7 +172,9 @@ for (const proto of [CanvasRenderingContext2D.prototype, OffscreenCanvasRenderin
         const t = document.timeline.currentTime;
         vsync.presentations.push([t, vsync.peint]); vsync.ecarts.push(performance.now() - t); vsync.ecrit = vsync.peint;
       }
-      return vrai.apply(this, a);
+      const t0 = performance.now(), r = vrai.apply(this, a), t1 = performance.now();
+      vsync.ecr_duree.push(t1 - t0); vsync.ecr_fin.push(t1 - document.timeline.currentTime);
+      return r;
     };
   }
 new BroadcastChannel("qtpy6-vsync").onmessage = e => {
@@ -170,6 +199,23 @@ def horloges(main):
     memoire_partagee.ajouter_crochet(run_js("() => vsync.passes.push(performance.now())"))
     pont, H = get_bridge(), {"recus": [], "tours": [], "dernier": 0, "ecran": None}
     pont._timer.timeout.connect(lambda: H["tours"].append(js.performance.now()))
+    D = {"deliver": [], "paint": [], "t0": js.performance.now()}  # W573 : ce que coûte le pont au fil principal
+    vrai_deliver = pont._deliver
+
+    def deliver_m(canal):
+        t = js.performance.now()
+        vrai_deliver(canal)
+        D["deliver"].append(js.performance.now() - t)
+    pont._deliver = deliver_m
+
+    def mesurer_peinture(ecran):
+        classe, vrai_paint = type(ecran), type(ecran).paintEvent
+
+        def paint_m(self, e):
+            t = js.performance.now()
+            vrai_paint(self, e)
+            D["paint"].append(js.performance.now() - t)
+        classe.paintEvent = paint_m
 
     class Peinture(QObject):
         def eventFilter(self, objet, e):
@@ -184,6 +230,7 @@ def horloges(main):
         if H["ecran"] is None:
             H["ecran"] = main.get_plugin("pyxel_game").get_widget()._screens.get(canal)
             H["ecran"].installEventFilter(H["filtre"])
+            mesurer_peinture(H["ecran"])
     pont.sig_frame.connect(recu)
     cadre = js.document.createElement("pre")
     cadre.style.cssText = ("position:fixed;top:4px;right:4px;z-index:2147483647;margin:0;padding:6px;font:12px monospace;"
@@ -196,6 +243,35 @@ def horloges(main):
             return "—"
         q = lambda p: d[min(len(d) - 1, int(p * len(d)))]
         return f"méd {q(.5):.1f} ms, 10 % {q(.1):.1f}, 90 % {q(.9):.1f}, max {d[-1]:.1f} ({len(d) + 1})"
+
+    def quant(d):
+        d = sorted(d)
+        if not d:
+            return "—"
+        q = lambda p: d[min(len(d) - 1, int(p * len(d)))]
+        return f"méd {q(.5):.1f}, 10 % {q(.1):.1f}, 90 % {q(.9):.1f}, max {d[-1]:.1f} ({len(d)})"
+
+    def reveil(v):
+        """W573 : du top de balayage écrit par la page au réveil du Worker qui le lit, puis l'écriture du canevas."""
+        import bisect
+        tops = [tuple(x) for x in v.tops.to_py()]
+        rev = [tuple(x) for x in v.reveils.to_py()]
+        ks = [k for k, _, _ in tops]
+        lat_image, lat_lu, sautes = [], [], Counter()
+        visee = [tw - c for _, tw, _, c in rev if c is not None]
+        for k, tw, _, _ in rev:
+            i = bisect.bisect_left(ks, k)  # première image où le compteur valait k
+            if i < len(tops) and tops[i][0] == k and tw >= tops[i][1]:
+                lat_image.append(tw - tops[i][1]); lat_lu.append(tw - tops[i][2])
+        for (k1, *_), (k2, *_) in zip(rev, rev[1:]):
+            sautes[k2 - k1] += 1
+        return [f"réveil Worker − début de l image du top : {quant(lat_image)} ms",
+                f"réveil Worker − top lu par la page      : {quant(lat_lu)} ms",
+                f"balayages entre deux réveils : {dict(sorted(sautes.items()))}",
+                f"sommeils par attente : {quant([n for _, _, n, _ in rev])}",
+                f"réveil Worker − balayage visé (grille, W573) : {quant(visee)} ms",
+                f"écriture canevas, durée      : {quant(list(v.ecr_duree.to_py())[-3000:])} ms",
+                f"écriture canevas, fin depuis le début de l image : {quant(list(v.ecr_fin.to_py())[-3000:])} ms"]
 
     def bilan():
         v = js.vsync
@@ -221,6 +297,10 @@ def horloges(main):
                    f"reçues (sig_frame) : {ecarts([t for _, t in H['recus']])}",
                    f"requestAnimFrame   : {ecarts(raf)}",
                    f"écriture canevas après l image : max {ecart[-1] if ecart else 0:.1f} ms"]
+        lignes += reveil(v)
+        secs = (js.performance.now() - D["t0"]) / 1000
+        lignes += [f"pont _deliver : {quant(D['deliver'][-3000:])} ms ; {sum(D['deliver']) / secs / 10:.1f} % du fil",
+                   f"paintEvent écran : {quant(D['paint'][-3000:])} ms ; {sum(D['paint']) / secs / 10:.1f} % du fil"]
         cadre.textContent = "\\n".join(lignes)
         js.console.log("VSYNC " + " | ".join(lignes))
         return len(H["recus"])

@@ -173,6 +173,11 @@ def _plein_ecran(app):
                     and objet.inherits("QMainWindow") and objet.parent() is None):
                 if not principale:
                     principale.append(objet)
+                    # W577 : le filtre de TOUTE l'application coûtait un appel Python par événement (40 463 au démarrage
+                    # de SmartPythonEditor, 1,7 s profilées ; pendant un jeu Pyxel, chaque minuterie et chaque peinture) ;
+                    # la fenêtre trouvée, seul l'état de celle-ci compte.
+                    app.removeEventFilter(self)
+                    objet.installEventFilter(self)
                 if objet is principale[0] and not objet.windowState() & Qt.WindowState.WindowFullScreen:
                     QTimer.singleShot(0, lambda: remplir(objet))  # hors de l'événement en cours de traitement
             return False

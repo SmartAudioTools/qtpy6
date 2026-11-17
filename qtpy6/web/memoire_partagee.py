@@ -77,11 +77,18 @@ def enregistrer_worker(worker: Any) -> None:
 
 BALAYAGES = "qtpy6-balayages"
 _BALAYAGES_JS = """sab => {
-  const a = new Int32Array(sab);  // [0] : balayages de l'écran comptés par la page ; [1] : leur période, en µs
-  let avant;
+  // Int32 [0] : balayages comptés par la page ; [1] : période de l'écran, en µs ; Float64 (octet 8) : instant absolu (s)
+  // du dernier balayage compté. t est l'instant du balayage même quand le rappel arrive en retard (fil chargé) ; une
+  // image sautée par la page compte pour m périodes (W573 : ni la période ni la phase ne dépendent des sauts).
+  const a = new Int32Array(sab, 0, 2), instant = new Float64Array(sab, 8, 1);
+  let avant, p = 1000 / 60;
   const f = t => {
-    if (avant !== undefined && t - avant < 100) Atomics.store(a, 1, Math.round((t - avant) * 1000));  // pas le retour d'un onglet caché
-    avant = t; Atomics.add(a, 0, 1); requestAnimationFrame(f);
+    const d = t - avant;
+    if (d > 0 && d < 100) {  // pas le retour d'un onglet caché
+      p += (d / Math.max(1, Math.round(d / p)) - p) / 20;
+      Atomics.store(a, 1, Math.round(p * 1000));
+    }
+    avant = t; instant[0] = (performance.timeOrigin + t) / 1000; Atomics.add(a, 0, 1); requestAnimationFrame(f);
   };
   requestAnimationFrame(f);
 }"""
@@ -89,12 +96,13 @@ _BALAYAGES_JS = """sab => {
 
 def _balayages() -> None:
     """Page : le segment ``BALAYAGES``, compté à chaque ``requestAnimationFrame``, l'horloge de l'écran pour les Workers
-    (``pyxel_web`` y cale ses images au lieu de ``time.sleep`` : W572). Créé une fois, au premier Worker."""
+    (``pyxel_web`` y cale ses images au lieu de ``time.sleep`` : W572 ; sur la grille des balayages, W573). Créé une
+    fois, au premier Worker."""
     import js  # noqa: PLC0415
     if BALAYAGES in _SEGMENTS or not hasattr(js, "SharedArrayBuffer"):  # page non isolée : pas de segment du tout
         return
     from pyodide.code import run_js  # noqa: PLC0415
-    _GARDES.append(SharedMemory(BALAYAGES, create=True, size=8))
+    _GARDES.append(SharedMemory(BALAYAGES, create=True, size=16))
     run_js(_BALAYAGES_JS)(_SEGMENTS[BALAYAGES])
 
 
