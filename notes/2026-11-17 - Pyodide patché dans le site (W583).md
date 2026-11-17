@@ -99,5 +99,10 @@ choisis la meilleure option ».
   (capture `w583/ecran.png` à 17:18), aucune erreur Pyodide ni du Worker ni de la page dans la console (seulement le
   bruit de Firefox) ; « Failed to initialize a device » (son SDL) en console du noyau ; une boîte d'erreur de Spyder,
   `KeyError` dans `qtconsole _handle_execute_reply` (nouveau, TODO item 23). La console n'a qu'un `In [1]` : le professeur
-  n'a pas cliqué le triangle (17:20, « je n'ai pas appuyé sur le triangle ») ; seul le triangle automatique a tourné. **Noyau vivant pendant
+  n'a pas cliqué le triangle (17:20, « je n'ai pas appuyé sur le triangle ») ; seul le triangle automatique a tourné.
+  **17:22-17:24, triangle cliqué par le professeur** (`w583/ecran_1722_manuel/`) : **6 « JEU load OK »** (l'automatique
+  + 5 relances), noyau vivant à chaque fois. Puis la PAGE (pyodide-qt 0.29.3, pas le 314 du Worker) meurt : Firefox
+  « Script terminated by timeout » dans un rappel `requestAnimationFrame` → `callPyObject`, puis `NoGilError` et
+  `index out of bounds` (l. 1620043) : la signature de `tri_avec_1` et de la piste W553 (item 1 bis). Le patch règle le
+  noyau ; le plantage restant est côté page. **Noyau vivant pendant
   13 min de jeu, un seul triangle prouvé à l'écran** ; « plusieurs triangles » n'est prouvé que sans affichage (6/6).

@@ -138,6 +138,10 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
      patch suffit, ou la garder en la documentant comme redondance volontaire.
    - Existant : rien dans `qtpy6/` ; `outils_wasm/pyside6/build/` et `wasm/patches/` pour la construction. Niveau :
      supposé.
+   - **Plantage restant, côté PAGE (W583, 17/11, écran du professeur, Pyodide patché)** : noyau vivant 6/6 triangles,
+     puis Firefox « Script terminated by timeout » dans un rappel `requestAnimationFrame` (`callPyObject`,
+     pyodide-qt 0.29.3) → `NoGilError` → `index out of bounds` l. 1620043 ; page morte. Journal
+     `qtpy6_essais/equipe/w583/ecran_1722_manuel/`. Non attribué.
    - Piste (W553, 12/11) : dans 9 captures du 12/10, « Cannot enter a promising task » toujours par `pomper`
      (qtpy6web.js) → callPromising, puis « NoGilError » puis « index out of bounds » (monkey, ref, tri2). Option C non
      mesurée : `_garde_vie.run_forever` reste dans `run_sync` toute la vie du noyau (« pendant une suspension » = toujours).
