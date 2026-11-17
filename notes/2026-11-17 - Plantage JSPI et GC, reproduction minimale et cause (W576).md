@@ -107,6 +107,10 @@ bounds », `unreachable`, ou boucle = blocage). Ce n'est pas la « réserve de P
   correction en JS dans `pyodide.asm.mjs` (ce que fait `fabriquer_pyodide_patche.py`, ≈ 6 lignes utiles,
   offset +52 propre à 314.0.7 / CPython 3.14.2, à garder par une assertion de version), appliquée par la
   construction du site. Décision à prendre (voir ETAT W576) ; puis rejouer `sonde_tri.sh` SANS la parade de l'item 1.
+- **Décidé par le professeur, 17/11 03:27 : « non directement le C »** (voie JS écartée, même comme étape de test).
+  Patch préparé, non compilé : `qtpy6_essais/equipe/w576/pystate_masquer_cadres.diff` (`captureThreadState` rend une
+  petite structure {tstate, current_frame} et met `current_frame` à NULL ; `restoreThreadState` le rétablit ; aucun
+  changement du JS). Reconstruction à attribuer par le Superviseur (hors brief W576).
 - d. Signalement amont : Pyodide (le défaut est dans l'interaction de leur bascule avec `mark_stacks`), avec
   `gcnu.mjs` comme reproduction ; CPython n'est pas en faute.
 

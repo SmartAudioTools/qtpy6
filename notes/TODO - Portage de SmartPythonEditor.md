@@ -109,7 +109,8 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
      pendant la suspension, `fabriquer_pyodide_patche.py`) : 12/12 OK. Pas de « réserve de tstates périmés ».
      `handback_tstate == NULL` (l. 222) non reproduit. Note `notes/2026-11-17 - Plantage JSPI et GC, reproduction
      minimale et cause (W576).md` ; décision c. (C + reconstruction, ou même correctif en JS dans la construction du
-     site, sans reconstruction) dans `qtpy6_essais/equipe/w576/ETAT.md`.
+     site, sans reconstruction) : **le professeur, 17/11 03:27 : « non directement le C »** ; patch préparé, non
+     compilé : `qtpy6_essais/equipe/w576/pystate_masquer_cadres.diff`.
    - c. Patch Pyodide dans la chaîne de construction existante (`wasm/patches/`, même voie que
      `qtbase-wasm-defilement.patch` ; Pyodide-PySide6 0.29.3.7, release GitHub), reconstruire, rejouer a. puis le
      triangle (`sonde_tri.sh`) SANS la parade de l'item 1 : c'est le test qui échoue sans le correctif.
