@@ -69,6 +69,10 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
      du report). Application : aucun.
    - Essai : `sh essais/spyder/sonde_tri.sh` (Firefox visible avec WebGL, l'utilisateur clique le triangle) ;
      reproduction sans affichage : `spe_m4.py?…&bouton=1` (ignoré par git).
+     **Cassé depuis D4 (W559, constat W579 17/11)** : `spe_m4.py` remplace dans `spe.py` la ligne
+     `travailleur.configurer("./pyodide-qt/")`, retirée depuis → assertion au démarrage (5/5). Variante privée qui
+     tourne : `qtpy6_essais/equipe/w579/spe_m4_d4.py`. Sans WebGL (Firefox du bac), le jeu doit être lancé en
+     `headless=True`, sinon pyxel appelle `abort()` à l'`init` (W579).
    - Niveau : mesuré (triangle passé par l'utilisateur le 12/10 à 19 h 45 avec le patch).
    - Décision à prendre (section « Décisions », D2 : options A, B, C). Puis l'item 1 bis.
    - **W545, 12/11 14:15 (note `2026-11-12 - Doublure GC du Worker (W545).md`)** : parade factorisée avec `_ramasser`
@@ -113,11 +117,11 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
      compilé : `qtpy6_essais/equipe/w576/pystate_masquer_cadres.diff`.
    - c. **EN PARTIE (W579, 17/11)** : Pyodide du Worker = **314.0.7** (pas Pyodide-PySide6), reconstruit hors réseau
      avec `wasm/patches/pyodide314-pystate-masquer-cadres.patch` (cœur 35 s ; `qtpy6_essais/equipe/w579/`). gcnu
-     **12/12 vert patché, 11/12 rouge d'origine**. Triangle sans parade : **ROUGE** patché aussi (3/3,
-     `unreachable` dans `__stack_chk_fail` : canari de pile C écrasé, seconde corruption hors GC, cause non
-     établie) ; témoin d'origine rouge 2/2. Le triangle (`spe_m4.py`) est cassé depuis D4 (W559), variante privée.
-     Note `notes/2026-11-17 - Patch pystate de Pyodide compilé et rejoué (W579).md`. Reste : appelant de
-     `__stack_chk_fail`, puis rejouer le triangle.
+     **12/12 vert patché, 11/12 rouge d'origine**. Triangle sans parade : le `__stack_chk_fail` des premières passes
+     était `abort()` appelé par `pyxel_binding` à l'`init` NON headless (pas de WebGL dans le Firefox du bac : même
+     arrêt hors triangle, `spe_monkey.py&headless=0`), pas Pyodide. **Jeu en headless : triangle VERT 5/5 patché,
+     rouge 3/4 d'origine** (`index out of bounds`).
+     Note `notes/2026-11-17 - Patch pystate de Pyodide compilé et rejoué (W579).md`.
    - d. Signalement amont : texte prêt, NON envoyé, dans la note W579 (gcnu + patch ; le second plantage n'y est
      pas). Signalement amont (Pyodide, et CPython si b. l'y situe) avec a. et c. Puis retirer la parade de l'item 1 si le
      patch suffit, ou la garder en la documentant comme redondance volontaire.

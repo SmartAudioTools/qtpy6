@@ -50,27 +50,31 @@ chacun (`w579/gcnu_rouge_vert.sh`, bilans `w579/gcnu/`) :
 Plantage : `RuntimeError: memory access out of bounds`. 12/12 vert contre 11/12 rouge : le test échoue sans le
 correctif et passe avec. Niveau : mesuré, 24 exécutions.
 
-## b. Triangle sans parade — ROUGE : le patch ne suffit pas
+## b. Triangle sans parade — VERT avec le jeu en headless
 
 - `spe_m4.py` (W545) ne tourne plus depuis D4 (W559) : il remplaçait dans `spe.py` la ligne
-  `travailleur.configurer("./pyodide-qt/")`, retirée depuis (assertion au démarrage, 5/5). Variante PRIVÉE, dans
-  `w579/site/app.zip` seulement (`w579/spe_m4_d4.py`, original gardé en `w579/app.zip.origine`) : `configurer("./pyodide/",
-  roues de la page + pyxel)` posé avant l'exec final. `essais/spyder/spe_m4.py` n'est pas touché ; **le triangle de
-  `sonde_tri.sh` est cassé pour tous depuis D4** (à réparer par qui possède l'essai).
-- Pyodide patché, 3 passes (`tri_patche_1`, `tri_g2b_1..2`) : le noyau démarre (`K4`), « M4 triangle », puis le Worker
-  meurt : `RuntimeError: unreachable executed`, offset 5614094, les 3 fois.
-- Pyodide d'origine, même site privé, 2 passes (`tri_origine_1..2`) : meurt aussi (`index out of bounds` puis
-  `unreachable executed`).
-- Fonction nommée : relien du cœur avec `PYODIDE_SYMBOLS=1` (-g2, mêmes objets, 20 s, `w579/dist_g2/`) ; même offset de
-  plantage que le binaire -g0 (le code ne change pas, la section `name` s'ajoute à la fin). `w579/fonction_a.py` :
-  **5614094 = `__stack_chk_fail`** — le canari de protection de pile d'une fonction C a été écrasé. Les offsets du
-  Pyodide d'origine (binaire de la release, autre disposition) ne se nomment pas avec cette carte.
-- Lecture (supposé, non prouvé) : une seconde corruption de la pile C sous JSPI, hors GC — une fonction suspendue dont
-  la zone de pile C est prêtée à une autre tâche par `StackState` et rendue abîmée, ou réécrite pendant la suspension.
-  Le patch pystate retire la lecture du GC (prouvé par a.) mais pas celle-ci. Firefox ne journalise pas la pile du
-  Worker : prochaine étape, appelant de `__stack_chk_fail` (`-sSTACK_OVERFLOW_CHECK=2` ou pile capturée dans
-  `travailleur.js` via `onerror` du Worker, ou reproduction sous Node avec run_sync imbriqués + lecture pyxel).
-- Niveau : mesuré, 5 passes ; cause de ce second plantage non établie.
+  `travailleur.configurer("./pyodide-qt/")`, retirée depuis (assertion au démarrage, 5/5). Variante PRIVÉE
+  (`w579/spe_m4_d4.py`) : `configurer("./pyodide/", roues de la page + pyxel)` posé avant l'exec final.
+  `essais/spyder/spe_m4.py` n'est pas touché ; ligne ajoutée au TODO, item 1, « Essai ».
+- Premières passes (jeu tel quel) : le Worker meurt dans les deux Pyodide, `unreachable executed` à 5614094 en patché.
+  Relien -g2 (`PYODIDE_SYMBOLS=1`, `w579/dist_g2/`) + `w579/fonction_a.py` : 5614094 = `__stack_chk_fail`, appelé par
+  `abort` ← `__abort_js` ← module annexe `pyxel_binding` (`wasm-function[361]`, pile capturée par `w579/pile_worker.py`
+  dans `travailleur.js` privé), juste après `PyInit_pyxel_binding` et l'avertissement SDL sur le canevas.
+- **Ce n'est ni Pyodide ni le GC** (mesuré) : même arrêt avec `gc.disable()` dans le noyau (2/2), avec la roue vsync
+  de W575 (2/2), et HORS triangle : `spe_monkey.py&cadence=1&headless=0` → `Aborted()` ; `&headless=1`, même Pyodide
+  patché → 128 lignes CADENCE, aucun arrêt. Le Firefox du bac n'a pas de WebGL : pyxel appelle `abort()` à l'`init`
+  avec rendu. Fichier et ligne côté pyxel non nommés (son .so n'a pas de section `name`) ; inutile pour le portage :
+  avec WebGL (Firefox de l'utilisateur), le jeu s'initialise.
+- Triangle avec le jeu en `headless=True` (copie privée `w579/site_monkey/monkey/`, .pyxres relu par XHR si absent :
+  le `%runfile` du triangle ne voyait que le .py), sondes `SITE=site_monkey w579/tri.sh` :
+
+| Pyodide | passes | résultat |
+|---|---|---|
+| 314.0.7 patché (`w579/dist`) | 5 (`tri_hlr_1..3`, `tri_hlr2_1..2`) | 5/5 : `load OK`, jeu affiché, aucune erreur wasm |
+| 314.0.7 d'origine (`w579/dist_origine`) | 4 (`tri_hlo_1..2`, `tri_hlo2_1..2`) | 3/4 : `index out of bounds` (2120315) avant le load |
+
+- Niveau : mesuré, 9 passes ; la passe `tri_hlr_3` a été coupée par le délai du lot après `load OK` (journal de
+  sonde tronqué, console complète jusque-là). Le patch C supprime le plantage du triangle ; témoin rouge 3/4.
 
 ## Incident : Pyodide partagé écrasé deux minutes
 
