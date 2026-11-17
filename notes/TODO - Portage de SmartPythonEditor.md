@@ -72,7 +72,15 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
      **Cassé depuis D4 (W559, constat W579 17/11)** : `spe_m4.py` remplace dans `spe.py` la ligne
      `travailleur.configurer("./pyodide-qt/")`, retirée depuis → assertion au démarrage (5/5). Variante privée qui
      tourne : `qtpy6_essais/equipe/w579/spe_m4_d4.py`. Sans WebGL (Firefox du bac), le jeu doit être lancé en
-     `headless=True`, sinon pyxel appelle `abort()` à l'`init` (W579).
+     `headless=True`, sinon pyxel appelle `abort()` à l'`init` (W579). **W583 (17/11)** : `spe_m4.py` du site toujours
+     périmé (AssertionError l. 13 sur le zip reconstruit) ; page d'écran du professeur =
+     `qtpy6_essais/equipe/w583/spe_ecran.py` (spe_m4 de W579 SANS forçage headless) ajouté à une copie de `site/app.zip`
+     (`w583/site_ecran`, `w583/ecran_professeur.sh`). Non corrigé ici.
+   - **W583, 17/11, Pyodide patché EN PLACE (item 1 bis c.)** : triangle sans affichage, jeu headless, 3 passes chacun :
+     **sans parade 3/3 noyau vivant** (« JEU load OK », K4 du noyau, aucune erreur du Worker), **avec parade 3/3** ;
+     erreurs côté PAGE (pyodide-qt 0.29.3, hors patch : promisingApply, fatal shibokensupport, NoGilError puis
+     `index out of bounds`) 2/3 sans, 1/3 avec : non significatif. La parade n'apporte rien de mesurable au noyau avec le
+     patch. **D2 reste au professeur** (aucune décision prise). Note `notes/2026-11-17 - Pyodide patché dans le site (W583).md`.
    - Niveau : mesuré (triangle passé par l'utilisateur le 12/10 à 19 h 45 avec le patch).
    - Décision à prendre (section « Décisions », D2 : options A, B, C). Puis l'item 1 bis.
    - **W545, 12/11 14:15 (note `2026-11-12 - Doublure GC du Worker (W545).md`)** : parade factorisée avec `_ramasser`
@@ -122,7 +130,10 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
      arrêt hors triangle, `spe_monkey.py&headless=0`), pas Pyodide. **Jeu en headless : triangle VERT 5/5 patché,
      rouge 3/4 d'origine** (`index out of bounds`).
      Note `notes/2026-11-17 - Patch pystate de Pyodide compilé et rejoué (W579).md`.
-   - d. Signalement amont : texte prêt, NON envoyé, dans la note W579 (gcnu + patch ; le second plantage n'y est
+     **EN PLACE (W583, 17/11 12:02)** : `exemple/pyodide/pyodide.asm.{wasm,mjs}` = `w579/dist` (wasm `72077364…`), lu
+     par `essais/spyder/site/pyodide` et 16 sites d'essai ; original dans `qtpy6_essais/equipe/w583/pyodide_origine_20261117/`.
+     `tests/test_web.py` 65/65. Note `notes/2026-11-17 - Pyodide patché dans le site (W583).md`.
+   - d. Signalement amont : texte prêt, relu par W583 (17/11), NON envoyé, dans la note W579 (gcnu + patch ; le second plantage n'y est
      pas). Signalement amont (Pyodide, et CPython si b. l'y situe) avec a. et c. Puis retirer la parade de l'item 1 si le
      patch suffit, ou la garder en la documentant comme redondance volontaire.
    - Existant : rien dans `qtpy6/` ; `outils_wasm/pyside6/build/` et `wasm/patches/` pour la construction. Niveau :
@@ -240,6 +251,9 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
 7. **Hébergement : un lien pour les élèves.** spe.py tourne par la sonde et dans le Chromium de l'utilisateur ; le lien
    reste à faire (zmq, « config de référence », Points ouverts). Manifeste d'application écarté pour l'instant, « à
    ajouter à l'hébergement ». Niveau : mesuré (Firefox sonde, Chromium par l'utilisateur pour `print`).
+   **Avant tout hébergement (W583, 17/11)** : `essais/spyder/site/app.zip` embarquait un journal de session
+   (`qtpy6/.claude/conversations/*.jsonl`, 2 Mo) et `spyder_pyxel/.claude/`, `.mcp.json` ; site NON hébergé, donc rien
+   n'est sorti. Filtres : `assembler.py` (W577) et `construire_site.py` (W583) ; garde `tests/test_site_sans_session.py`.
 8. **Pyxel, chargement des ressources** : `load("projet_monkey.pyxres")` → `Failed to open file` malgré l'injection
    (TODO son, « Suite du 12/10, 19 h 45 »). À vérifier : fichier dans le FS du noyau, cwd à `init`, `load` par chemin
    absolu. Essai : `spe_monkey.py?jeu=…`. Fichiers : `qtpy6/web/pyxel_web.py`. Niveau : mesuré (échec), cause supposée.
@@ -423,6 +437,14 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
     - fork Spyder : feuilles de style qstylizer 7,5–8,5 s profilées ; `traitlets.getmembers` des classes de qtconsole
       (14,2 s profilées avant, alias exclus) ; import du plugin débogueur 19 s profilées ; points d'entrée des plugins
       (`importlib.metadata` 1,5 s) ; `QDockWidget.setWidget` 2,0 s.
+
+23. **`KeyError` dans `qtconsole/frontend_widget.py:485` `_handle_execute_reply`** (non attribué ; professeur, 17/11 17:18,
+    page d'écran de W583 avec Firefox visible, Pyodide patché, après le triangle automatique et « JEU load OK ») :
+    `self._request_info['execute'].pop(msg_id)` → `KeyError: '…_42_4'`, pile `bloquant.py:340 relais` → `_relayer` →
+    `executer` → `base_frontend_mixin._dispatch` → `shell.py:1320`. Le `pop` vient APRÈS `self.executed.emit(msg)` : une
+    même réponse traitée deux fois, ou rentrée pendant une suspension d'un slot d'`executed` (hypothèse, non prouvée ;
+    l'essai lance aussi un `execute()` par `QTimer`, hors usage élève). Absent de la console (boîte d'erreur de Spyder
+    seulement). Niveau : vu une fois. Journal `qtpy6_essais/equipe/w583/ecran.console.log`.
 
 ## Décisions à prendre par l'utilisateur
 

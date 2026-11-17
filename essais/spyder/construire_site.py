@@ -127,6 +127,8 @@ def assembler(archive, fichiers=(), **k):
             if nom and (EXCLURE_TESTS in f"/{nom}" or nom in self.NameToInfo  # un doublon : la 1re écriture gagne
                         or ("/" not in nom and not nom.endswith(".py")) or nom.endswith(".log")):  # du dossier des essais,
                 return  # pas les captures de sa racine ni aucun journal, que les sondes des autres workers réécrivent
+            if nom and (any(c.startswith(".") for c in nom.split("/")) or nom.endswith(".jsonl")):  # ni fichier de session
+                return  # (.claude/, .mcp.json, .git*) : spyder_pyxel/ passe par fichiers=, hors du filtre de l'assembleur (W583)
             super().write(chemin, nom, *a, **kk)
 
     compile_original = _assembler.py_compile.compile
