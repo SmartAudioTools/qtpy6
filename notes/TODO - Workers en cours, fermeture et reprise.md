@@ -69,18 +69,6 @@ relancer plus tard »). Dépôt : `/DATA/Python/qtpy6` (git, HEAD 48883d3 à 19:
   professeur voit la construction d'après a0cc393 ou une régression (commits a0cc393..HEAD sur qtpy6/web/) ; corriger
   dans psutil_web ou demander la ligne à W564 (sous_processus.py) ; ligne TODO sous 18 ; commit ; vu par le professeur.
 
-## W570 — item 10 (fenêtre d'erreur de l'explorateur, `bloquant._relayer`, model None) + regard item 19
-
-- session_id : `520911b3-6795-4a10-bcd1-aad3f4b588d2` ; brief `briefs/Worker_570.md` ; ETAT `w570/ETAT.md` ; budget 2 pts.
-- Fichiers : `qtpy6/web/bloquant.py`, `tests/test_web.py` (fin du fichier). Trace du professeur :
-  `w566/trace_professeur_explorateur_1952.txt`. Note : `notes/2026-11-12 - Explorateur, modele None dans _relayer
-  (W570).md` (pas encore écrite).
-- Non commité (75 lignes, `w570/en_cours_0024.diff`) : test rouge `test_directory_loaded_reporte_comme_en_natif` ;
-  correctif `bloquant.py` (`_est_destroyed` → `_mode`, `_relayer` : `r.direct or (r.direct is False and _peut_suspendre())`).
-- RESTE : test rouge sur le code d'avant puis vert, suite test_web, sonde spe.py, professeur dans son Firefox
-  (lancement : `python -m http.server 8765` dans `essais/spyder/site`, `firefox 'http://localhost:8765/index.html?script=spe.py'`),
-  lui demander aussi si le rapporteur n'affiche plus rien d'autre (item 19, inscrire sous 19), ligne TODO sous 10, commit.
-
 ## Fermés aujourd'hui (pour mémoire, pas à relancer)
 
 W547, W557, W559 (983750ef), W560, W562, W563 (fb621fe7), W566 (c0b44394, 6 commits dont 48883d3), W567 (c16eeed0,

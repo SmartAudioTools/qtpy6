@@ -1855,3 +1855,19 @@ def test_sonde_fait_ne_recouvre_pas_le_geste_suivant(monkeypatch):
     page = Page()
     assert sonde.attendre(page, "fini", time.time() + 2, pilote=True) == "fini"
     assert page.gestes == ["fichier", "cliquer"]
+
+
+@greenlet_seul
+def test_directory_loaded_reporte_comme_en_natif():
+    # W570, item 10 du TODO Portage. Qt wasm n'a pas de fil (QT_FEATURE_thread -1) : le QFileInfoGatherer émet
+    # directoryLoaded SUR PLACE, dans le fetchMore que la vue appelle en pleine mise en page ; en natif, émis par son fil,
+    # il arrive en connexion différée. Le slot de Spyder (resizeColumnToContents) y parcourait des index en construction :
+    # index.model() None. Même émis dans une entrée promettante, son slot passe donc après l'émission, comme en natif.
+    sortie = simule("""
+        from qtpy6.QtWidgets import QFileSystemModel
+        m = QFileSystemModel()
+        m.directoryLoaded.connect(lambda chemin: print("recu", chemin))
+        principal(lambda: (m.directoryLoaded.emit("/x"), print("apres emit")))
+        tourner()
+    """)
+    assert sortie.splitlines() == ["apres emit", "recu /x"]

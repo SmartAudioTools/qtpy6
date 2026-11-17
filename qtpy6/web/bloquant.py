@@ -230,11 +230,18 @@ _connect_qt = []  # le connect de la liaison, avant la doublure
 _expediteur = []  # l'expéditeur d'un slot reporté, que ``QObject.sender()`` rend pendant son exécution
 
 
-def _est_destroyed(signal):
-    """``signal`` est-il ``destroyed`` ? Son nom n'a pas la même porte : ``signal.signal`` sous PyQt6 (``"2destroyed(QObject*)"``),
-    ``str()`` seulement sous PySide6 (``"<PySide6.QtCore.SignalInstance destroyed() at 0x…>"``)."""
-    nom = getattr(signal, "signal", None) or str(signal).split(" ")[1]
-    return nom.lstrip("2").startswith("destroyed(")
+def _mode(signal):
+    """Quand le relais appelle les slots de ``signal`` : True sur place (``destroyed`` : après, trop tard), None toujours
+    reportés (``directoryLoaded``), False selon l'entrée (``_relayer``). Le nom du signal n'a pas la même porte :
+    ``signal.signal`` sous PyQt6 (``"2destroyed(QObject*)"``), ``str()`` seulement sous PySide6
+    (``"<PySide6.QtCore.SignalInstance destroyed() at 0x…>"``).
+
+    ``directoryLoaded`` : Qt wasm n'a pas de fil, et le QFileInfoGatherer de QFileSystemModel l'émet sur place, dans le
+    ``fetchMore`` que la vue appelle en pleine mise en page ; en natif, son fil l'émet et il arrive en connexion différée.
+    Appelé sur place, le slot d'un explorateur (Spyder : ``resizeColumnToContents``) parcourait des index en construction,
+    ``index.model()`` None (item 10 du TODO Portage, 12/11/2026)."""
+    nom = (getattr(signal, "signal", None) or str(signal).split(" ")[1]).lstrip("2")
+    return True if nom.startswith("destroyed(") else None if nom.startswith("directoryLoaded(") else False
 
 
 def _mort():
@@ -364,7 +371,7 @@ def doubler_qtcore(ns):
         # Un QEvent passé en argument (Spyder : sig_key_pressed.emit(event) dans keyPressEvent) ne vit que le temps du
         # dispatch, et l'émetteur lit son accept() juste après l'emit : reporté, le slot lirait un objet C++ détruit et
         # son accept() viendrait trop tard (une touche insérée deux fois, Entrée perdue). Il s'exécute donc sur place.
-        if r.direct or _peut_suspendre() or any(isinstance(a, QEvent) for a in args):
+        if r.direct or (r.direct is False and _peut_suspendre()) or any(isinstance(a, QEvent) for a in args):
             return executer(r, exp, args)  # appelé tout de suite, mais par le relais : sender() n'y vaut que par _expediteur
         _plus_tard(executer, r, exp, args)
         return None
@@ -382,11 +389,11 @@ def doubler_qtcore(ns):
     def connect_(self, slot, *args, **kwargs):
         if isinstance(slot, (signal_lie, types.BuiltinFunctionType, types.BuiltinMethodType)) or not callable(slot):
             return connect(self, slot, *args, **kwargs)
-        return connect(self, relayer(slot, _est_destroyed(self)), *args, **kwargs)  # destroyed : après, trop tard
+        return connect(self, relayer(slot, _mode(self)), *args, **kwargs)
 
     def disconnect_(self, *args):
         if len(args) == 1 and callable(args[0]) and not isinstance(args[0], signal_lie):
-            r = existant(args[0], _est_destroyed(self))
+            r = existant(args[0], _mode(self))
             if r is not None:  # sinon, connecté sans relais (le connect de la liaison, ``_connect_qt``), ou pas du tout
                 return disconnect(self, r.appel)
         return disconnect(self, *args)

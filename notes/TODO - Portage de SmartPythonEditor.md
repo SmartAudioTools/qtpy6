@@ -264,6 +264,13 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
       Elle passe par `bloquant.py:354 __call__` → `_relayer:368` → `executer:377`, puis par `explorer.py:1009`
       (lambda `resizeColumnToContents(0)`) → `initStyleOption:184/193` `model.isDir` sur un modèle None. Piste à établir :
       un relais de `bloquant` qui rejoue le lambda alors que le modèle n'est plus là. Non attribué.
+    - **[FAIT, W578, 17/11]** (reprend le correctif non commité de W570) Reproduit hors écran, 5 sur 5 : sous-dossier
+      déjà listé, déplié, mise en page lancée depuis une entrée promettante → `fetchMore` dans `QTreeViewPrivate::layout`
+      émet `directoryLoaded` sur place (Qt wasm sans fil), slot exécuté par le relais pendant que les lignes suivantes
+      sont vides → `QModelIndex()` au délégué. Correctif `bloquant.py` : slots de `directoryLoaded` toujours reportés,
+      comme la connexion différée native (5 OK sur 5) ; `tests/test_explorateur_web.py`. Reste : vu par le professeur
+      dans SON Firefox (`qtpy6_essais/equipe/w578/ecran_professeur.sh`), et lui demander l'item 19 (rapporteur muet ?).
+      Note `2026-11-17 - Explorateur, fenêtre d'erreur fugitive et relais de bloquant (W578).md`.
 11. **Interruption d'un calcul qui ne dort jamais.** Aujourd'hui : signal livré au prochain `time.sleep` (a4ee0c6).
     Pour un vrai arrêt : `setInterruptBuffer` sur SharedArrayBuffer (grep → 0). La page EST isolée depuis f02c16c
     (`sw.js`, `isoler`) : voir « Contradictions ». Niveau : lu.
