@@ -54,8 +54,13 @@ balayage. Le jeu garde alors sa propre horloge et les sauts d'images restent.
 - Suite du greffon : 8 étapes vertes. Les 9 autres sont hors d'atteinte dans ce Python
   (`qtawesome` et `spyder` absents, paquet `tests` masqué par site-packages), et l'étaient déjà
   avant.
-- **Non vérifié** : le patch Rust n'est pas compilé. Le shell de nuit n'a pas de réseau, et le
-  clone a été lancé hors bac par le professeur.
+- Patch Rust **compilé hors ligne** (chaîne de W575), fork `/DATA/Python/FORKS/pyxel`,
+  branche `qtpy6-vsync`, c398acf + 61c7cad. Roue native construite.
+- Sonde hors écran : step 0,01 ms sans vsync, flip 32,3 ms.
+  Défaut trouvé : le swap offscreen ne bloque pas. Corrigé par une garde d'une demi-période :
+  33 ms avec vsync.
+- Greffon avec le VRAI Pyxel du fork et des balayages simulés à 60 Hz :
+  33,6 ms par image, image publiée lue.
 - **Non vérifié** : que les UpdateRequest suivent vraiment l'écran sous Wayland.
 - **Non vérifié** : l'histogramme des balayages. Le script est prêt :
   `w574/mesure_balayages.py`.
