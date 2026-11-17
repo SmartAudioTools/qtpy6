@@ -473,13 +473,18 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
       (14,2 s profilées avant, alias exclus) ; import du plugin débogueur 19 s profilées ; points d'entrée des plugins
       (`importlib.metadata` 1,5 s) ; `QDockWidget.setWidget` 2,0 s.
 
-23. **`KeyError` dans `qtconsole/frontend_widget.py:485` `_handle_execute_reply`** (non attribué ; professeur, 17/11 17:18,
+23. **`KeyError` dans `qtconsole/frontend_widget.py:485` `_handle_execute_reply`** [EN COURS W585, diagnostic] (professeur, 17/11 17:18,
     page d'écran de W583 avec Firefox visible, Pyodide patché, après le triangle automatique et « JEU load OK ») :
     `self._request_info['execute'].pop(msg_id)` → `KeyError: '…_42_4'`, pile `bloquant.py:340 relais` → `_relayer` →
     `executer` → `base_frontend_mixin._dispatch` → `shell.py:1320`. Le `pop` vient APRÈS `self.executed.emit(msg)` : une
     même réponse traitée deux fois, ou rentrée pendant une suspension d'un slot d'`executed` (hypothèse, non prouvée ;
     l'essai lance aussi un `execute()` par `QTimer`, hors usage élève). Absent de la console (boîte d'erreur de Spyder
     seulement). Niveau : vu une fois. Journal `qtpy6_essais/equipe/w583/ecran.console.log`.
+    **Cause MESURÉE (W585, 17/11)** : ni double réponse ni slot d'`executed` ; le handler suspend (JSPI) dans
+    `iopub_channel.flush()` (`Future.result` doublé), le `kernel_info_reply` du démarrage passe pendant ce temps →
+    `_started_channels` → `reset(clear=True)` remplace le dict → `pop` sur le nouveau. Dépend de l'`execute()` du `QTimer`
+    (1/5 avec, 0/3 sans). Reste : doublure proposée (`flush` sur place dans la page, ≈ 1 point), accord du Superviseur
+    demandé. Note `notes/2026-11-17 - KeyError qtconsole _handle_execute_reply, cause (W585).md`.
 
 
 24. **Pyxel web sur l'écran réel : images perdues ou doublées (≈ 20 à 30 %), vrai vsync** (W582, EN ATTENTE : le
