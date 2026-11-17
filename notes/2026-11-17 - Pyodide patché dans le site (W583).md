@@ -98,6 +98,6 @@ choisis la meilleure option ».
   écran du professeur** : triangle automatique → `%runfile` (In [1]), jeu Monkey affiché et animé dans le panneau Pyxel
   (capture `w583/ecran.png` à 17:18), aucune erreur Pyodide ni du Worker ni de la page dans la console (seulement le
   bruit de Firefox) ; « Failed to initialize a device » (son SDL) en console du noyau ; une boîte d'erreur de Spyder,
-  `KeyError` dans `qtconsole _handle_execute_reply` (nouveau, TODO item 23). La console n'a qu'un `In [1]` : les clics
-  suivants n'ont pas donné de second `%runfile` (le jeu tourne toujours, le noyau est occupé). **Noyau vivant pendant
+  `KeyError` dans `qtconsole _handle_execute_reply` (nouveau, TODO item 23). La console n'a qu'un `In [1]` : le professeur
+  n'a pas cliqué le triangle (17:20, « je n'ai pas appuyé sur le triangle ») ; seul le triangle automatique a tourné. **Noyau vivant pendant
   13 min de jeu, un seul triangle prouvé à l'écran** ; « plusieurs triangles » n'est prouvé que sans affichage (6/6).
