@@ -80,3 +80,54 @@ Item 1 bis (patch Pyodide/JSPI, `w545/ETAT.md`), reste de l'item 3 (3 SignalAlia
 (import par l'alias 760 ms contre 165, banc `qtpy6_essais/w567/mesurer_demarrage.py` + cProfile ; contrainte du
 professeur 19:42 : profilage de nuit seulement, CPU libre), item 22 (démarrage de spe.py 62,6 s, `w566/sonde_spe.log`),
 item 7 (hébergement, professeur), item 17, Vitesse 3/4/6.
+
+## État au 17/11/2026 17:55 (Superviseur qtpy6 [5fd449]) — nuit et journée du 17/11, tout en pause
+
+Consigne du professeur, 17:36 et 17:51 : « consigne tout dans un ou plusieurs TODO pour pouvoir reprendre plus tard ».
+Chronologie complète : `/DATA/Python/qtpy6_essais/equipe/tableau_de_bord.md` (une ligne par événement, 03:27 → 17:51) ;
+briefs `qtpy6_essais/equipe/briefs/Worker_572.md` à `Worker_585.md` ; ETAT de chaque worker dans `qtpy6_essais/equipe/w5xx/`.
+Commits qtpy6 de la période : 2319f2e (W572) → 2e60039 (W584) + W585 (85c223f et son commit final), aucun poussé.
+
+### Fermés (pour mémoire, pas à relancer)
+- W572 2319f2e, W573 0755f7e, W574 3b9ca08/8d340df, W575 5e71ddc/557c87b/7df5008, W576 e1f2e8e/392b3df, W577 4174b11,
+  W578 5721323, W579 4d24a5e/735cd91, W580 c46d5ba, W581 4c2efef (item 21 clos), W583 d49df6e/461f852/bddb37f,
+  W584 2e60039 (item 1 CLOS, 1 bis diagnostiqué), W582 (item 24, dans 2e60039), W585 (item 23, diagnostic seul).
+- Hors qtpy6 : fork Pyxel `/DATA/Python/FORKS/pyxel` branche `qtpy6-vsync` (c398acf, 61c7cad : `pyxel.step`,
+  `pyxel.vsync`), dépôt local SANS remote ; greffon natif spyder_pyxel 2601e46 (tube `<shm>.vsync.fifo`), non poussé.
+- SmartTeacher W744 796dfde dans qtpy6 (pompe : 16 octets de pile C rendus par callPromising), à pousser avec le reste.
+
+### Où en est chaque sujet
+- **Saccades Pyxel web (demande 02:45)** : chaîne complète (grille des balayages W573, fork step/vsync W574, roue W575,
+  jonction W580 : 60,0 i/s hors écran). Sur l'écran réel 19-30 % d'images perdues ou doublées : item **24** du TODO
+  Portage (W582 : mesures, correctif B tube + QSocketNotifier NON retenu, diff `qtpy6_essais/equipe/w582/correctif_W582.diff`
+  sha256 f6f83444…, avis du Superviseur : OffscreenCanvas transféré au Worker + rAF du Worker, sondage d'une heure avant
+  toute doublure, repli file d'une image). Question du professeur 17:32 « l'approche la plus proche du hardware » :
+  réponse à l'item 24, décision non prise. Reprise : machine calme (charge < 2), six passes alternées.
+- **Portage SPE web (demande 02:46)** : item 1 CLOS (W584 : la parade `_doubler_gc` n'a jamais été appliquée, diff en
+  note) ; item 1 bis : Pyodide 314.0.7 patché EN PLACE dans `exemple/pyodide` (W579 patch `wasm/patches/pyodide314-pystate-
+  masquer-cadres.patch`, W583 ; original `qtpy6_essais/equipe/w583/pyodide_origine_20261117/`, sources
+  `/DATA/Python/outils_wasm/pyodide314/pyodide`, produit `w579/dist/`) ; plantage de page après triangles = fermeture de
+  Firefox (probable) ; amont déjà corrigé (pyodide PR #6466, issue #6464 close 12/11) : signalement 1 bis d. SANS OBJET,
+  au plus demander le rétroportage 314.x. Item 19 : rien à faire (W566). Item 21 clos (4c2efef). Item 22 : mesuré sur
+  écran 12,6 s (`w577/ecran_professeur.sh`, post_visible_setup 7,0 s, tas 535 Mio), non attribué. Item 23 : cause
+  mesurée (W585), doublure `flush` synchrone proposée (≈ 1 pt), décision du professeur en attente. Item 7 : le site
+  embarquait un journal de session (`construire_site.py` corrigé d49df6e, `tests/test_site_sans_session.py`).
+- **Site des élèves** `essais/spyder/site/app.zip` : reconstruit depuis HEAD le 17/11 16:30 (W583), à reconstruire par
+  `qtpy6_essais/equipe/w572/maj_zip.py` après tout commit, jamais depuis l'arbre de travail.
+
+### À trancher par le professeur (rien ne bouge d'ici là)
+1. Diffs NON commités d'autrui, toujours dans l'arbre (156 lignes, `git diff --stat`) : `essais/spyder/env18_spe.py`,
+   `qtpy6/web/js/travailleur.js`, `qtpy6/web/preambule.py` (hunk W564DBG : casse le noyau IPython, le site se construit
+   depuis HEAD pour l'éviter), `qtpy6/web/travailleur.py`, `tests/test_noyau_web.py` : commit ou corbeille.
+2. Item 24 (vsync) : sondage OffscreenCanvas 1 h, ou file d'une image, ou rien.
+3. Item 23 : doublure `flush` synchrone (W585, ≈ 1 pt) ou rien.
+4. Publier le fork Pyxel (branche `qtpy6-vsync`, aucun remote) ou le garder local.
+5. Erreur « pompe : A value of type undefined … was thrown as an error » vue à 15,6 s sur la page w577 (site d'AVANT
+   796dfde) : à revoir sur un site d'après ; non reproduite depuis.
+6. Pousser qtpy6 et spyder_pyxel (le professeur pousse ; commande dans le message du Superviseur).
+
+### Faits d'environnement utiles à la reprise
+Le shell du bac n'a AUCUN réseau (téléchargements par le professeur, `w579/telecharger_pyodide314.sh`) ; le Firefox du
+bac n'a pas de WebGL (Pyxel non headless y meurt en `__stack_chk_fail` : ce n'était ni Pyodide ni la pompe) ; les
+mesures d'écran ne valent rien sous charge (huit sessions SmartTeacher le 17/11 après-midi, charge 9-14) ;
+`w573/ecran_professeur.sh` n'existe pas (les pages d'écran : w577, w578, w580, w582, w583).

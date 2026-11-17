@@ -473,7 +473,7 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
       (14,2 s profilées avant, alias exclus) ; import du plugin débogueur 19 s profilées ; points d'entrée des plugins
       (`importlib.metadata` 1,5 s) ; `QDockWidget.setWidget` 2,0 s.
 
-23. **`KeyError` dans `qtconsole/frontend_widget.py:485` `_handle_execute_reply`** [EN COURS W585, diagnostic] (professeur, 17/11 17:18,
+23. **`KeyError` dans `qtconsole/frontend_widget.py:485` `_handle_execute_reply`** [W585 : diagnostic fait, décision en attente] (professeur, 17/11 17:18,
     page d'écran de W583 avec Firefox visible, Pyodide patché, après le triangle automatique et « JEU load OK ») :
     `self._request_info['execute'].pop(msg_id)` → `KeyError: '…_42_4'`, pile `bloquant.py:340 relais` → `_relayer` →
     `executer` → `base_frontend_mixin._dispatch` → `shell.py:1320`. Le `pop` vient APRÈS `self.executed.emit(msg)` : une
@@ -483,8 +483,21 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
     **Cause MESURÉE (W585, 17/11)** : ni double réponse ni slot d'`executed` ; le handler suspend (JSPI) dans
     `iopub_channel.flush()` (`Future.result` doublé), le `kernel_info_reply` du démarrage passe pendant ce temps →
     `_started_channels` → `reset(clear=True)` remplace le dict → `pop` sur le nouveau. Dépend de l'`execute()` du `QTimer`
-    (1/5 avec, 0/3 sans). Reste : doublure proposée (`flush` sur place dans la page, ≈ 1 point), accord du Superviseur
-    demandé. Note `notes/2026-11-17 - KeyError qtconsole _handle_execute_reply, cause (W585).md`.
+    (1/5 avec, 0/3 sans ; passes headless `qtpy6_essais/equipe/w585/passe.sh <étiq> qt=1|qt=0 120`, site privé
+    `w585/site` par `w585/construire.py`, sonde `w585/sonde_w585.py` ; a1 : `ER> n=2 … FL> … RESET clear=True
+    executing=True … ER! KeyError dict@<autre>`). **Statut : décision du professeur en attente** (17/11 17:51 : « consigne
+    tout […] pour pouvoir reprendre plus tard »).
+    **Pour reprendre** — doublure proposée, dans qtpy6 seulement : `jupyter_client.threaded.ThreadedZMQSocketChannel.flush`
+    remplacé dans la page par `self._flush()` sur place (la page est le fil de l'ioloop : rien à attendre, donc aucune
+    suspension, donc aucun handler intercalé, comme en natif). Posée à l'import de `jupyter_client.threaded` par un chercheur
+    `sys.meta_path` comme `pyxel_web._Chercheur` (factoriser, ne pas dupliquer) ; ≈ 25 lignes + test, ≈ 1 point.
+    Test rouge à écrire d'abord (`tests/test_web.py`) : un handler appelle `flush()`, un second message est livré pendant
+    ce temps ; rouge = le second passe AVANT la fin du premier, vert = après. Puis rejouer `w585/passe.sh` qt=1 ×5 : aucun
+    `RESET` entre `FL>` et `FL<`, 0 `ER!`. Ce que ça casse peut-être : un `flush` synchrone appelé pendant une suspension
+    JSPI d'une autre pile livre les messages iopub sur place (`_livrer` → relais : reportés si on ne peut pas suspendre),
+    et `flush(timeout)` ne borne plus rien ; à vérifier sur la sortie des `print` d'un `%runfile` (ordre sortie/invite).
+    Alternative écartée : sérialiser les slots d'un receveur suspendu dans `bloquant._relayer` (interblocage avec
+    `attendre_signal` et les dialogues). Note `notes/2026-11-17 - KeyError qtconsole _handle_execute_reply, cause (W585).md`.
 
 
 24. **Pyxel web sur l'écran réel : images perdues ou doublées (≈ 20 à 30 %), vrai vsync** (W582, EN ATTENTE : le
