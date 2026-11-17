@@ -1,0 +1,40 @@
+GC 1 SUSP 1 pyodide 314.0.7 node v26.11.1 variante entrelace fils 4 tours 200
+Pyodide has suffered a fatal error. Please report this to the Pyodide maintainers.
+The cause of the fatal error was:
+RuntimeError: memory access out of bounds
+    at wasm://wasm/0249d42a:wasm-function[4219]:0x205a4a
+    at wasm://wasm/0249d42a:wasm-function[4215]:0x204445
+    at wasm://wasm/0249d42a:wasm-function[4227]:0x20625b
+    at wasm://wasm/0249d42a:wasm-function[4293]:0x20cf3c
+    at wasm://wasm/0249d42a:wasm-function[3792]:0x1d11dd
+    at wasm://wasm/0249d42a:wasm-function[3793]:0x1d1b0b
+    at wasm://wasm/0249d42a:wasm-function[1217]:0xbebbe
+    at wasm://wasm/0249d42a:wasm-function[1262]:0xc092b
+    at wasm://wasm/0249d42a:wasm-function[1212]:0xbe815
+    at wasm://wasm/0249d42a:wasm-function[1214]:0xbe9f3 {
+  pyodide_fatal_error: true
+}
+Stack (most recent call first):
+  File "/lib/python314.zip/pyodide/webloop.py", line 504 in call_later
+  File "/lib/python314.zip/pyodide/webloop.py", line 440 in call_soon
+  File "/lib/python314.zip/asyncio/events.py", line 94 in _run
+  File "/lib/python314.zip/pyodide/webloop.py", line 491 in run_handle
+node:internal/process/promises:324
+    triggerUncaughtException(err, true /* fromPromise */);
+    ^
+
+RuntimeError: memory access out of bounds
+    at wasm://wasm/0249d42a:wasm-function[4219]:0x205a4a
+    at wasm://wasm/0249d42a:wasm-function[4215]:0x204445
+    at wasm://wasm/0249d42a:wasm-function[4227]:0x20625b
+    at wasm://wasm/0249d42a:wasm-function[4293]:0x20cf3c
+    at wasm://wasm/0249d42a:wasm-function[3792]:0x1d11dd
+    at wasm://wasm/0249d42a:wasm-function[3793]:0x1d1b0b
+    at wasm://wasm/0249d42a:wasm-function[1217]:0xbebbe
+    at wasm://wasm/0249d42a:wasm-function[1262]:0xc092b
+    at wasm://wasm/0249d42a:wasm-function[1212]:0xbe815
+    at wasm://wasm/0249d42a:wasm-function[1214]:0xbe9f3 {
+  pyodide_fatal_error: true
+}
+
+Node.js v26.11.1

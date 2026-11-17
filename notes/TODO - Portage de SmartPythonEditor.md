@@ -97,14 +97,19 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
    ne peut pas réparer Pyodide / JSPI ? », « ajoute la reproduction minimale et le patch Pyodide au TODO »). La parade
    de l'item 1 tient l'éditeur en vie ; la cause, elle, n'est que supposée (GC jeune parcourant les piles des
    `PyThreadState` périmés de la réserve de Pyodide) et doit être PROUVÉE avant tout patch.
-   - a. Reproduction minimale : Pyodide nu sous Node, piles JSPI entrelacées (deux fils coopératifs qui s'attendent),
-     `gc.set_threshold(1, 1, 1)` ; le 12/10 l'essai `$TMPDIR/gcnu.mjs` (perdu) ne plantait PAS encore. Ce que la
-     mesure de l'option C (item 1) apprend sur la fenêtre critique (la bascule seule, ou toute suspension) guide
-     l'écriture. Garder le script dans `essais/spyder/gc_jspi/` (pas `$TMPDIR`), avec la version de Pyodide, de Node
-     et la trace du plantage.
-   - b. Cause prouvée : localiser dans les sources de Pyodide / CPython (bascule JSPI, `pystate`, `_PyThreadState` de
-     la réserve) ce que la passe jeune lit de faux ; le dire avec le fichier et la ligne, niveau « lu dans les sources
-     + mesuré ».
+   - a. **FAIT (W576, 17/11)** : `essais/spyder/gc_jspi/gcnu.mjs` (Pyodide 314.0.7, Node 26.11.1) plante 3/3 avec
+     4 entrées promettantes suspendues par `run_sync`, seuils par défaut compris ; OK sans suspension, en série, GC
+     coupé, passe jeune ou pleine seule ; plante avec la passe incrémentale seule (`gc.collect(1)`). Bilans et trace
+     dans `gc_jspi/traces/`.
+   - b. **FAIT (W576, 17/11), lu dans les sources + mesuré sous Node** : `mark_stacks` (CPython 3.14.2 `gc.c`, passe
+     incrémentale seulement) suit le `current_frame` du PyThreadState d'une tâche SUSPENDUE (`pystate.c` 314.0.7 :
+     `captureThreadState` l. 204 le laisse dans la liste de l'interpréteur) jusqu'à son cadre d'entrée
+     (`_PyEntryFrame entry`, pile C de `_PyEval_EvalFrameDefault`), zone que `StackState` (`pyodide.asm.mjs`) a rendue
+     à une autre tâche : en-tête réécrit dans 471 suspensions sur 800. Correctif émulé en JS (`current_frame = NULL`
+     pendant la suspension, `fabriquer_pyodide_patche.py`) : 12/12 OK. Pas de « réserve de tstates périmés ».
+     `handback_tstate == NULL` (l. 222) non reproduit. Note `notes/2026-11-17 - Plantage JSPI et GC, reproduction
+     minimale et cause (W576).md` ; décision c. (C + reconstruction, ou même correctif en JS dans la construction du
+     site, sans reconstruction) dans `qtpy6_essais/equipe/w576/ETAT.md`.
    - c. Patch Pyodide dans la chaîne de construction existante (`wasm/patches/`, même voie que
      `qtbase-wasm-defilement.patch` ; Pyodide-PySide6 0.29.3.7, release GitHub), reconstruire, rejouer a. puis le
      triangle (`sonde_tri.sh`) SANS la parade de l'item 1 : c'est le test qui échoue sans le correctif.

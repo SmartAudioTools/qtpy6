@@ -1,0 +1,2 @@
+entrelace 4 x 200 GC=1 SUSP=1 #1 rc=1 RuntimeError: memory access out of bounds
+entrelace 4 x 200 GC=1 SUSP=1 #2 rc=124 timeout/aucune

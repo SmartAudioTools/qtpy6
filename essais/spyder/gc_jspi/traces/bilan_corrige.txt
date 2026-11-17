@@ -1,0 +1,12 @@
+entrelace 4 x 200 GC=1 SUSP=1 #1 rc=0 OK fini
+entrelace 4 x 200 GC=1 SUSP=1 #2 rc=0 OK fini
+entrelace 4 x 200 GC=1 SUSP=1 #3 rc=0 OK fini
+entrelace 4 x 200 GC=incr SUSP=1 #1 rc=0 OK fini
+entrelace 4 x 200 GC=incr SUSP=1 #2 rc=0 OK fini
+entrelace 4 x 200 GC=incr SUSP=1 #3 rc=0 OK fini
+imbrique 8 x 200 GC=1 SUSP=1 #1 rc=0 OK fini
+imbrique 8 x 200 GC=1 SUSP=1 #2 rc=0 OK fini
+imbrique 8 x 200 GC=1 SUSP=1 #3 rc=0 OK fini
+entrelace 16 x 300 GC=1 SUSP=1 #1 rc=0 OK fini
+entrelace 16 x 300 GC=1 SUSP=1 #2 rc=0 OK fini
+entrelace 16 x 300 GC=1 SUSP=1 #3 rc=0 OK fini
