@@ -12,6 +12,11 @@ set +u   # emsdk_env.sh lit des variables non définies
 # shellcheck disable=SC1091
 source "$R/emsdk/emsdk_env.sh" >/dev/null
 set -u
+# Cache d'emscripten (port SDL2) : emcc y pose un verrou même pour le lire, et telecharger_pyxel.sh l'a créé en 755
+# depuis un autre compte. Une copie par compte, écrivable (727 Mo, une fois).
+EM_CACHE="$R/cache-emscripten-$(id -un)"
+export EM_CACHE
+[ -d "$EM_CACHE" ] || cp -r "$EMSDK/upstream/emscripten/cache" "$EM_CACHE"
 debut=$(date +%s)
 make -C "$SRC" clean-wasm build-wasm
 # shellcheck disable=SC2012

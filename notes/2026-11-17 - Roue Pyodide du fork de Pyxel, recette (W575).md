@@ -38,5 +38,17 @@ ajoute `pyxel.step()` (cadencement externe) ; il faut la roue Pyodide de cette b
   corrigés dans les scripts : `set -u` levé autour d'`emsdk_env.sh` (stderr visible), racine rendue absolue, toolchain
   installée depuis les sources (`rust-toolchain.toml`), roue la plus récente de `dist/`.
 
+## Étape 1 jouée (17/11, 03:09–03:20)
+- Le professeur a lancé `telecharger_pyxel.sh` depuis son compte : OK du premier coup (versions dans le README).
+- Premier `construire_pyxel.sh` en échec : `pyxel-core/build.rs:238` panique, `emcc --cflags --use-port=sdl2` ne rend
+  rien parce que `emcc: error: cache directory ".../emscripten/cache" is not writable` (créé en 755 par l'autre compte,
+  masque ACL r-x). Correction : `EM_CACHE` vers une copie par compte. Alternative écartée : demander un `chmod -R g+w`
+  au professeur — à refaire après chaque `embuilder`, et le cache partagé entre comptes se verrouille mal.
+- **Mesuré** : roue rebâtie en 218 s, 4 778 149 octets (kitao 5 024 321 : écart de taille non expliqué, chemins
+  remappés et LTO thin de la même recette ; le contenu Python est le même nom de roue), sonde `fini`, CADENCE 68,
+  VSYNC 33, noyau 2 040 images à 38,9 i/s contre 1 740 à 41,9 avec la roue de kitao (`w575/depart_kitao.*`,
+  `w575/rebatie_kitao.*`) : identique en usage au niveau de cette mesure. Les « Supposé » ci-dessus sont levés :
+  rustup, `-Zbuild-std` et le port SDL2 passent hors ligne.
+
 ## RESTE
 Étape 1 du README par le professeur, puis construction, sonde, roue de la branche W574 (`pyxel.step` vu par la sonde).

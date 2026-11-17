@@ -37,4 +37,9 @@ de l'emsdk 4.0.9 de la recette Qt (`wasm/README.md`) : les deux versions d'emscr
 ## Mesuré
 
 - Départ, roue de kitao (sha256 `a6f45776…`) : sonde `fini` en 53 s, CADENCE 68, VSYNC 38 (`w575/depart_kitao.*`).
-- Durée de construction et taille de la roue rebâtie : à mesurer (pas de réseau la nuit du 17/11, étape 1 non jouée).
+- Téléchargement (17/11 03:09, par le professeur) : maturin 1.16.0, ruff 0.17.5, rustc 1.99.0-nightly (2026-08-11),
+  emcc 5.0.3, Python 3.14.8 (`FORKS/pyxel-wasm/versions.txt`).
+- Roue rebâtie (v2.9.9 non modifiée) : **218 s**, **4 778 149 octets** (kitao : 5 024 321), sha256 `d5af1112…`, même
+  nom ; sonde `fini`, CADENCE 68, VSYNC 33, noyau 2 040 images à 38,9 i/s (`w575/rebatie_kitao.*`).
+- Cache d'emscripten : emcc y pose un verrou même pour lire le port SDL2 ; créé en 755 par le compte qui télécharge,
+  il est copié une fois par compte (`cache-emscripten-<compte>`, 727 Mo) par `construire_pyxel.sh`.
