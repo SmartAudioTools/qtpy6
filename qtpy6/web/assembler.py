@@ -15,7 +15,7 @@ from pathlib import Path
 def assembler(archive, fichiers=(), paquets=(), distributions=(), polices=(), dossier_polices="polices", pyc=None,
               exclure=(), compression=zipfile.ZIP_DEFLATED):
     """Écrit le zip ``archive``. ``fichiers`` : ``{nom_dans_le_zip: chemin}``. ``paquets`` : des noms de modules
-    importables, dont le dossier entier (``.py`` et données, sans ``__pycache__``) est pris là où il est, ce qui vaut pour
+    importables, dont le dossier entier (``.py`` et données, sans ``__pycache__`` ni fichier ou dossier caché) est pris là où il est, ce qui vaut pour
     une installation éditable. ``distributions`` : des paquets installés pris avec leurs métadonnées, pour ceux dont les
     points d'entrée servent (les extensions de ``markdown``). ``polices`` : des fichiers ``.ttf``/``.otf``, sous
     ``dossier_polices`` (ce qu'``application(polices=…)`` charge). ``pyc`` : chaque ``.py`` accompagné de son
@@ -49,7 +49,8 @@ def assembler(archive, fichiers=(), paquets=(), distributions=(), polices=(), do
         for nom in paquets:
             racine = Path(importlib.import_module(nom).__file__).parent
             for p in sorted(racine.rglob("*")):
-                if p.is_file() and "__pycache__" not in p.parts:
+                relatif = p.relative_to(racine).parts  # ni __pycache__, ni dossier caché (.claude d'une session : 1,9 Mio, W577)
+                if p.is_file() and "__pycache__" not in relatif and not any(n.startswith(".") for n in relatif):
                     ecrire(p, f"{nom}/{p.relative_to(racine).as_posix()}")
         for nom in distributions:
             d = importlib.metadata.distribution(nom)

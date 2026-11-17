@@ -22,6 +22,7 @@ import re
 import string
 import sys
 import warnings
+import weakref
 
 from . import API_NAME, PYQT6, PYSIDE6
 
@@ -99,6 +100,31 @@ _prepared = set()
 _BINDING = {API_NAME, 'shiboken6', 'Shiboken', 'builtins'}
 
 
+_PYTHON = weakref.WeakKeyDictionary()  # class -> its Python side, see _python_side; a dynamic class can still go
+
+
+def _python_side(owner, again=False):
+    """The classes of `owner`'s MRO that are not the binding's, the names they
+    define, whether one has `__getattr__`, their dicts and the sum of their
+    sizes (what tells that a name was set since). Once per class, not once per alias and
+    class: traitlets reads every name of each new qtconsole class (getmembers),
+    and the sort of the MRO for each of the ~400 aliases was the first cost of
+    qtpy6 in Spyder's start in the page (W577, item 22: 5 µs per alias against
+    0.16 for the camelCase name, natively). Not seen: a name deleted then
+    another set on the same class, sizes unchanged (rare; was already so for
+    classes without __getattr__ before)."""
+    if not again:
+        try:
+            return _PYTHON[owner]
+        except KeyError:
+            pass
+    python = tuple(c for c in owner.__mro__ if c.__module__.partition('.')[0] not in _BINDING)
+    dicts = tuple(vars(c) for c in python)  # live views: their len() follows the class
+    names = set().union(*dicts)
+    side = _PYTHON[owner] = (python, names, '__getattr__' in names, dicts, sum(map(len, dicts)))
+    return side
+
+
 class _Alias:
     """A snake_case alias that gives way to the application: the name defined
     by a Python class of the instance's MRO placed after the Qt class (a mixin
@@ -106,37 +132,41 @@ class _Alias:
     Python ``__getattr__`` gives (a delegating proxy: Spyder's FrameWebView ->
     its WebView's set_font) - what the name would be without qtpy6 - and only
     else the Qt method. A plain class attribute would mask both."""
-    __slots__ = ('qt', 'name', 'plain')
+    __slots__ = ('qt', 'name', 'get', 'signe')
 
     def __init__(self, qt, name):
-        self.qt, self.name, self.plain = qt, name, set()  # plain: the classes where only Qt has the name
+        self.qt, self.name, self.get, self.signe = qt, name, hasattr(qt, '__get__'), None
 
     def __get__(self, obj, owner=None):
         owner = type(obj) if owner is None else owner
-        if owner not in self.plain:
-            python = [c for c in owner.__mro__ if c.__module__.partition('.')[0] not in _BINDING]
+        python, names, getattr_, dicts, size = _python_side(owner)
+        if sum(map(len, dicts)) != size:  # a name set since on a class of the MRO: read again
+            python, names, getattr_, dicts, size = _python_side(owner, again=True)
+        if self.name in names:
             for c in python:
                 found = vars(c).get(self.name, self)
                 if not isinstance(found, _Alias):  # a doublure (Python class) carries aliases too: skipped
                     return found.__get__(obj, owner) if hasattr(found, '__get__') else found
-            if any('__getattr__' in vars(c) for c in python):
-                if obj is not None:
-                    try:
-                        return owner.__getattr__(obj, self.name)
-                    except AttributeError:
-                        pass
-            else:
-                self.plain.add(owner)  # measured: 1.9 µs per access without it, 0.15 for the camelCase name
+        if getattr_ and obj is not None:
+            try:
+                return owner.__getattr__(obj, self.name)
+            except AttributeError:
+                pass
         return self._qt(obj, owner)
 
     def _qt(self, obj, owner):
-        qt = self.qt.__get__(obj, owner) if hasattr(self.qt, '__get__') else self.qt
-        if obj is not None or not callable(qt) or hasattr(qt, '__signature__') or hasattr(qt, '__code__'):
+        qt = self.qt.__get__(obj, owner) if self.get else self.qt
+        if obj is not None:
+            return qt
+        if self.signe is not None and self.signe.qt is qt:  # kept: traitlets reads it for each new class (W577)
+            return self.signe
+        if not callable(qt) or hasattr(qt, '__signature__') or hasattr(qt, '__code__'):
             return qt
         # Read on the class, a binding method has no signature (inspect.signature: ValueError); code written for
         # Qt never met it under a snake_case name, Spyder's inspect.signature on each create_* member does
         # (completion/plugin.py:577, W567): an honest (*args, **kwargs), still equal to the Qt method.
-        return _Signe(qt, self.name)
+        self.signe = _Signe(qt, self.name)
+        return self.signe
 
 
 class _Signe:
@@ -189,8 +219,8 @@ def _signal_masked(cls, **kwargs):
     PySide6 only: PyQt6 calls it on its own wrappers while it creates them, and
     reading them then crashes (measured, even `cls.__module__`)."""
     for name, attr in vars(cls).items():
-        if type(attr).__name__ in ('Signal', 'pyqtSignal') or not name[0].islower():
-            continue
+        if name not in _SIGNAL_ALIASES or type(attr).__name__ in ('Signal', 'pyqtSignal'):
+            continue  # most names: no signal alias anywhere has it (W577, a cost of each QObject subclass)
         for base in cls.__mro__[1:]:
             found = vars(base).get(name)
             if found is not None:
@@ -203,6 +233,7 @@ def _signal_masked(cls, **kwargs):
 
 
 _QObject = None  # the binding's QObject, once prepared
+_SIGNAL_ALIASES = set()  # the names of every _SignalAlias set by _pyside6_class
 
 
 def _pyside6_class(cls):
@@ -234,6 +265,8 @@ def _pyside6_class(cls):
             if snake != name and snake not in members:
                 signal = type(attr).__name__ in ('Signal', 'pyqtSignal')
                 setattr(cls, snake, _SignalAlias(name, snake) if signal else _Alias(attr, snake))
+                if signal:
+                    _SIGNAL_ALIASES.add(snake)
 
 
 class _Finder(importlib.abc.MetaPathFinder, importlib.abc.Loader):

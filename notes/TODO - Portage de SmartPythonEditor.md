@@ -392,6 +392,17 @@ Du plus bloquant au moins bloquant. « Niveau » : mesuré / lu dans les sources
     l'item 21). Professeur, 12/11 19:49, dans son Firefox : « le demarage est horriblement long ». Mesuré une fois
     (W566, sonde Firefox, 12/11 19:03, machine chargée : 8 sessions et Firefox concurrents) : durée totale 62,6 s, dont
     `post_visible_setup` 48,7 s ; tas wasm 215 Mio. Log `qtpy6_essais/equipe/w566/sonde_spe.log`.
+    **W577, 17/11 (note `2026-11-17 - Démarrage de spe.py dans la page, profil et corrections (W577).md`)** : les
+    48,7 s étaient CUMULÉS depuis l'entrée dans Python, pas la durée de `post_visible_setup` (1,5 à 7,7 s). Corrigé
+    dans qtpy6 : alias snake_case (cache par classe), `_signal_masked`, `.claude` hors de l'archive — durée totale 19,2
+    → 15,0, 26,0 → 21,7, 17,9 → 15,7 s (3 paires alternées, charge 37–44). Reste, poste par poste :
+    - qtpy6, à d'autres : `bloquant._relayer` 6,2 s profilées (W578) ; filtre `PleinEcran` de toute l'application,
+      40 463 appels (W573, diff `qtpy6_essais/equipe/w577/w573_plein_ecran.diff`) ; dépaquetage d'`app.zip` 2,5 à
+      12 s, `zipfile` Python, 94 Mio décompressés dont `.py` ET `.pyc` et 1 224 `.pyi` (contenu : `construire_site.py`
+      de l'essai ; mécanisme : `qtpy6web.js`, W573).
+    - fork Spyder : feuilles de style qstylizer 7,5–8,5 s profilées ; `traitlets.getmembers` des classes de qtconsole
+      (14,2 s profilées avant, alias exclus) ; import du plugin débogueur 19 s profilées ; points d'entrée des plugins
+      (`importlib.metadata` 1,5 s) ; `QDockWidget.setWidget` 2,0 s.
 
 ## Décisions à prendre par l'utilisateur
 

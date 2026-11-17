@@ -115,6 +115,8 @@ try:
         etape("show")
         post_visible_setup(self)
         etape("post_visible_setup")
+        import profil_demarrage  # instrumentation (W577)
+        profil_demarrage.rapport()
         if os.environ.get("JALON7_ERREUR"):  # erreur7.py : une exception dans un slot
             QTimer.singleShot(1000, lambda: 1 / 0)
         if "SUITE" in globals():  # un essai qui prolonge celui-ci (jalon8c.py) : il appelle rapport() quand il a fini

@@ -10,6 +10,7 @@ import types
 
 T0 = time.monotonic()
 ICI = os.path.dirname(os.path.abspath(__file__))
+import profil_demarrage  # noqa: E402, F401 - instrumentation (W577) : &profil=1 / PROFIL_DEMARRAGE=1
 os.environ.setdefault("QT_API", "pyside6")
 os.environ.setdefault("SPYDER_QT_SKIP_VERSION_CHECK", "1")   # le fork accepte PySide6 6.8-6.9 ; ici 6.10/6.11
 
