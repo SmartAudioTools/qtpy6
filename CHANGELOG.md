@@ -2,6 +2,12 @@
 
 ## Non publié
 
+- `QPdfView` cherche dans le texte (ajout de qtpy6, natif et navigateur, même API) : `setSearchText`, `searchText`,
+  `searchResultCount` et le signal `searchResultCountChanged(int)` (aussitôt en natif, après lecture du texte par pdf.js
+  dans le navigateur), `currentSearchResultIndex` / `setCurrentSearchResultIndex` (noms de Qt ; défile jusqu'au
+  résultat), le signal `findRequested` (Ctrl+F dans la vue, que le navigateur ne voit plus). Sans casse, blancs souples ;
+  rien n'est trouvé dans un masque (`setMasks`) ni au-delà de `setPageLimit`, compte compris. `QPdfSearchModel` de Qt
+  écarté : la vue Qt peint ses résultats en C++ et le modèle compte aussi ce qui est masqué.
 - Un alias snake_case de méthode cède la place à l'application. Un nom défini par une classe Python de la MRO, ou rendu
   par un `__getattr__` Python, passe avant la méthode Qt. Avant, l'alias posé sur la classe Qt masquait le
   `move_cursor` du mixin de Spyder (`TypeError` sur `moveCursor(int)`, puis une récursion sans fin de la console interne

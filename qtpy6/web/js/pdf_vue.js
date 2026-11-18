@@ -11,6 +11,12 @@
   let lib = null;
   const MARGE_LIEN = 12;  // points laissés au-dessus de la destination d'un lien : dessus, le haut d'un titre était coupé (même marge sur ordinateur, QtPdfWidgets.py)
   const PAVE = 12;  // côté des pavés d'un masque, en points de la page : illisible à tout zoom (MASK_BLOCK sur ordinateur)
+  const MARGE_RECHERCHE = 40;  // points laissés au-dessus d'un résultat de recherche atteint (SEARCH_MARGIN sur ordinateur)
+  const mesure = document.createElement("canvas").getContext("2d");
+  const largeur = (texte, famille) => {  // largeur d'un texte dans la famille de fonte d'un morceau pdf.js (repli sans-serif)
+    mesure.font = `100px ${famille || "sans-serif"}`;
+    return mesure.measureText(texte).width || texte.length;
+  };
 
   // Les pavés d'un masque (x, y, l, h en points) sur le canevas d'une page : chacun prend la couleur moyenne de ce qu'il
   // couvre, obtenue par réductions de moitié successives (une réduction directe n'échantillonne que quelques pixels, et
@@ -52,6 +58,9 @@
 .qtpy6-pdf .liens { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
 .qtpy6-pdf .liens a { position: absolute; pointer-events: auto; cursor: pointer; }
 .qtpy6-pdf .liens .voile { position: absolute; background: rgba(255 255 255 / 0.63); }
+.qtpy6-pdf .trouves { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+.qtpy6-pdf .trouves div { position: absolute; background: rgba(255 230 0 / 0.43); }
+.qtpy6-pdf .trouves .courant { background: rgba(255 150 0 / 0.55); }
 .qtpy6-pdf-bulle { position: fixed; z-index: 2147483647; pointer-events: none; max-width: 32em; padding: 4px 8px;
                    background: #ffffe1; color: #000; border: 1px solid #767676; font: 13px sans-serif; }
 .qtpy6-pdf .page canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
@@ -135,6 +144,16 @@
         e.clipboardData.setData("text/plain", this.filtre(document.getSelection().toString()));
         e.preventDefault();
       });
+      this.cherche = "";  // setSearchText : le texte, ses résultats [[page, [[x, y, l, h] en points], …], le courant
+      this.trouves = [];
+      this.courant = -1;
+      // Ctrl+F : la page a le clavier, Qt ne le voit pas ; sans ceci, le navigateur ouvrirait sa propre recherche
+      this.div.addEventListener("keydown", e => {
+        if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "f") {
+          e.preventDefault();
+          this.trouver?.();
+        }
+      });
     }
 
     async afficher(doc) {  // un PDFDocumentProxy, sa promesse (celle d'ouvrir) ou null
@@ -143,6 +162,96 @@
       if (demande !== this.demande) return;  // une demande plus récente est passée pendant l'attente
       this.doc = doc;
       await this.mettreEnPage();
+      this.rechercher();
+    }
+
+    rappelsRecherche(compte, trouver) {  // le nombre de résultats, une fois connu ; Ctrl+F dans la vue
+      this.compte = compte;
+      this.trouver = trouver;
+    }
+
+    // setSearchText : le texte des pages montrées, lu par pdf.js (getTextContent) ; casse ignorée, un blanc vaut tout
+    // blanc ; un résultat qui touche un masque n'existe pas, ni compté ni montré (même règle sur ordinateur). Chaque
+    // morceau de texte donne la part de sa largeur qu'occupe le résultat, au prorata de ses caractères.
+    async rechercher(texte = this.cherche) {
+      this.cherche = texte ?? "";
+      const tour = this.tour = (this.tour ?? 0) + 1, trouves = [], doc = this.doc;
+      const mots = this.cherche.split(/\s+/).filter(Boolean);
+      if (mots.length && doc) {
+        const motif = new RegExp(mots.map(m => m.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s+"), "giu");
+        for (let n = 1; n <= this.montrees(); n++) {
+          const page = await doc.getPage(n), contenu = await page.getTextContent();
+          if (tour !== this.tour || doc !== this.doc) return;
+          const base = page.getViewport({ scale: 1 }), morceaux = [], masques = this.masques.get(n - 1) ?? [];
+          let tout = "";
+          for (const item of contenu.items) {
+            if (item.str === undefined) continue;
+            morceaux.push([tout.length, item]);
+            tout += item.str + (item.hasEOL ? "\n" : "");
+          }
+          for (const m of tout.matchAll(motif)) {
+            const debut = m.index, fin = m.index + m[0].length, boites = [];
+            for (const [origine, item] of morceaux) {
+              const a = Math.max(debut, origine), b = Math.min(fin, origine + item.str.length);
+              // un morceau blanc ne compte pas : pdf.js lui donne parfois toute la largeur jusqu'au mot suivant
+              if (a >= b || !item.str.slice(a - origine, b - origine).trim()) continue;
+              const [x, y] = base.convertToViewportPoint(item.transform[4], item.transform[5]);  // la ligne de base
+              const h = item.height || Math.hypot(item.transform[2], item.transform[3]);
+              // la part de largeur mesurée dans une fonte proche (pdf.js : styles[fontName]), pas comptée en lettres :
+              // une lettre étroite avant le mot décalait le surlignage d'un caractère
+              const part = t => largeur(t, contenu.styles?.[item.fontName]?.fontFamily) / largeur(item.str, contenu.styles?.[item.fontName]?.fontFamily);
+              const boite = [x + item.width * part(item.str.slice(0, a - origine)), y - h,
+                             item.width * part(item.str.slice(a - origine, b - origine)), h];
+              const derniere = boites.at(-1);  // une boîte par ligne, comme sur ordinateur
+              if (derniere && Math.min(derniere[1] + derniere[3], boite[1] + h) - Math.max(derniere[1], boite[1]) > 0) {
+                const [g, hh, d, bb] = [Math.min(derniere[0], boite[0]), Math.min(derniere[1], boite[1]),
+                                        Math.max(derniere[0] + derniere[2], boite[0] + boite[2]),
+                                        Math.max(derniere[1] + derniere[3], boite[1] + h)];
+                boites[boites.length - 1] = [g, hh, d - g, bb - hh];
+              } else boites.push(boite);
+            }
+            const touche = ([x, y, l, h]) => masques.some(([mx, my, ml, mh]) => x < mx + ml && mx < x + l
+                                                                                && y < my + mh && my < y + h);
+            if (boites.length && !boites.some(touche)) trouves.push([n - 1, boites]);
+          }
+        }
+      }
+      if (tour !== this.tour) return;
+      const avant = this.trouves.length;
+      this.trouves = trouves;
+      this.courant = -1;
+      this.surligner();
+      if (this.cherche || avant) this.compte?.(trouves.length);
+    }
+
+    surligner() {
+      for (const cadre of this.div.children) this.peindreTrouves(cadre);
+    }
+
+    peindreTrouves(cadre) {  // les résultats de la page, en surbrillance, le courant plus foncé
+      const { page, echelle } = cadre.qtpy6 ?? {};
+      if (!page) return;
+      cadre.querySelector(":scope > .trouves")?.remove();
+      const calque = document.createElement("div");
+      calque.className = "trouves";
+      this.trouves.forEach(([numero, boites], i) => {
+        if (numero !== page.pageNumber - 1) return;
+        for (const [x, y, l, h] of boites) {
+          const boite = document.createElement("div");
+          if (i === this.courant) boite.className = "courant";
+          Object.assign(boite.style, { left: `${x * echelle}px`, top: `${y * echelle}px`,
+                                       width: `${l * echelle}px`, height: `${h * echelle}px` });
+          calque.append(boite);
+        }
+      });
+      if (calque.childElementCount) cadre.append(calque);
+    }
+
+    allerA(index) {  // setCurrentSearchResultIndex : le résultat devient le courant, et la vue défile jusqu'à lui
+      this.courant = index;
+      this.surligner();
+      const trouve = this.trouves[index], cadre = trouve && this.div.children[trouve[0]];
+      if (cadre) this.div.scrollTop = cadre.offsetTop + Math.max(0, trouve[1][0][1] - MARGE_RECHERCHE) * cadre.qtpy6.echelle;
     }
 
     async mettreEnPage() {
@@ -168,6 +277,7 @@
         cadre.style.setProperty("--scale-factor", echelle);
         cadre.qtpy6 = { page, echelle, generation };
         this.div.append(cadre);
+        this.peindreTrouves(cadre);
         this.visibles.observe(cadre);
       }
       this.div.scrollTop = proportion * this.div.scrollHeight;
@@ -179,7 +289,7 @@
 
     limiter(nombre) {
       this.limite = nombre ?? null;
-      if (this.doc) this.mettreEnPage();
+      if (this.doc) this.mettreEnPage().then(() => this.rechercher());
     }
 
     // setCopyZones : seul le texte de ces zones se sélectionne et se copie (null : tout) ; setCopyFilter : texte → texte
@@ -221,7 +331,7 @@
     masquer(liste) {  // [[page, x, y, l, h], …]
       this.masques = new Map();
       for (const [page, ...zone] of liste ?? []) this.masques.set(page, [...(this.masques.get(page) ?? []), zone]);
-      if (this.doc) this.mettreEnPage();
+      if (this.doc) this.mettreEnPage().then(() => this.rechercher());
     }
 
     espacer(gauche, haut, droite, bas, ecart) {

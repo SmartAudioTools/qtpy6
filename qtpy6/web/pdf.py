@@ -122,11 +122,20 @@ class QPdfView(Calque):
 
     documentChanged = Signal(object)
     urlActivated = Signal(str)  # comme en natif : un clic sur un lien vers une URL de setUrlLinks
+    searchResultCountChanged = Signal(int)  # comme en natif, mais plus tard : pdf.js lit le texte en arrière-plan
+    currentSearchResultIndexChanged = Signal(int)
+    findRequested = Signal()  # Ctrl+F dans la vue (le <div> a le clavier, pas Qt)
+    SEARCH_MARGIN = 40  # MARGE_RECHERCHE de pdf_vue.js
 
     def __init__(self, parent=None):
+        from pyodide.ffi import create_proxy  # noqa: PLC0415
+
         super().__init__(parent)
         self._document, self._mode_page, self._mode_zoom = None, self.PageMode.SinglePage, self.ZoomMode.Custom
         self._vue = vue = _js().vue()
+        self._cherche, self._compte, self._courant = "", 0, -1  # setSearchText
+        self._rappels_recherche = (create_proxy(self._compter), create_proxy(lambda: self.findRequested.emit()))
+        vue.rappelsRecherche(*self._rappels_recherche)
         self._limite, self._masques = None, {}
         self._zones_copie = self._filtre = None  # setCopyZones, setCopyFilter
         self._schemas, self._bulle, self._rappels = (), None, ()  # setUrlLinks ; les proxys, gardés autant que la vue
@@ -166,6 +175,32 @@ class QPdfView(Calque):
 
     def masks(self):
         return {page: list(zones) for page, zones in self._masques.items()}
+
+    def setSearchText(self, texte):
+        """Comme en natif (pages montrées, hors masques, casse ignorée) ; ``searchResultCountChanged`` arrive quand
+        pdf.js a lu le texte des pages."""
+        self._cherche = texte or ""
+        self._vue.rechercher(self._cherche)
+
+    def searchText(self):
+        return self._cherche
+
+    def searchResultCount(self):
+        return self._compte
+
+    def currentSearchResultIndex(self):
+        return self._courant
+
+    def setCurrentSearchResultIndex(self, index):
+        index = index if 0 <= index < self._compte else -1
+        if index != self._courant:
+            self._courant = index
+            self.currentSearchResultIndexChanged.emit(index)
+        self._vue.allerA(index)
+
+    def _compter(self, nombre):  # pdf_vue.js a (re)cherché : aucun résultat courant, comme en natif
+        self._compte, self._courant = int(nombre), -1
+        self.searchResultCountChanged.emit(self._compte)
 
     def setCopyZones(self, zones):
         """{page: [QRectF en points]} : seul leur texte se sélectionne et se copie ; {} aucun, None tout (le défaut)."""

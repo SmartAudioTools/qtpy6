@@ -5,6 +5,7 @@ code of a document), setCopyFilter rewrites what is copied and setUrlLinks makes
 clickable (``urlActivated``), with a tooltip;
 in the browser, where Qt-WASM has no QtPdf, qtpy6.web.pdf's QPdfView, drawn by pdf.js, whose text selects and copies
 as in the browser's PDF viewer."""
+import re
 import sys
 
 from . import _binding
@@ -29,6 +30,9 @@ else:
         MASK_BLOCK = 12  # side of a mask's blocks, in the page's points: unreadable at any zoom (same in pdf_vue.js)
         COPY_MARGIN = 3  # points a selected line's box may go past its copy zone (same in pdf_vue.js)
         urlActivated = Signal(str)  # a click on a link to a URL of setUrlLinks: the URL, as written in the PDF
+        searchResultCountChanged = Signal(int)  # setSearchText's results are known (or changed): their number
+        findRequested = Signal()  # Ctrl+F pressed in the view (in the browser, where the page has the keyboard, too)
+        SEARCH_MARGIN = 40  # points left above a search result scrolled to (same in pdf_vue.js)
 
         def __init__(self, parent=None):
             super().__init__(parent)  # PyQt6 wants the parent, even None
@@ -42,6 +46,7 @@ else:
             self._blocks = {}  # {(page, index of the mask): QImage, one pixel per block}, read once
             self._copy_zones = self._copy_filter = None  # setCopyZones, setCopyFilter
             self._url_schemes, self._url_tip, self._tip_shown = (), None, None  # setUrlLinks ; the URL whose tooltip is shown
+            self._search_text, self._results, self._current = "", [], -1  # setSearchText: [(page, [QRectF])], the current one
             self.viewport().setCursor(Qt.CursorShape.IBeamCursor)
             self.viewport().setMouseTracking(True)  # the pointing hand over a link
             self.verticalScrollBar().rangeChanged.connect(self._clamp)
@@ -52,6 +57,7 @@ else:
             in the browser's QPdfView."""
             self._limit = count
             self._clamp()
+            self._search()
             self.viewport().update()
 
         def pageLimit(self):
@@ -65,10 +71,90 @@ else:
             self._masks = {page: [QRectF(r) for r in rectangles] for page, rectangles in (masks or {}).items() if rectangles}
             self._blocks = {}
             self._selection = None
+            self._search()
             self.viewport().update()
 
         def masks(self):
             return {page: list(rectangles) for page, rectangles in self._masks.items()}
+
+        def setSearchText(self, text):
+            """Finds ``text`` in the pages shown (setPageLimit), outside the masks (setMasks): case ignored, any run of
+            blanks matching any other. Every result is highlighted; none is current (``currentSearchResultIndex`` -1)
+            until ``setCurrentSearchResultIndex``. ``searchResultCountChanged`` gives their number, here at once, later
+            in the browser (pdf.js reads the text in the background); setPageLimit, setMasks and setDocument search
+            again. Not Qt's (its QPdfSearchModel can neither skip a mask nor stop at a page): a qtpy6 addition, also
+            in the browser's QPdfView."""
+            self._search_text = text or ""
+            self._search()
+            self.viewport().update()
+
+        def searchText(self):
+            return self._search_text
+
+        def searchResultCount(self):
+            return len(self._results)
+
+        def currentSearchResultIndex(self):
+            return self._current
+
+        def setCurrentSearchResultIndex(self, index):
+            """Makes result ``index`` (of setSearchText) the current one, drawn darker, and scrolls it into view
+            (``SEARCH_MARGIN`` points of the page above it); -1: none."""
+            index = index if 0 <= index < len(self._results) else -1
+            if index != self._current:
+                self._current = index
+                self.currentSearchResultIndexChanged.emit(index)
+            if index >= 0:
+                page, boxes = self._results[index]
+                if self.pageMode() == self.PageMode.SinglePage:
+                    self.pageNavigator().jump(page, QPointF(), self.pageNavigator().currentZoom())
+                target = self._pages().get(page)
+                if target is not None:
+                    scale = target.width() / self.document().pagePointSize(page).width()
+                    top = target.top() + round(max(0, boxes[0].top() - self.SEARCH_MARGIN) * scale)
+                    bar = self.verticalScrollBar()
+                    bar.setValue(bar.value() + top)
+            self.viewport().update()
+
+        def _search(self, *_):
+            """setSearchText's results, again: [(page, [QRectF of each line of the match])], current reset to none."""
+            results, document = [], self.document()
+            if self._search_text.split() and document is not None and document.status() == document.Status.Ready:
+                pattern = re.compile(r"\s+".join(map(re.escape, self._search_text.split())), re.IGNORECASE)
+                shown = document.pageCount() if self._limit is None else min(self._limit, document.pageCount())
+                for page in range(shown):
+                    for match in pattern.finditer(document.getAllText(page).text()):
+                        selection = document.getSelectionAtIndex(page, match.start(), match.end() - match.start())
+                        boxes = []  # one per line: PDFium gives one per run of text, down to one per glyph
+                        for box in (polygon.boundingRect() for polygon in selection.bounds()):
+                            if boxes and min(boxes[-1].bottom(), box.bottom()) - max(boxes[-1].top(), box.top()) > 0:
+                                boxes[-1] = boxes[-1].united(box)
+                            else:
+                                boxes.append(box)
+                        if boxes and not any(box.intersects(mask) for box in boxes for mask in self._masks.get(page, ())):
+                            results.append((page, boxes))
+            changed = results != self._results or self._current != -1
+            self._results, self._current = results, -1
+            if changed or self._search_text:
+                self.searchResultCountChanged.emit(len(results))
+
+        def _highlight_results(self):
+            """Paints setSearchText's results over their pages, the current one darker."""
+            if not self._results:
+                return
+            pages = self._pages()
+            painter = QPainter(self.viewport())
+            painter.setPen(Qt.PenStyle.NoPen)
+            for index, (page, boxes) in enumerate(self._results):
+                rectangle = pages.get(page)
+                if rectangle is None or not rectangle.intersects(self.viewport().rect()):
+                    continue
+                scale = rectangle.width() / self.document().pagePointSize(page).width()
+                painter.setBrush(QColor(255, 150, 0, 140) if index == self._current else QColor(255, 230, 0, 110))
+                for box in boxes:
+                    painter.drawRect(QRectF(rectangle.left() + box.left() * scale, rectangle.top() + box.top() * scale,
+                                            box.width() * scale, box.height() * scale))
+            painter.end()
 
         def setCopyZones(self, zones):
             """Only the text inside zones of the pages selects and copies: ``zones`` is {page: [QRectF in the page's
@@ -328,6 +414,9 @@ else:
             if event.matches(QKeySequence.StandardKey.Copy) and self._selection is not None:
                 QGuiApplication.clipboard().setText(self.copyText())
                 event.accept()
+            elif event.matches(QKeySequence.StandardKey.Find):
+                self.findRequested.emit()
+                event.accept()
             else:
                 super().keyPressEvent(event)
 
@@ -341,6 +430,7 @@ else:
                 painter.end()
             self._pixelate()
             self._veil()
+            self._highlight_results()
             rectangle = self._selection and self._pages().get(self._selection[0])
             if rectangle:
                 page, selection = self._selection
@@ -383,5 +473,8 @@ else:
                 document.setParent(None)
             self._document = document
             super().setDocument(document)
+            if document is not None:  # loaded later (a QBuffer read at once is Ready here): searched when it is
+                document.statusChanged.connect(self._search)
+            self._search()
 
 _binding.finish(globals())

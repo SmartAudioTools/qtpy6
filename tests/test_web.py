@@ -686,6 +686,146 @@ def test_pdf_limite_de_pages_en_natif(app, tmp_path):
     vue.close()
 
 
+def _pdf_a_chercher(chemin):
+    """Trois pages : « Boucle for » deux fois sur la première (la seconde à masquer), une fois sur chacune des suivantes."""
+    ecrivain = QtGui.QPdfWriter(str(chemin))
+    peintre = QtGui.QPainter(ecrivain)
+    peintre.setFont(QtGui.QFont("DejaVu Sans", 14))
+    for page in range(3):
+        if page:
+            ecrivain.newPage()
+        peintre.drawText(600, 1200, f"Page {page} : la boucle  FOR repete")
+        if page == 0:
+            peintre.drawText(600, 6000, "Reponse cachee : une Boucle for")
+    peintre.end()
+
+
+def test_pdf_recherche_en_natif(app, tmp_path):
+    """``setSearchText`` : casse ignorée, blancs quelconques ; aucun résultat dans un masque (``setMasks``) ni au-delà de
+    ``setPageLimit``, le compte non plus ; ``setCurrentSearchResultIndex`` fait défiler jusqu'au résultat et le
+    surligne ; Ctrl+F dans la vue émet ``findRequested``."""
+    from qtpy6.QtPdf import QPdfDocument
+    from qtpy6.QtPdfWidgets import QPdfView
+    from qtpy6.QtTest import QTest
+
+    _pdf_a_chercher(tmp_path / "cours.pdf")
+    document = QPdfDocument(None)
+    document.load(str(tmp_path / "cours.pdf"))
+    vue = QPdfView(None)
+    vue.setDocument(document)
+    vue.setPageMode(QPdfView.PageMode.MultiPage)
+    vue.setZoomMode(QPdfView.ZoomMode.FitToWidth)
+    vue.resize(400, 300)
+    vue.show()
+    app.processEvents()
+    comptes = []
+    vue.searchResultCountChanged.connect(comptes.append)
+    vue.setSearchText("boucle for")
+    assert comptes[-1] == vue.searchResultCount() == 4 and vue.currentSearchResultIndex() == -1
+    cachee = [boites for page, boites in vue._results if page == 0][1][0]
+    vue.setMasks({0: [cachee.adjusted(-4, -4, 4, 4)]})
+    assert comptes[-1] == vue.searchResultCount() == 3, "un résultat dans un masque est compté"
+    vue.setPageLimit(2)
+    assert comptes[-1] == vue.searchResultCount() == 2, "un résultat au-delà de la limite de pages est compté"
+    assert [page for page, _ in vue._results] == [0, 1]
+    vue.setCurrentSearchResultIndex(1)
+    app.processEvents()
+    page, boites = vue._results[1]
+    haut = vue._pages()[page].top() + boites[0].top() * vue._pages()[page].width() / document.pagePointSize(page).width()
+    assert vue.currentSearchResultIndex() == 1 and 0 <= haut < vue.viewport().height(), haut
+    image = vue.viewport().grab().toImage()
+    pixel = image.pixelColor(vue._pages()[page].left() + 2 + round(boites[0].left() * vue._pages()[page].width()
+                             / document.pagePointSize(page).width()), round(haut) + 3)
+    assert pixel.red() > 200 and pixel.blue() < 150, f"résultat courant non surligné : {pixel.name()}"
+    demandes = []
+    vue.findRequested.connect(lambda: demandes.append(1))
+    QTest.keyClick(vue, QtCore.Qt.Key.Key_F, QtCore.Qt.KeyboardModifier.ControlModifier)
+    assert demandes == [1]
+    vue.setSearchText("")
+    assert vue.searchResultCount() == 0 and comptes[-1] == 0
+    vue.close()
+
+
+_RECHERCHE_PAGE = """<!doctype html><meta charset="utf-8"><body style="margin:0"><script type="module">
+const source = await (await fetch("js/pdf_vue.js")).text();
+const { ouvrir, vue } = eval(source)(new URL("js/pdfjs/pdf.min.mjs", location).href,
+                                     new URL("js/pdfjs/pdf.worker.min.mjs", location).href);
+const octets = new Uint8Array(await (await fetch("cours.pdf")).arrayBuffer());
+window.chercher = async (masques, limite) => {
+  const v = vue(), comptes = [];
+  let demandes = 0;
+  v.placer(0, 0, 400, 300, true);
+  v.rappelsRecherche(n => comptes.push(n), () => demandes++);
+  v.masquer(masques);
+  v.limiter(limite);
+  await v.afficher(ouvrir(octets.slice()));
+  await v.rechercher("boucle for");
+  const trouves = v.trouves;
+  v.allerA(1);
+  const courants = [...v.div.children].map(c => c.querySelectorAll(".trouves .courant").length);
+  const defile = v.div.scrollTop;
+  v.div.dispatchEvent(new KeyboardEvent("keydown", { key: "f", ctrlKey: true, bubbles: true, cancelable: true }));
+  await v.rechercher("");
+  const vides = v.div.querySelectorAll(".trouves").length;
+  v.detruire();
+  return { comptes, trouves, courants, defile, demandes, vides };
+};
+window.pret = true;
+</script>"""
+
+
+@pytest.mark.parametrize("moteur", MOTEURS)
+def test_pdf_recherche_dans_le_navigateur(app, tmp_path, moteur):
+    """La recherche de ``pdf_vue.js`` (doublure de ``setSearchText``) : mêmes résultats qu'en natif, aux mêmes endroits à
+    quelques points près, aucun dans un masque ni au-delà de la limite (compte compris) ; ``allerA`` fait défiler et
+    marque le courant ; Ctrl+F dans la vue appelle le rappel au lieu de la recherche du navigateur."""
+    import functools
+    import http.server
+    import threading
+
+    from qtpy6.QtPdf import QPdfDocument
+    from qtpy6.QtPdfWidgets import QPdfView
+
+    _pdf_a_chercher(tmp_path / "cours.pdf")
+    document = QPdfDocument(None)
+    document.load(str(tmp_path / "cours.pdf"))
+    vue = QPdfView(None)
+    vue.setDocument(document)
+    vue.setSearchText("boucle for")
+    masque = [boites for page, boites in vue._results if page == 0][1][0].adjusted(-4, -4, 4, 4)
+    vue.setMasks({0: [masque]})
+    vue.setPageLimit(2)
+    natifs = vue._results
+    (tmp_path / "js").symlink_to(RACINE / "qtpy6" / "web" / "js")
+    (tmp_path / "index.html").write_text(_RECHERCHE_PAGE, encoding="utf-8")
+
+    class Silencieux(http.server.SimpleHTTPRequestHandler):
+        def log_message(self, *_):
+            pass
+
+    serveur = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Silencieux, directory=str(tmp_path)))
+    threading.Thread(target=serveur.serve_forever, daemon=True).start()
+    navigateur = ouvrir(moteur, f"http://127.0.0.1:{serveur.server_port}/index.html")
+    try:
+        debut = time.time()
+        while not navigateur.execute_script("return window.pret") and time.time() - debut < 30:
+            time.sleep(0.1)
+        zone = [0, masque.x(), masque.y(), masque.width(), masque.height()]
+        r = navigateur.execute_script(f"return chercher({json.dumps([zone])}, 2).catch(e => ({{ erreur: String(e) }}))")
+        assert "erreur" not in r, r
+        assert r["comptes"][-2:] == [2, 0], r["comptes"]
+        assert [page for page, _ in r["trouves"]] == [page for page, _ in natifs] == [0, 1], (r["trouves"], natifs)
+        for (_, web), (_, natif) in zip(r["trouves"], natifs):
+            gauche, droite = min(x for x, _, _, _ in web), max(x + l for x, _, l, _ in web)
+            assert len(natif) == 1 and abs(gauche - natif[0].left()) < 5 and abs(droite - natif[0].right()) < 8, (web, natif)
+            assert all(y < natif[0].center().y() < y + h for _, y, _, h in web), (web, natif)
+        assert r["courants"] == [0, 1] and r["defile"] > 0, r
+        assert r["demandes"] == 1 and r["vides"] == 0, r
+    finally:
+        navigateur.quit()
+        serveur.shutdown()
+
+
 def test_pdf_lien_seul_sur_sa_ligne(app, tmp_path):
     """Un lien interne seul sur sa ligne se suit d'un clic n'importe où sur la ligne (un sommaire), pas seulement sur
     son texte ; deux liens sur une même ligne gardent chacun le leur."""
