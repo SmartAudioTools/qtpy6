@@ -45,6 +45,10 @@ class Paresse(QObject):
         barre.valueChanged.connect(Paresse._defiler)
         barre.valueChanged.connect(self.rafraichir)
         zone.viewport().installEventFilter(self)
+        # le contenu aussi : un élément au-dessus qui rétrécit (bâti, remis en page) fait monter un élément endormi dans
+        # la vue sans défilement ; resté endormi, il gardait sa hauteur d'avant, son contenu coupé (W772, 18/11/2026)
+        if self.contenu is not None:
+            self.contenu.installEventFilter(self)
         self.rafraichir()
 
     @staticmethod

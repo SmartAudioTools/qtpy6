@@ -50,6 +50,25 @@ def test_endormis_loin_de_la_vue_eveilles_a_l_approche(app):
     zone.close()
 
 
+def test_eveille_quand_il_entre_dans_la_vue_sans_defilement(app):
+    """Un élément au-dessus rétrécit (bâti, remis en page pendant le chargement) : un élément endormi remonte dans la vue
+    sans que la page défile. Endormi, il gardait sa hauteur de l'endormissement, son contenu coupé (SmartTeacher, énoncé
+    affiché en partie au chargement, W772, 18/11/2026)."""
+    elements = [Element() for _ in range(30)]
+    zone = page(elements)
+    zone.show()
+    app.processEvents()
+    zone.paresse.rafraichir()
+    assert not elements[5].layout().isEnabled()
+    for e in elements[:5]:
+        e.findChild(QWidget).setFixedHeight(10)  # 500 → 50 px : l'élément 5 monte dans la vue, rien ne défile
+    for _ in range(5):
+        app.processEvents()
+    assert zone.verticalScrollBar().value() == 0 and zone.paresse._en_vue(elements[5], 0)
+    assert elements[5].layout().isEnabled()
+    zone.close()
+
+
 def test_chantier_bati_en_fond_hors_defilement_et_la_vue_d_abord(app):
     elements = [Element(batie=False) for _ in range(30)]
     zone = page(elements)
