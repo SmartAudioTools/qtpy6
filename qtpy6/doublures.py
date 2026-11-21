@@ -14,6 +14,7 @@ C'est qtpy6 qui nomme les modules du navigateur, pour que le test de l'applicati
 raison : un test de l'application n'a pas à importer le paquet du navigateur.
 
 Les doublures sont inertes : ``document`` et ``window`` acceptent ``addEventListener`` sans rien brancher,
+``window.performance`` ne connaît aucune navigation (une page neuve),
 ``create_proxy`` rend la fonction telle quelle, ``jsnull`` est un objet distinct de None (le ``null`` de JS). Ce que le
 test veut de plus sur ``js`` se donne en argument : ``navigateur_double(localStorage=...)``. Un module importé dans le
 bloc garde ses références aux doublures : au test de le retirer de ``sys.modules`` s'il ne doit pas servir après."""
@@ -46,6 +47,7 @@ def navigateur_double(**js: Any) -> Iterator[types.ModuleType]:
     ``js`` porte ``document`` et ``window``, remplacés ou complétés par les arguments nommés."""
     module_js = types.ModuleType("js")
     module_js.document, module_js.window = _cible(), _cible()
+    module_js.window.performance = types.SimpleNamespace(getEntriesByType=lambda genre: [])  # page neuve, pas rechargée
     for nom, valeur in js.items():
         setattr(module_js, nom, valeur)
     ffi = types.ModuleType("pyodide.ffi")
