@@ -372,6 +372,50 @@ def test_pdf_doublé_dans_le_navigateur():
     assert sortie == "qtpy6.web.pdf qtpy6.web.pdf True False"  # js n'est chargé qu'à la première vue
 
 
+def test_pdf_navigateur_et_clavier_de_la_doublure():
+    """La doublure de ``QPdfView`` (``pdf_vue.js`` remplacé par un faux) : ``pageNavigator()`` lit et règle la page de la
+    vue ; une touche pressée dans le ``<div>`` (``_touche``) part à Qt comme au QPdfView natif qui a le focus, et n'est
+    « prise » (le navigateur ne défile pas) que si un raccourci de la fenêtre l'a déclenchée."""
+    sortie = en_navigateur("""
+        import types
+        from qtpy6.QtCore import QPointF, Qt
+        from qtpy6.QtGui import QKeySequence, QShortcut
+        from qtpy6.QtWidgets import QApplication, QWidget
+        app = QApplication([])
+        ffi = types.ModuleType("pyodide.ffi")  # après QtCore, dont la pompe tournerait sur ce faux js
+        ffi.create_proxy = ffi.to_js = lambda x: x
+        sys.modules.update({"pyodide": types.ModuleType("pyodide"), "pyodide.ffi": ffi, "js": types.SimpleNamespace(
+            window=types.SimpleNamespace(qtpy6Conteneur=types.SimpleNamespace(
+                getBoundingClientRect=lambda: types.SimpleNamespace(left=0, top=0))))})
+
+        class Vue:  # pdf_vue.js
+            page, alle = 2, None
+            def __getattr__(self, nom):
+                return lambda *_: None
+            def rappelClavier(self, touche):
+                self.touche = touche
+            def pageCourante(self):
+                return self.page
+            def allerPage(self, n, y):
+                self.alle = (n, y)
+
+        from qtpy6.web import pdf
+        pdf._JS = types.SimpleNamespace(vue=Vue)
+        fenetre, vus = QWidget(), []
+        vue = pdf.QPdfView(fenetre)
+        QShortcut(QKeySequence(Qt.Key.Key_Right), fenetre, lambda: vus.append("droite"))
+        fenetre.show()
+        fenetre.activateWindow()
+        app.processEvents()
+        navigateur = vue.pageNavigator()
+        navigateur.jump(3, QPointF(0, 12), navigateur.currentZoom())
+        print(navigateur.currentPage(), vue._vue.alle, vue._vue.touche is not None)
+        print(vue._touche("ArrowRight", False, False, False, False), vus, vue.hasFocus())
+        print(vue._touche("ArrowLeft", False, False, False, False), vue._touche("é", False, False, False, False), vus)
+    """)
+    assert sortie.splitlines() == ["2 (3, 12.0) True", "True ['droite'] True", "False False ['droite']"], sortie
+
+
 def test_moteur_web_doublé_dans_le_navigateur():
     sortie = en_navigateur("""
         from qtpy6.QtWebEngineWidgets import QWebEngineView
@@ -630,6 +674,83 @@ def test_pdf_liens_vers_une_url_dans_le_navigateur(app, tmp_path, moteur):
             time.sleep(0.1)
         r = navigateur.execute_script("return essayer().catch(e => ({ erreur: String(e) }))")
         assert r == {"n": 1, "bulle": "<b>appli://question/q1</b>", "cachee": True, "clics": ["appli://question/q1"]}, r
+    finally:
+        navigateur.quit()
+        serveur.shutdown()
+
+
+_PAGES_PAGE = """<!doctype html><meta charset="utf-8"><body style="margin:0"><script type="module">
+const source = await (await fetch("js/pdf_vue.js")).text();
+const { ouvrir, vue } = eval(source)(new URL("js/pdfjs/pdf.min.mjs", location).href,
+                                     new URL("js/pdfjs/pdf.worker.min.mjs", location).href);
+const octets = new Uint8Array(await (await fetch("pages.pdf")).arrayBuffer());
+window.essayer = async () => {
+  const v = vue(), recues = [];
+  v.placer(0, 0, 600, 400, true);
+  v.marges = [0, 0, 0, 0];
+  v.rappelClavier((touche, ctrl) => (recues.push(ctrl ? `Ctrl+${touche}` : touche), touche === "ArrowRight"));
+  await v.afficher(ouvrir(octets.slice()));
+  // Firefox : la barre de défilement apparue rétrécit la vue, qui se remet en page (page 3 posée après afficher)
+  const attendre = ms => new Promise(r => setTimeout(r, ms));
+  for (let i = 0; i < 100 && v.div.children.length < 4; i++) await attendre(50);
+  await attendre(200);
+  const pages = [v.pageCourante()];
+  for (const n of [2, 1, 3]) {
+    v.allerPage(n, 0);
+    pages.push(v.pageCourante());
+  }
+  v.div.scrollTop = v.div.children[1].offsetTop + 10;  // un peu sous le haut de la deuxième page
+  pages.push(v.pageCourante());
+  v.placer(0, 0, 600, 1500, true);  // plus haute que deux pages : la dernière ne peut plus monter en haut
+  await attendre(300);
+  v.allerPage(3, 0);  // currentPage() de Qt rend pourtant la page sautée
+  pages.push(v.pageCourante());
+  const presser = (key, ctrlKey = false) => {
+    const e = new KeyboardEvent("keydown", { key, ctrlKey, bubbles: true, cancelable: true });
+    v.div.dispatchEvent(e);
+    return e.defaultPrevented;
+  };
+  const prises = [presser("ArrowRight"), presser("ArrowDown"), presser("c", true), presser("x", true)];
+  v.detruire();
+  return { pages, prises, recues };
+};
+window.pret = true;
+</script>"""
+
+
+@pytest.mark.parametrize("moteur", MOTEURS)
+def test_pdf_pages_et_clavier_dans_le_navigateur(app, tmp_path, moteur):
+    """``pdf_vue.js`` seul : ``allerPage`` (``pageNavigator().jump``) met la page en haut de la vue, ``pageCourante``
+    (``currentPage``) suit le défilement ; une touche pressée dans le ``<div>`` part au rappel de Qt (``rappelClavier``),
+    sauf Ctrl+C (la copie reste au navigateur), et seule celle que Qt prend perd son effet dans la page."""
+    import functools
+    import http.server
+    import threading
+
+    ecrivain = QtGui.QPdfWriter(str(tmp_path / "pages.pdf"))
+    peintre = QtGui.QPainter(ecrivain)
+    for i in range(4):
+        if i:
+            ecrivain.newPage()
+        peintre.drawText(600, 1200, f"Page {i}")
+    peintre.end()
+    (tmp_path / "js").symlink_to(RACINE / "qtpy6" / "web" / "js")
+    (tmp_path / "index.html").write_text(_PAGES_PAGE, encoding="utf-8")
+
+    class Silencieux(http.server.SimpleHTTPRequestHandler):
+        def log_message(self, *_):
+            pass
+
+    serveur = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Silencieux, directory=str(tmp_path)))
+    threading.Thread(target=serveur.serve_forever, daemon=True).start()
+    navigateur = ouvrir(moteur, f"http://127.0.0.1:{serveur.server_port}/index.html")
+    try:
+        debut = time.time()
+        while not navigateur.execute_script("return window.pret") and time.time() - debut < 30:
+            time.sleep(0.1)
+        r = navigateur.execute_script("return essayer().catch(e => ({ erreur: String(e) }))")
+        assert r == {"pages": [0, 2, 1, 3, 1, 3], "prises": [True, False, False, False],
+                     "recues": ["ArrowRight", "ArrowDown", "Ctrl+x"]}, r
     finally:
         navigateur.quit()
         serveur.shutdown()

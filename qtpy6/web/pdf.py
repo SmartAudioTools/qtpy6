@@ -11,13 +11,16 @@ n'est ouvert, que Qt dessinerait dessous. Seul le sous-ensemble utile de l'API e
 liens internes du PDF (un sommaire) suivis au clic, comme sur ordinateur ; et ``setPageLimit``, l'ajout de qtpy6 (les
 premières pages seules), setMasks (des zones en pavés, leur texte retiré), setCopyZones (seul le texte de ces zones
 se sélectionne) et setCopyFilter (ce que copie le navigateur, réécrit), les autres ajouts, comme sur
-ordinateur. Le chargement est asynchrone : ``load`` rend ``Error.None_`` avec ``status() == Loading``, puis
+ordinateur ; ``pageNavigator()`` (``currentPage``, ``jump``), et les touches pressées quand le PDF a le clavier,
+envoyées à la vue comme Qt le ferait (raccourcis de la fenêtre compris). Le chargement est asynchrone : ``load`` rend ``Error.None_`` avec ``status() == Loading``, puis
 ``statusChanged(Ready)``."""
 
 import enum
 import importlib.resources
 
-from qtpy6.QtCore import QMargins, QObject, QRectF, Signal
+from qtpy6.QtCore import QEvent, QMargins, QObject, QPointF, QRectF, Qt, Signal
+from qtpy6.QtGui import QKeyEvent
+from qtpy6.QtWidgets import QApplication
 
 from .calque import Calque
 
@@ -113,6 +116,43 @@ class QPdfDocument(QObject):
             self.statusChanged.emit(statut)
 
 
+class QPdfPageNavigator(QObject):
+    """Ce que ``QPdfView.pageNavigator()`` sait du navigateur : la page en haut de la vue, et y aller."""
+
+    def __init__(self, vue):
+        super().__init__(vue)
+        self._vue = vue
+
+    def currentPage(self):
+        return self._vue._vue.pageCourante()
+
+    def currentLocation(self):
+        return QPointF()
+
+    def currentZoom(self):
+        return 1.0
+
+    def jump(self, page, location=QPointF(), zoom=0):  # noqa: ARG002 - le zoom suit toujours la largeur
+        self._vue._vue.allerPage(page, location.y())
+
+
+# Les noms de KeyboardEvent.key des touches sans caractère (les autres : leur caractère), en touches de Qt
+_TOUCHES = {"ArrowLeft": Qt.Key.Key_Left, "ArrowRight": Qt.Key.Key_Right, "ArrowUp": Qt.Key.Key_Up,
+            "ArrowDown": Qt.Key.Key_Down, "PageUp": Qt.Key.Key_PageUp, "PageDown": Qt.Key.Key_PageDown,
+            "Home": Qt.Key.Key_Home, "End": Qt.Key.Key_End, "Escape": Qt.Key.Key_Escape, "Enter": Qt.Key.Key_Return,
+            "Tab": Qt.Key.Key_Tab, "Backspace": Qt.Key.Key_Backspace, "Delete": Qt.Key.Key_Delete, " ": Qt.Key.Key_Space}
+
+
+class _Raccourci(QObject):
+    """Filtre de l'application le temps d'un ``sendEvent`` : ``vu``, un raccourci (QShortcut, QAction) a été déclenché."""
+    vu = False
+
+    def eventFilter(self, objet, evenement):  # noqa: ARG002
+        if evenement.type() == QEvent.Type.Shortcut:
+            self.vu = True
+        return False
+
+
 class QPdfView(Calque):
     class PageMode(enum.Enum):
         SinglePage, MultiPage = range(2)
@@ -136,6 +176,9 @@ class QPdfView(Calque):
         self._cherche, self._compte, self._courant = "", 0, -1  # setSearchText
         self._rappels_recherche = (create_proxy(self._compter), create_proxy(lambda: self.findRequested.emit()))
         vue.rappelsRecherche(*self._rappels_recherche)
+        self._rappel_clavier = create_proxy(self._touche)
+        vue.rappelClavier(self._rappel_clavier)
+        self._navigateur = QPdfPageNavigator(self)
         self._limite, self._masques = None, {}
         self._zones_copie = self._filtre = None  # setCopyZones, setCopyFilter
         self._schemas, self._bulle, self._rappels = (), None, ()  # setUrlLinks ; les proxys, gardés autant que la vue
@@ -144,6 +187,34 @@ class QPdfView(Calque):
 
     def document(self):
         return self._document
+
+    def pageNavigator(self):
+        return self._navigateur
+
+    def _touche(self, nom, ctrl, maj, alt, meta):
+        """Une touche pressée dans le ``<div>`` (le PDF cliqué a le clavier) : envoyée à la vue comme Qt l'enverrait au
+        QPdfView natif qui a le focus ; vrai si Qt l'a prise, sinon elle garde son effet dans la page (défilement)."""
+        touche = _TOUCHES.get(nom)
+        if touche is None and len(nom) == 1 and nom.isascii():
+            touche = Qt.Key(ord(nom.upper()))
+        if touche is None:
+            return False
+        modificateurs = Qt.KeyboardModifier.NoModifier
+        for appuye, modificateur in ((ctrl, Qt.KeyboardModifier.ControlModifier), (maj, Qt.KeyboardModifier.ShiftModifier),
+                                     (alt, Qt.KeyboardModifier.AltModifier), (meta, Qt.KeyboardModifier.MetaModifier)):
+            if appuye:
+                modificateurs |= modificateur
+        evenement = QKeyEvent(QEvent.Type.KeyPress, touche, modificateurs, nom if len(nom) == 1 else "")
+        evenement.setAccepted(False)
+        self.setFocus()  # le PDF cliqué a le clavier : en natif, la vue aurait le focus
+        guet = _Raccourci(self)  # un raccourci déclenché laisse l'événement non accepté : on le guette
+        QApplication.instance().installEventFilter(guet)
+        try:
+            QApplication.sendEvent(self, evenement)
+        finally:
+            QApplication.instance().removeEventFilter(guet)
+            guet.deleteLater()
+        return guet.vu or evenement.isAccepted()
 
     def setDocument(self, document):
         if self._document is not None:

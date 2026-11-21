@@ -147,11 +147,17 @@
       this.cherche = "";  // setSearchText : le texte, ses résultats [[page, [[x, y, l, h] en points], …], le courant
       this.trouves = [];
       this.courant = -1;
-      // Ctrl+F : la page a le clavier, Qt ne le voit pas ; sans ceci, le navigateur ouvrirait sa propre recherche
+      // Le <div> cliqué a le clavier, Qt ne le voit pas. Ctrl+F : sans ceci, le navigateur ouvrirait sa propre recherche ;
+      // Ctrl+C et Ctrl+A restent au <div> (copier, tout sélectionner) ; toute autre touche part à Qt (rappelClavier),
+      // comme au QPdfView natif qui a le focus (raccourcis de la fenêtre, keyPressEvent), et celle que Qt laisse passer
+      // garde son effet dans la page (défilement).
       this.div.addEventListener("keydown", e => {
-        if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "f") {
+        const commande = (e.ctrlKey || e.metaKey) && !e.altKey ? e.key.toLowerCase() : "";
+        if (commande === "f") {
           e.preventDefault();
           this.trouver?.();
+        } else if (commande !== "c" && commande !== "a" && this.touche?.(e.key, e.ctrlKey, e.shiftKey, e.altKey, e.metaKey)) {
+          e.preventDefault();
         }
       });
     }
@@ -168,6 +174,25 @@
     rappelsRecherche(compte, trouver) {  // le nombre de résultats, une fois connu ; Ctrl+F dans la vue
       this.compte = compte;
       this.trouver = trouver;
+    }
+
+    rappelClavier(touche) {  // (key, ctrl, maj, alt, meta) → vrai si Qt a pris la touche
+      this.touche = touche;
+    }
+
+    pageCourante() {  // pageNavigator().currentPage() : la dernière page dont le haut est monté au haut de la vue
+      // ou, tant que la vue n'a pas bougé, celle d'allerPage même si le bas du document l'empêche de monter (comme Qt)
+      if (this.sautee && this.sautee[1] === this.div.scrollTop) return this.sautee[0];
+      let n = 0;
+      while (n + 1 < this.div.children.length && this.div.children[n + 1].offsetTop <= this.div.scrollTop + 1) n++;
+      return n;
+    }
+
+    allerPage(n, y) {  // pageNavigator().jump : le point à y points du haut de la page n, en haut de la vue
+      const cadre = this.div.children[n];
+      if (!cadre) return;
+      this.div.scrollTop = cadre.offsetTop + y * cadre.qtpy6.echelle;
+      this.sautee = [n, this.div.scrollTop];
     }
 
     // setSearchText : le texte des pages montrées, lu par pdf.js (getTextContent) ; casse ignorée, un blanc vaut tout
