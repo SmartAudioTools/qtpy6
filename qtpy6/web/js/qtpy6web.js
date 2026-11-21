@@ -378,8 +378,19 @@ function sans_menu(conteneur) {
 // minuteries à 0 ms de Qt (sinon sa boucle d'envoi des événements natifs attend une minuterie qui ne viendrait jamais).
 // PySide/PyQt rendent le GIL autour de processEvents : le reprendre pour sauver l'état de Python, le rendre pendant la
 // suspension (les autres entrées en ont besoin), le reprendre et le rendre de nouveau à la reprise.
+// L'aiguilleur de qtSuspendJs : (func (export "qt") (if (call $decider) (then (call $suspendre)))), $decider : () → i32,
+// $suspendre : () → (), tous deux importés de `env`.
+const AIGUILLEUR = new Uint8Array([
+  0, 97, 115, 109, 1, 0, 0, 0,                                                 // en-tête \0asm, version 1
+  1, 8, 2, 96, 0, 0, 96, 0, 1, 127,                                            // types : () → (), () → i32
+  2, 31, 2, 3, 101, 110, 118, 7, 100, 101, 99, 105, 100, 101, 114, 0, 1,       // import env.decider (type 1)
+  3, 101, 110, 118, 9, 115, 117, 115, 112, 101, 110, 100, 114, 101, 0, 0,      // import env.suspendre (type 0)
+  3, 2, 1, 0,                                                                  // une fonction, type 0
+  7, 6, 1, 2, 113, 116, 0, 2,                                                  // export « qt » = fonction 2
+  10, 11, 1, 9, 0, 16, 0, 4, 64, 16, 1, 11, 11,                                // call 0 ; if ; call 1 ; end ; end
+]);
 export const suspension = { promettant: false, tache: false, qtEnTache: false, suspendu: false, suspensions: 0, refus: 0, M: null, detruit: "" };
-function boucles_qt() {
+export function boucles_qt() {  // exportée pour tests/suspension_harnais.mjs
   globalThis.Asyncify ??= { handleAsync: f => f(), makeAsyncFunction: f => f };
   const minuteries = new Map();  // id → fonction, des setTimeout à 0 ms : le repli sans suspension en tire celles de Qt
   const st0 = setTimeout, ct0 = clearTimeout;
@@ -394,8 +405,15 @@ function boucles_qt() {
     const env = imports && imports.env;
     if (!env || !env.__asyncjs__qtSuspendJs) return imports;
     const { saveState, restoreState } = env, s = suspension;
-    // Pas async : une promesse rendue hors entrée promettante serait un SuspendError
-    env.__asyncjs__qtSuspendJs = new WebAssembly.Suspending(() => {
+    // Le refus ne passe JAMAIS par l'import Suspending : JavaScriptCore (Safari) suspend à chaque appel d'un tel import,
+    // même quand la fonction rend une valeur ordinaire (« The spec requires us to suspend even if the wrapped function
+    // returned a real value », WebAssemblySuspending.cpp), et vérifie à chaque appel la pile jusqu'à l'entrée promettante ;
+    // V8 vérifie aussi la pile à chaque appel (mesuré sous node 26). Un refus y devenait une vraie suspension, sans état
+    // sauvé, ou un SuspendError (« JavaScript frames found between WebAssembly.Suspending and WebAssembly.promising »,
+    // l'iPhone d'un élève, L-7). Qt appelle donc l'aiguilleur, un module wasm de 76 octets : `decider` (JS ordinaire) tranche
+    // et prépare, et seulement s'il rend 1, `suspendre` (Suspending) suspend ; d'un appel à l'autre, aucune frame JS.
+    let pret = null;  // ce que decider passe à suspendre, qu'il appelle aussitôt (wasm seul entre les deux)
+    const decider = () => {
       const M = s.M, ctrl = M && M.qtSuspendResumeControl;
       let etat = null, sans_gil = false;
       const en_tache = s.tache && !s.promettant;
@@ -409,16 +427,23 @@ function boucles_qt() {
         s.refus++;
         if (ctrl) for (const [id, f] of [...minuteries])
           if (Object.values(ctrl.eventHandlers).includes(f)) { ct0(id); minuteries.delete(id); f(); }
-        return;
+        return 0;
       }
       s.suspensions++; s.promettant = false; s.suspendu = true;
       if (en_tache) s.qtEnTache = true;  // la pompe attend la fin de la tâche (bloquant), comme la sienne propre (encours)
+      pret = { M, ctrl, etat, sans_gil, en_tache };
+      return 1;
+    };
+    const suspendre = new WebAssembly.Suspending(() => {
+      const { M, ctrl, etat, sans_gil, en_tache } = pret;
+      pret = null;
       return new Promise(r => { ctrl.resume = r; }).then(() => {
         restoreState(etat);
         if (sans_gil) M._PyEval_SaveThread();
         s.promettant = !en_tache; s.suspendu = false;
       });
     });
+    env.__asyncjs__qtSuspendJs = new WebAssembly.Instance(new WebAssembly.Module(AIGUILLEUR), { env: { decider, suspendre } }).exports.qt;
     return imports;
   };
   const i0 = WebAssembly.instantiate, is0 = WebAssembly.instantiateStreaming;

@@ -427,8 +427,21 @@ postes visés ; (5) le temps de chargement à froid derrière le bandeau, avec l
   téléphone monte) ; une liste déroulante au `focus-helper` (`inputmode=none`).
 - **Lecteur d'écran** : Qt-WASM n'expose que « boutons et cases à cocher » ; une vue complexe ne produit rien. Un usage
   accessible reste au DOM.
+- **Un refus de suspendre ne passe jamais par l'import `Suspending`** (21/11/2026, W869, L-7 de SmartTeacher : un iPhone
+  d'élève, « JavaScript frames found between WebAssembly.Suspending and WebAssembly.promising », page morte au démarrage).
+  `qtSuspendJs` était lui-même le `WebAssembly.Suspending`, et refusait en rendant `undefined`. Or JavaScriptCore suspend à
+  CHAQUE appel d'un tel import, même pour une valeur ordinaire (« The spec requires us to suspend even if the wrapped
+  function returned a real value », `WebAssemblySuspending.cpp`), et V8 (node 26) aussi ; tous deux vérifient la pile à
+  chaque appel : frame JS entre l'import et l'entrée promettante, ou pas d'entrée promettante → SuspendError. Un refus
+  devenait donc une erreur, ou une suspension sans l'état de Pyodide sauvé, pendant laquelle une autre entrée de Python
+  pouvait tourner. Désormais Qt appelle un aiguilleur wasm de 76 octets (`AIGUILLEUR`) : `decider` (import ordinaire)
+  tranche, sauve l'état, tire les minuteries à 0 ms en cas de refus, et seulement s'il rend 1, `suspendre` (Suspending)
+  suspend ; wasm seul entre les deux, aucune frame JS. Test : `test_suspension_jspi` (`suspension_harnais.mjs`, sous node,
+  règle de V8 et règle de JSC simulée), rouge sans le correctif (deux SuspendError, un refus qui suspend), vert après.
+  Safari réel non essayé ici (pas de WebKit) : le test sur iPhone est au professeur.
 - **Ce que le navigateur ne fait plus** dans la fenêtre Qt : sélection et recherche dans le texte, traduction
-  automatique, clic droit. Safari (iPad, iPhone) : pas avant la 27, la première à avoir JSPI (section « Le worker ») ; non essayé.
+  automatique, clic droit. Safari (iPad, iPhone) : pas avant la 27, la première à avoir JSPI (section « Le worker ») ; un
+  élève sur iPhone le 16/11/2026 (L-7 de SmartTeacher, refus de `qtSuspendJs`, voir plus haut) ; non essayé ici.
 - **Deux Pyodide** : la page (Pyodide-Qt, roues par URL seulement, ABI `cp313-cp313-pyemscripten_2025_0_wasm32`) et le
   worker (Pyodide ordinaire, Python 3.14) ; les deux versions sont dans `versions.json`.
 - **`import js`** n'existe que dans le navigateur : jamais au niveau d'un module qui doit s'importer en natif (un test le
