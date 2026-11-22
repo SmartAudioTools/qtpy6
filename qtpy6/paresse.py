@@ -115,6 +115,30 @@ class Paresse(QObject):
         if reveilles:
             self._recaler(reveilles, repere, avant)
 
+    def mettre_en_page_jusqu_a(self, cible):
+        """Bâtit et met en page, tout de suite, les éléments entre la vue et ``cible`` (un élément ou un widget qu'il
+        contient), sans que ce qui est à l'écran ne bouge, avant de mesurer où ``cible`` se trouve : endormis, ils
+        gardaient la hauteur de leur endormissement (bâtis hors de la vue : celle de l'élément vide), et une descente
+        vers ``cible`` tombait à côté, puis ils grandissaient en s'éveillant pendant la descente (SmartTeacher, flèche
+        « question suivante » d'un TP arrêtée deux questions trop haut, [L-43], 22/11/2026). Ceux qui restent hors de la
+        vue sont rendormis par le ``rafraichir`` suivant, à leur hauteur juste. Au-dessus de la vue, rien à faire : une
+        hauteur au-dessus de ``cible`` n'y est pas entre la vue et elle, et ce qui est entre elle et la vue ne la déplace pas."""
+        repere, avant = self._repere()
+        rang = next((i for i, e in enumerate(self.elements) if e is cible or e.isAncestorOf(cible)), None)
+        if repere is None or rang is None:
+            return
+        entre = self.elements[self.elements.index(repere):rang]
+        for e in entre:
+            if not getattr(e, "batie", True):
+                e.batir()
+                e.updateGeometry()
+        for e in entre:
+            if (disposition := e.layout()) is not None and not disposition.isEnabled():
+                disposition.setEnabled(True)
+                disposition.invalidate()
+                disposition.activate()  # voir ``rafraichir``
+        self._recaler(entre, repere, avant)
+
     def _recaler(self, elements, repere, avant):
         if repere:
             # la hauteur corrigée remonte niveau par niveau (élément, parents, contenu, zone défilante), chacun par un
