@@ -390,7 +390,37 @@ const AIGUILLEUR = new Uint8Array([
   7, 6, 1, 2, 113, 116, 0, 3,                                                  // export « qt » = fonction 3
   10, 17, 1, 15, 0, 16, 0, 4, 64, 6, 64, 16, 1, 25, 16, 2, 11, 11, 11,         // call 0 ; if ; try ; call 1 ;
 ]);                                                                            // catch_all ; call 2 ; end ×3
-export const suspension = { promettant: false, tache: false, qtEnTache: false, suspendu: false, suspensions: 0, refus: 0, M: null, detruit: "" };
+// L'aiguilleur de syncifyHandler, l'import Suspending par lequel run_sync de Pyodide suspend (JsvPromise_Syncify) :
+// (func (export "s") (param externref externref) (result externref) (try (result externref) (do (call $suspendre
+// (local.get 0) (local.get 1))) (catch_all (call $refuser)))), $suspendre : l'import d'origine, $refuser : () → externref.
+const AIGUILLEUR_SYNC = new Uint8Array([
+  0, 97, 115, 109, 1, 0, 0, 0,                                                 // en-tête \0asm, version 1
+  1, 11, 2, 96, 2, 111, 111, 1, 111, 96, 0, 1, 111,                            // types : (ext, ext) → ext, () → ext
+  2, 31, 2, 3, 101, 110, 118, 9, 115, 117, 115, 112, 101, 110, 100, 114, 101, 0, 0,  // import env.suspendre (type 0)
+  3, 101, 110, 118, 7, 114, 101, 102, 117, 115, 101, 114, 0, 1,                // import env.refuser (type 1)
+  3, 2, 1, 0,                                                                  // une fonction, type 0
+  7, 5, 1, 1, 115, 0, 2,                                                       // export « s » = fonction 2
+  10, 16, 1, 14, 0, 6, 111, 32, 0, 32, 1, 16, 0, 25, 16, 1, 11, 11,            // try (externref) ; local.get 0, 1 ;
+]);                                                                            // call 0 ; catch_all ; call 1 ; end ×2
+// run_sync suspend par l'import syncifyHandler, appelé du C de Pyodide. Une frame JS entre lui et l'entrée promettante
+// (un rappel JS → wasm que can_run_sync ne voit pas, Safari seul, W933, 22/11/2026 : 99 « Pyodide mort » de Safari, Mac et
+// iPhone, toutes dans run_sync pendant un import de qtpy6.web.importer) : le moteur lève alors un SuspendError
+// (« JavaScript frames found between WebAssembly.Suspending and WebAssembly.promising ») qui traversait le C de Pyodide
+// et le tuait. L'aiguilleur l'attrape (catch_all) avant tout changement d'état, et `refuser` rend l'erreur que Pyodide
+// attend d'une promesse rejetée (Module.error, la cause dans Module.syncify_error) : run_sync lève alors une JsException
+// dans Python, que l'appelant traite. `module_de()` rend le Module de Pyodide (posé après loadPyodide).
+export function syncify_refusable(suspendre, module_de) {
+  const refuser = () => {
+    const M = module_de();
+    if (!M) throw new Error("run_sync refusé avant que Pyodide soit chargé");
+    suspension.refus_sync++;
+    M.syncify_error = new Error("suspension refusée par le moteur : une frame JavaScript sépare run_sync de l'entrée "
+                                + "promettante (SuspendError)");
+    return M.error;
+  };
+  return new WebAssembly.Instance(new WebAssembly.Module(AIGUILLEUR_SYNC), { env: { suspendre, refuser } }).exports.s;
+}
+export const suspension = { promettant: false, tache: false, qtEnTache: false, suspendu: false, suspensions: 0, refus: 0, refus_sync: 0, M: null, detruit: "" };
 export function boucles_qt() {  // exportée pour tests/suspension_harnais.mjs
   globalThis.Asyncify ??= { handleAsync: f => f(), makeAsyncFunction: f => f };
   const minuteries = new Map();  // id → fonction, des setTimeout à 0 ms : le repli sans suspension en tire celles de Qt
@@ -404,6 +434,11 @@ export function boucles_qt() {  // exportée pour tests/suspension_harnais.mjs
   window.clearTimeout = id => { minuteries.delete(id); ct0(id); };
   const envelopper = imports => {
     const env = imports && imports.env;
+    // le module principal de Pyodide (ses propres imports, pas le Proxy des modules annexes)
+    // (un WebAssembly.Suspending quand la JSPI existe, le même test que Pyodide ; sans elle, une fonction JS qui n'a rien
+    // à refuser. Ni typeof ni instanceof ne le reconnaissent partout : sous JavaScriptCore, « function », pas instanceof)
+    if (env && Object.hasOwn(env, "syncifyHandler") && "Suspending" in WebAssembly)
+      env.syncifyHandler = syncify_refusable(env.syncifyHandler, () => suspension.M);
     if (!env || !env.__asyncjs__qtSuspendJs) return imports;
     const { saveState, restoreState } = env, s = suspension;
     // Le refus ne passe JAMAIS par l'import Suspending : JavaScriptCore (Safari) suspend à chaque appel d'un tel import,
@@ -546,7 +581,10 @@ function mourir(e) {
   if (mort) return;
   mort = e || true;
   noter(`Pyodide mort (erreur fatale) : ${(e && e.message) || e}`);
-  for (const l of String((e && e.stack) || "").split("\n").slice(0, 12)) if (l.trim()) noter(`  ${l.trim()}`);
+  // le haut de la pile (où l'erreur est née) ET le bas (l'entrée JS qui a mené là : les 12 premières lignes seules ne
+  // montraient pas la frame JS des « JavaScript frames found » de Safari, W933)
+  const pile = String((e && e.stack) || "").split("\n").filter(l => l.trim());
+  for (const l of pile.length > 48 ? [...pile.slice(0, 16), "…", ...pile.slice(-32)] : pile) noter(`  ${l.trim()}`);
   sceller();
   const d = document.createElement("div");
   d.id = "qtpy6-mort";

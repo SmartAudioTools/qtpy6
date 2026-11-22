@@ -280,16 +280,21 @@ def importer(nom, signaler=None, periode=0.04):
     if not navigateur():
         return importlib.import_module(nom)
     import js  # noqa: PLC0415
-    from pyodide.ffi import create_once_callable  # noqa: PLC0415
+    from pyodide.ffi import JsException, create_once_callable  # noqa: PLC0415
 
-    vu, pause = [0], [time.monotonic()]
+    vu, pause, refusee = [0], [time.monotonic()], [False]
 
     class Pause:
         @staticmethod
         def find_spec(*_):
             vu[0] += 1
-            if time.monotonic() - pause[0] > periode and js.document.visibilityState == "visible" and bloquant._pyodide_peut():
-                bloquant._pyodide_suspendre(lambda reprendre: js.setTimeout(create_once_callable(reprendre), 0))
+            if (not refusee[0] and time.monotonic() - pause[0] > periode and js.document.visibilityState == "visible"
+                    and bloquant._pyodide_peut()):
+                try:
+                    bloquant._pyodide_suspendre(lambda reprendre: js.setTimeout(create_once_callable(reprendre), 0))
+                except JsException:  # le moteur refuse (frame JS sous l'import, Safari : syncify_refusable de qtpy6web.js)
+                    refusee[0] = True  # la suite de l'import d'un bloc, comme hors d'une entrée suspendable
+                    return None
                 pause[0] = time.monotonic()
                 if signaler:
                     signaler(vu[0])
