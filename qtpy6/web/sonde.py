@@ -62,10 +62,11 @@ def main(argv=None):
     a.add_argument("--visible", action="store_true", help="une vraie fenêtre sur l'écran, pas hors écran")
     a.add_argument("--chromium", action="store_true", help="le moteur Blink de QtWebEngine au lieu de Firefox")
     a.add_argument("--glisser", help="X1,Y1,X2,Y2, ou page (window.glisser) : un glissé souris une fois l'état atteint")
+    a.add_argument("--sans-jspi", action="store_true", help="Firefox sans WebAssembly.Suspending : un navigateur trop ancien")
     a.add_argument("--pilote", action="store_true", help="les clics et frappes réels que la page demande (window.etat)")
     o = a.parse_args(argv)
-    if o.chromium and (o.zoom or o.tactile or o.visible):
-        a.error("--chromium : ni --zoom, ni --tactile, ni --visible")
+    if o.chromium and (o.zoom or o.tactile or o.visible or o.sans_jspi):
+        a.error("--chromium : ni --zoom, ni --tactile, ni --visible, ni --sans-jspi")
 
     chemin, _, requete = o.page.partition("?")
     racine = Path(o.racine).resolve() if o.racine else Path(chemin).resolve().parent
@@ -254,6 +255,8 @@ def firefox(o, largeur, hauteur, url):
         options.add_argument("--headless")
     options.add_argument(f"--width={largeur}")
     options.add_argument(f"--height={hauteur}")
+    if o.sans_jspi:
+        options.set_preference("javascript.options.wasm_js_promise_integration", False)
     if o.zoom:
         options.set_preference("layout.css.devPixelsPerPx", o.zoom)
     if o.tactile:

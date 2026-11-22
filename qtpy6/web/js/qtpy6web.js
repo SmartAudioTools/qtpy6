@@ -651,6 +651,39 @@ function glisser_rejoue(conteneur) {
   }, true);
 }
 
+// Le navigateur tel qu'un élève le reconnaît (« Safari 26.1 », « Chrome 131 ») ; iPhone et iPad d'abord : tout y est WebKit,
+// c'est la version d'iOS qui compte, quel que soit le navigateur.
+export function navigateur(agent = navigator.userAgent) {
+  const v = re => re.exec(agent)?.[1];
+  // Depuis iOS 26, Safari fige la version du système (« OS 18_6 ») : la vraie est dans Version/, quand Safari la donne.
+  const apple = /(?:iPhone|iPad|iPod)/.test(agent) || /Macintosh/.test(agent) && navigator.maxTouchPoints > 1;
+  const ios = apple && (v(/Version\/(\d+\.\d+)/) ?? v(/ OS (\d+[_.]\d+)/));
+  if (ios) return `iOS ${ios.replace("_", ".")}`;
+  for (const [nom, re] of [["Edge", /Edg\/(\d+)/], ["Opera", /OPR\/(\d+)/], ["Firefox", /Firefox\/(\d+)/], ["Chrome", /Chrome\/(\d+)/],
+                           ["Safari", /Version\/(\d+\.\d+).*Safari/]]) {
+    const n = v(re);
+    if (n) return `${nom} ${n}`;
+  }
+  return "inconnu";
+}
+
+// Pyodide-Qt et Qt-WASM sont compilés pour la JSPI (WebAssembly.Suspending) : sans elle, Pyodide s'arrête sur « WebAssembly
+// stack switching not supported in this JavaScript runtime », message que personne ne comprend (élève du 22/11/2026, W925). Il
+// n'y a pas d'autre chemin (Pyodide ne suspend plus que par JSPI ; une recompilation Asyncify de Qt et de Pyodide, plus lourde
+// et plus lente, a été écartée) : le navigateur est refusé AVANT tout téléchargement, avec ce qu'il faut faire, et la boîte
+// noire le garde (l'application peut l'envoyer : erreur.name === "NavigateurSansJSPI").
+function verifier_navigateur() {
+  if (typeof WebAssembly === "object" && typeof WebAssembly.Suspending === "function") return;
+  const nom = navigateur();
+  noter(`navigateur sans JSPI : ${nom} (${navigator.userAgent})`);
+  sceller();
+  const erreur = new Error(`ce navigateur (${nom}) est trop ancien pour cette page. Mettez-le à jour, ou ouvrez ce lien dans `
+    + "Google Chrome ou Microsoft Edge à jour (version 137 ou plus) ; sur iPad ou iPhone, il faut iOS 27 ou plus.");
+  erreur.name = "NavigateurSansJSPI";
+  erreur.navigateur = nom;
+  throw erreur;
+}
+
 export async function preparer(conteneur, { indexURL, archives = [], roues = [], env = {}, sur_ligne, progres = () => {},
                                             tailles = {}, jumeaux = [], module, boucles = true, mort: texte } = {}) {
   if (sur_ligne) ecouter = sur_ligne;
@@ -662,14 +695,13 @@ export async function preparer(conteneur, { indexURL, archives = [], roues = [],
   });
   window.journal = journal;
   ouvrir_boite_noire();
+  verifier_navigateur();
   indexURL = new URL(indexURL.endsWith("/") ? indexURL : indexURL + "/", location.href).href;
   // Les gros fichiers demandés dès maintenant : sinon le moteur attendait pyodide.mjs puis pyodide.asm.js (1,2 Mo), deux
   // allers-retours de plus, et chaque roue le démarrage entier de Pyodide. Pyodide et loadPackage les reçoivent ensuite.
   ["pyodide.asm.wasm", "python_stdlib.zip"].forEach(n => prelancer(indexURL + n));
   roues.forEach(r => prelancer(r));
   const zips = archives.map(a => telecharger(a.url));  // en parallèle du chargement de Pyodide
-  // Sans JSPI (pas de WebAssembly.Suspending), rien n'est posé : Pyodide lui-même n'y démarre pas (web.md, QDrag.exec).
-  boucles = boucles && typeof WebAssembly.Suspending === "function";
   if (boucles) boucles_qt();  // avant que Pyodide instancie son module
   const { loadPyodide } = await import(indexURL + "pyodide.mjs");
   const [py, ...donnees] = await Promise.all([loadPyodide({ indexURL, stdout: print, stderr: print }), ...zips]);
