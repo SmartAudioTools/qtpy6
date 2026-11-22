@@ -75,4 +75,14 @@ await essai("suspension", async () => {
   resultat.reprise = fini && s.promettant && !s.suspendu;
 });
 Object.assign(resultat, { refus: s.refus, suspensions: s.suspensions, sauves, restaures });
+// la pompe promettante, une frame JS au milieu (pompe → wasm → rappel JS → Qt qui veut suspendre ; les Safari des élèves,
+// W929) : decider prépare la suspension, suspendre lève un SuspendError, l'aiguilleur l'attrape et refuse (état restauré,
+// minuteries de Qt tirées), la pompe reste promettante
+const avant = { refus: s.refus, suspensions: s.suspensions, sauves, restaures };
+await essai("pompe_frame_js", async () => {
+  s.promettant = true;
+  await WebAssembly.promising(dehors(() => qt()))();
+});
+resultat.pompe_frame_js_compteurs = [s.refus - avant.refus, s.suspensions - avant.suspensions, sauves - avant.sauves,
+                                     restaures - avant.restaures, s.promettant, s.suspendu];
 console.log(JSON.stringify(resultat));

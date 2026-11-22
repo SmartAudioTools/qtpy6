@@ -439,6 +439,13 @@ postes visés ; (5) le temps de chargement à froid derrière le bandeau, avec l
   suspend ; wasm seul entre les deux, aucune frame JS. Test : `test_suspension_jspi` (`suspension_harnais.mjs`, sous node,
   règle de V8 et règle de JSC simulée), rouge sans le correctif (deux SuspendError, un refus qui suspend), vert après.
   Safari réel non essayé ici (pas de WebKit) : le test sur iPhone est au professeur.
+  **Insuffisant** (22/11/2026, W929) : les Safari (Mac 27.2, iPhone, Chrome d'iPhone qui est un WebKit) mouraient encore au
+  démarrage. Cas restant : la pompe promettante, une frame JS au milieu (pompe → wasm → rappel JS → Qt qui veut suspendre) ;
+  `decider` ne voit pas la frame JS, `suspendre` lève le SuspendError (V8 comme JavaScriptCore : Chrome n'y passe
+  simplement jamais). L'aiguilleur entoure désormais `suspendre` d'un `try … catch_all` (96 octets) qui appelle `refuser` :
+  état de Pyodide restauré comme à une reprise immédiate, minuteries de Qt tirées, la pompe reste promettante. Reproduit
+  sous le vrai JavaScriptCore avec **bun** (qui l'embarque, JSPI comprise) : `test_suspension_jspi` a un troisième moteur,
+  `bun` (chemin dans `$BUN`), et le cas `pompe_frame_js`, rouge sans le correctif sous les trois.
 - **Ce que le navigateur ne fait plus** dans la fenêtre Qt : sélection et recherche dans le texte, traduction
   automatique, clic droit. Safari (iPad, iPhone) : pas avant la 27, la première à avoir JSPI (section « Le worker ») ; un
   élève sur iPhone le 16/11/2026 (L-7 de SmartTeacher, refus de `qtSuspendJs`, voir plus haut) ; non essayé ici.
