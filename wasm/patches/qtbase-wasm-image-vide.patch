@@ -1,0 +1,17 @@
+--- a/src/plugins/platforms/wasm/qwasmbackingstore.cpp	2026-11-23 03:39:26.376998994 +0100
++++ b/src/plugins/platforms/wasm/qwasmbackingstore.cpp	2026-11-23 03:39:26.391101017 +0100
+@@ -52,6 +52,14 @@
+     if (m_dirty.isNull())
+         return;
+ 
++    // A window of zero width or height (its screen is a container of size 0, e.g. a page loaded in a background tab
++    // that was never shown) has a null image: createImageData(0, h) throws "Invalid width or height" and kills the
++    // event loop. Nothing to draw; getUpdatedWebImage() returns undefined, which paint() already skips.
++    if (m_image.isNull()) {
++        m_dirty = QRegion();
++        return;
++    }
++
+     if (m_webImageDataArray.isUndefined()) {
+         m_webImageDataArray = window->context2d().call<emscripten::val>(
+                 "createImageData", emscripten::val(m_image.width()),

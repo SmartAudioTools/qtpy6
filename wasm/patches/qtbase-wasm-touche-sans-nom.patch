@@ -1,0 +1,21 @@
+diff --color -ru a/src/plugins/platforms/wasm/qwasmwindow.cpp b/src/plugins/platforms/wasm/qwasmwindow.cpp
+--- a/src/plugins/platforms/wasm/qwasmwindow.cpp	2026-11-23 03:00:25.988653068 +0100
++++ b/src/plugins/platforms/wasm/qwasmwindow.cpp	2026-11-23 03:00:26.122755546 +0100
+@@ -215,10 +215,15 @@
+     m_wheelEventCallback = QWasmEventHandler(m_window, "wheel",
+         [this](emscripten::val event) { this->handleWheelEvent(event); });
+ 
++    // A keydown/keyup that is not a KeyboardEvent (Chrome sends plain Events, e.g. on autofill) has no string
++    // key/code: KeyEvent would throw "Cannot pass non-string to std::string" and abort the application.
++    const auto isKey = [](emscripten::val event) {
++        return event["key"].isString() && event["code"].isString();
++    };
+     m_keyDownCallback = QWasmEventHandler(m_window, "keydown",
+-        [this](emscripten::val event) { this->handleKeyEvent(KeyEvent(EventType::KeyDown, event, m_deadKeySupport)); });
++        [this, isKey](emscripten::val event) { if (isKey(event)) this->handleKeyEvent(KeyEvent(EventType::KeyDown, event, m_deadKeySupport)); });
+     m_keyUpCallback =QWasmEventHandler(m_window, "keyup",
+-        [this](emscripten::val event) {this->handleKeyEvent(KeyEvent(EventType::KeyUp, event, m_deadKeySupport)); });
++        [this, isKey](emscripten::val event) { if (isKey(event)) this->handleKeyEvent(KeyEvent(EventType::KeyUp, event, m_deadKeySupport)); });
+ 
+     m_inputCallback = QWasmEventHandler(m_window, "input",
+         [this](emscripten::val event){ handleInputEvent(event); });
