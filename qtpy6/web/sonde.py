@@ -164,13 +164,14 @@ def taper(navigateur):
 
 
 def raccourci(navigateur):
-    """``window.touche`` (« c », « x » ou « v ») avec Ctrl, au vrai clavier, là où le navigateur a le focus. Blink piloté en
+    """``window.touche`` (« c », « x », « v », ou une autre lettre : « f ») avec Ctrl, au vrai clavier, là où le navigateur a le focus. Blink piloté en
     DevTools ne déclenche pas seul la commande d'édition d'un raccourci : ``commands`` la lui donne, comme le clavier
     (les événements ``copy``, ``cut`` et ``paste`` de la page)."""
     c = navigateur.execute_script("return window.touche")
     if isinstance(navigateur, Blink):
         touche = dict(key=c, code="Key" + c.upper(), windowsVirtualKeyCode=ord(c.upper()), modifiers=2)
-        navigateur.cdp("Input.dispatchKeyEvent", type="rawKeyDown", commands=[{"c": "copy", "x": "cut", "v": "paste"}[c]], **touche)
+        commande = {"c": "copy", "x": "cut", "v": "paste"}.get(c)  # Ctrl+F n'a pas de commande d'édition : la page seule le voit
+        navigateur.cdp("Input.dispatchKeyEvent", type="rawKeyDown", commands=[commande] if commande else [], **touche)
         navigateur.cdp("Input.dispatchKeyEvent", type="keyUp", **touche)
     else:
         from selenium.webdriver.common.action_chains import ActionChains  # noqa: PLC0415
