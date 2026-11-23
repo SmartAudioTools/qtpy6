@@ -43,6 +43,8 @@ scenario("cache_sans_visibilite", () => {
 scenario("fil_bloque", () => { avancer(10, { qt: false, tics: false }); avancer(5); });
 // La boucle de Qt arrêtée seule, la page tique toujours : 10 s sans battement, puis Qt repart.
 scenario("qt_arretee", () => { avancer(10, { qt: false }); avancer(2); });
+// Un message très long (chemin de sujet, puis la cause) : son début et sa fin restent.
+scenario("message_long", () => { m.print("bilan " + "x".repeat(1500) + " : Error: chemin refusé : la cause"); avancer(1); });
 // Visite suivante (B4) : la boîte laissée par une page morte sans pagehide, relue par un module neuf. Cachée : libérée par
 // le navigateur pendant qu'elle était cachée (onglet caché, puis plus rien) ; visible : vraiment tuée (fil bloqué).
 const visite_suivante = async (nom, f) => {

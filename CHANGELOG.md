@@ -2,6 +2,9 @@
 
 ## Non publié
 
+- La boîte noire coupe un message trop long en son milieu, et non plus à sa fin, au-delà de 1 000 caractères au lieu de
+  300 : la cause d'une erreur suit souvent un long chemin, et elle se perdait (80 lignes « Error: chemin refusé » sans
+  leur fin dans les boîtes des élèves du 23/11/2026, W968 SmartTeacher).
 - `QPdfView` cherche dans le texte (ajout de qtpy6, natif et navigateur, même API) : `setSearchText`, `searchText`,
   `searchResultCount` et le signal `searchResultCountChanged(int)` (aussitôt en natif, après lecture du texte par pdf.js
   dans le navigateur), `currentSearchResultIndex` / `setCurrentSearchResultIndex` (noms de Qt ; défile jusqu'au

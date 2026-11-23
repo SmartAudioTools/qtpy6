@@ -97,7 +97,7 @@ export function print(m) {
 // Qt arrêtée alors que la page tourne (`battement_qt`, qu'un QTimer de qtpy6.web.boite_noire appelle), avec l'état des
 // suspensions de `boucles_qt`. La visite suivante de la même page la lit (`boite_noire_precedente`) : `fin` nul et
 // `vivant` ancien disent une page tuée sans pagehide, un fil bloqué jusqu'au bout. L'application décide où l'envoyer.
-const BOITE = "qtpy6.boite_noire:" + location.pathname, SEUIL_GEL = 3000, LIGNES = 400;
+const BOITE = "qtpy6.boite_noire:" + location.pathname, SEUIL_GEL = 3000, LIGNES = 400, LONGUEUR = 1000;
 const boite = { debut: Date.now(), vivant: Date.now(), qt: null, fin: null, cachee: false, figee: false, memoire: null,
                 agent: navigator.userAgent, lignes: [] };
 let boite_avant = null, boite_ouverte = false;
@@ -107,7 +107,9 @@ let boite_avant = null, boite_ouverte = false;
 let derniere = null, repetitions = 0, depuis = "";
 function noter(m) {
   const h = new Date().toLocaleTimeString("fr-FR");
-  m = m.length > 300 ? m.slice(0, 300) + "…" : m;
+  // Trop long, le message perd son MILIEU, pas sa fin : la cause d'une erreur suit souvent un long chemin (« <sujet>.etat.json :
+  // Error: chemin refusé : … », 80 lignes coupées avant la cause dans les boîtes du 23/11/2026, W968 SmartTeacher).
+  if (m.length > LONGUEUR) m = m.slice(0, LONGUEUR / 2) + " … " + m.slice(-LONGUEUR / 2);
   if (m === derniere && boite.lignes.length) {
     repetitions++;
     boite.lignes[boite.lignes.length - 1] = `${h} ${m} (×${repetitions} depuis ${depuis})`;

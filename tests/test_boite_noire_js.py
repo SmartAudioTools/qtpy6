@@ -70,3 +70,9 @@ def test_page_figee_puis_liberee_n_est_pas_tuee(scenarios: dict) -> None:
 
 def test_memoire_dans_l_en_tete(scenarios: dict) -> None:
     assert "mémoire JS : 50 Mo (au plus 50) sur 4096 Mo" in scenarios["morte_visible"]["texte"]
+
+
+def test_message_long_garde_sa_fin(scenarios: dict) -> None:
+    """La cause d'une erreur suit souvent un long chemin : coupé au milieu, le message la garde (W968 SmartTeacher)."""
+    ligne = next(l for l in scenarios["message_long"]["lignes"] if l.startswith("bilan "))
+    assert ligne.endswith("Error: chemin refusé : la cause") and " … " in ligne and len(ligne) < 1100, ligne
