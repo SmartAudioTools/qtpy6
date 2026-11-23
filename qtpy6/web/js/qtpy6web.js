@@ -280,10 +280,28 @@ export function service_worker(script, { cache = "qtpy6", pyodide, isoler = fals
   };
 }
 
+// Une demande que le réseau refuse (« Failed to fetch » : connexion coupée, Wi-Fi qui change) se refait après ces délais
+// (ms) : une coupure passagère ne tue plus le chargement. Seul le refus du réseau (TypeError, par la norme de fetch) se
+// refait : ni un refus de l'hôte (404, 500), ni une demande annulée (AbortError, TimeoutError d'un signal expiré).
+export const NOUVEAUX_ESSAIS = [1000, 3000];
+async function avec_essais(demander) {
+  for (const delai of NOUVEAUX_ESSAIS) {
+    try { return await demander(); } catch (e) {
+      if (!(e instanceof TypeError)) throw e;
+      noter(`téléchargement refusé (${e?.message ?? e}) : nouvel essai dans ${delai / 1000} s`);
+      await new Promise(r => setTimeout(r, delai));
+    }
+  }
+  return demander();
+}
+
 // Les octets reçus pendant `preparer` : chaque réponse de fetch lue en double (clone), son nom (dernier segment de l'adresse)
 // pesé par `tailles` ; et ceux de `jumeaux` demandés par en_jumeau. Rend `prelancer(url)`, qui commence un téléchargement
 // tout de suite et le garde pour la première demande de la même adresse, et `retablir()`, qui remet le fetch d'origine.
-function compter(tailles, jumeaux, signaler) {
+// `perdre(nom, raison)` est appelée quand un fichier de `vitaux` manque pour de bon (refusé après les nouveaux essais,
+// réponse en erreur, coupure pendant la lecture) : Pyodide, lui, ne le dit pas (une bibliothèque standard manquante finit
+// en « Fatal Python error: … No module named 'encodings' », et loadPyodide ne rend jamais la main).
+function compter(tailles, jumeaux, signaler, vitaux = [], perdre = () => {}) {
   const fetch_origine = window.fetch;
   const fichiers = Object.fromEntries(Object.entries(tailles).map(([nom, total]) => [nom, { recu: 0, total }]));
   let haut = 0;
@@ -294,14 +312,23 @@ function compter(tailles, jumeaux, signaler) {
   };
   const obtenir = async (...args) => {
     const adresse = new URL(String(args[0]?.url ?? args[0]), location.href), nom = adresse.pathname.split("/").pop();
-    const reponse = jumeaux.includes(nom) && await en_jumeau(fetch_origine, adresse) || await fetch_origine(...args);
+    const vital = vitaux.includes(nom);
+    let reponse;
+    try {
+      reponse = await avec_essais(async () => jumeaux.includes(nom) && await en_jumeau(fetch_origine, adresse)
+                                              || await fetch_origine(...args));
+    } catch (e) {
+      if (vital && e instanceof TypeError) perdre(nom, e.message);  // pas une annulation voulue
+      throw e;
+    }
+    if (!reponse.ok && vital) perdre(nom, `réponse ${reponse.status}`);
     if (!reponse.ok || !reponse.body) return reponse;
     const fichier = fichiers[nom] = { recu: 0, total: tailles[nom] || +reponse.headers.get("Content-Length") || 1 };
     const lecteur = reponse.clone().body.getReader();
     (async () => {
       for (let r; !(r = await lecteur.read()).done;) { fichier.recu += r.value.byteLength; avancer(); }
       fichier.total = fichier.recu; avancer();
-    })().catch(() => {});
+    })().catch(e => { if (vital) perdre(nom, `coupé pendant la lecture (${e?.message ?? e})`); });
     return reponse;
   };
   const prelances = new Map();
@@ -745,10 +772,28 @@ export async function preparer(conteneur, { indexURL, archives = [], roues = [],
   if (sur_ligne) ecouter = sur_ligne;
   if (texte) texte_mort = texte;
   const avance = avancement(progres);
+  // Le moteur et la bibliothèque standard manquent malgré les nouveaux essais : la page le dit à la personne, avec quoi
+  // faire, au lieu d'attendre un Pyodide qui ne rendra jamais la main (élève de Seconde, 22/11/2026, 44 visites sur
+  // « Failed to fetch » puis « No module named 'encodings' » : un .zip bloqué sur son ordinateur seul, W955 de SmartTeacher).
+  let perdre;
+  const perte = new Promise((_, rejeter) => {
+    perdre = (nom, raison) => {
+      noter(`téléchargement impossible : ${nom} (${raison})`);
+      sceller();
+      const erreur = new Error(`le fichier ${nom}, nécessaire au démarrage, n'a pas pu être téléchargé (${raison}). Vérifiez `
+        + "la connexion à Internet et rechargez la page. Si cela recommence sur cet appareil seulement, un antivirus, une "
+        + "extension du navigateur ou un contrôle parental bloque sans doute le téléchargement : essayez un autre navigateur "
+        + "ou un autre appareil.");
+      erreur.name = "TelechargementImpossible";
+      erreur.fichier = nom;
+      rejeter(erreur);
+    };
+  });
+  perte.catch(() => {});  // relevée par la course plus bas, pas en « promesse rejetée » si elle arrive pendant un autre await
   const { prelancer, retablir } = compter(tailles, ["pyodide.asm.wasm", "python_stdlib.zip", ...jumeaux], f => {
     avance.reel("octets", f);
     if (f >= 1) avance.debut("moteur");
-  });
+  }, ["pyodide.asm.wasm", "python_stdlib.zip"], (...a) => perdre(...a));
   window.journal = journal;
   ouvrir_boite_noire();
   verifier_navigateur();
@@ -758,9 +803,11 @@ export async function preparer(conteneur, { indexURL, archives = [], roues = [],
   ["pyodide.asm.wasm", "python_stdlib.zip"].forEach(n => prelancer(indexURL + n));
   roues.forEach(r => prelancer(r));
   const zips = archives.map(a => telecharger(a.url));  // en parallèle du chargement de Pyodide
+  zips.forEach(z => z.catch(() => {}));  // relevés par le Promise.all plus bas ; après une perte, plus attendus
   if (boucles) boucles_qt();  // avant que Pyodide instancie son module
-  const { loadPyodide } = await import(indexURL + "pyodide.mjs");
-  const [py, ...donnees] = await Promise.all([loadPyodide({ indexURL, stdout: print, stderr: print }), ...zips]);
+  const { loadPyodide } = await Promise.race([import(indexURL + "pyodide.mjs"), perte]);
+  const [py, ...donnees] = await Promise.race([Promise.all([loadPyodide({ indexURL, stdout: print, stderr: print }), ...zips]),
+                                               perte]);
   py._api.on_fatal = mourir;  // l'API privée de Pyodide (fatal_error l'appelle une fois, après console.error)
   if (boucles) { suspension.M = py._module; figer_les_evenements(py._module); }
   print(`Pyodide-Qt ${py.version} chargé${donnees.length ? " ; archives " + donnees.map(d => (d.byteLength / 1024) | 0).join(", ") + " Kio" : ""}`);
@@ -772,6 +819,7 @@ export async function preparer(conteneur, { indexURL, archives = [], roues = [],
     await py.loadPackage(new URL(roue, location.href).href);
   }
   retablir();
+  perdre = () => {};  // un flux qui se couperait après coup (lecture du clone) n'écrit plus « téléchargement impossible »
   // Le Pyodide et les roues de la page : ceux que prend par défaut le Worker d'un QProcess (qtpy6.web.lancer, D4 du
   // 12/11/2026), pour que l'application n'ait pas à les redire (travailleur.configurer reste pour en donner d'autres).
   window.qtpy6Pyodide = indexURL;
