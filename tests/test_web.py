@@ -2170,3 +2170,47 @@ def test_directory_loaded_reporte_comme_en_natif():
         tourner()
     """)
     assert sortie.splitlines() == ["apres emit", "recu /x"]
+
+
+@pytest.mark.parametrize("touche", ["espace", "entree", "suggestion"])
+def test_touche_en_pleine_composition_valide_le_mot(touche):
+    """Un clavier de téléphone qui envoie l'espace (``insertText``) ou Entrée (``insertLineBreak``) pendant la
+    composition du mot, sans ``compositionend`` avant : la fenêtre de Qt reçoit un ``compositionend`` juste avant, où
+    Qt-WASM valide sa pré-édition (sans lui, le mot souligné disparaissait à l'espace : téléphone d'un élève, 24/11/2026),
+    puis l'espace en ``input`` sans sa plage, ou Entrée en touche."""
+    from qtpy6.web import _VALIDER_LA_COMPOSITION
+    from qtpy6.web.sonde import Blink
+
+    navigateur = Blink("about:blank", 400, 300)
+    try:
+        navigateur.execute_script(f"""
+            const fenetre = document.createElement("div"), el = document.createElement("input");
+            fenetre.className = "qt-window";  // Qt-WASM écoute sur sa fenêtre (qwasmwindow.cpp), parente du champ caché
+            el.className = "qt-window-input-element";
+            fenetre.append(el);
+            document.body.append(fenetre);
+            window.journal = [];
+            for (const t of ["compositionend", "beforeinput", "input", "keydown", "keyup"])  // à la remontée, comme Qt
+              fenetre.addEventListener(t, e => journal.push(e.type + (e.inputType ? ":" + e.inputType : "") + "="
+                                                            + (e.key && !e.isComposing ? e.key : e.data)));
+            new Function({json.dumps(_VALIDER_LA_COMPOSITION)})();
+            el.focus();""")
+        for i in range(1, 8):
+            navigateur.cdp("Input.dispatchKeyEvent", type="rawKeyDown", key="Unidentified", windowsVirtualKeyCode=229)
+            navigateur.cdp("Input.imeSetComposition", text="bonjour"[:i], selectionStart=i, selectionEnd=i)
+        if touche == "suggestion":  # le texte remplace le mot par la plage du beforeinput, que Qt doit recevoir
+            navigateur.execute_script("""const el = document.activeElement;
+                el.dispatchEvent(new InputEvent("beforeinput", {inputType: "insertText", data: "bonjour ", bubbles: true}));""")
+        elif touche == "espace":
+            navigateur.cdp("Input.dispatchKeyEvent", type="keyDown", key=" ", code="Space", text=" ", windowsVirtualKeyCode=32)
+        else:
+            navigateur.cdp("Input.dispatchKeyEvent", type="rawKeyDown", key="Enter", code="Enter", windowsVirtualKeyCode=13)
+            navigateur.cdp("Input.dispatchKeyEvent", type="char", key="Enter", text="\r")
+        journal = navigateur.execute_script("return journal")
+    finally:
+        navigateur.quit()
+    # le beforeinput n'atteint pas Qt : sa plage, le mot entier, aurait remplacé le mot validé par l'espace
+    attendu = {"espace": ["compositionend=bonjour", "input:insertText= "],
+               "entree": ["compositionend=bonjour", "keydown=Enter", "keyup=Enter"],
+               "suggestion": ["beforeinput:insertText=bonjour "]}[touche]
+    assert journal[-len(attendu):] == attendu, journal

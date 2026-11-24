@@ -91,6 +91,7 @@ def application(polices: str | os.PathLike[str] | None = None, defaut: QFont | t
                 app.setFont(defaut if isinstance(defaut, QFont) else QFont(*defaut))
             _coller()
             _garder_le_focus()
+            _valider_la_composition()
             _dessiner_aussitot()
             _plein_ecran(app)
             from . import boite_noire  # noqa: PLC0415
@@ -204,6 +205,47 @@ def _garder_le_focus():
           if (!presse || e.relatedTarget || !String(el.className).startsWith("qt-window-")) return;
           setTimeout(() => { if (!document.activeElement || document.activeElement === document.body) el.focus({preventScroll: true}); }, 0);
         }, true);""")()
+
+
+_VALIDER_LA_COMPOSITION = """let compose = false, mot = "";
+    document.addEventListener("compositionstart", () => { compose = true; mot = ""; }, true);
+    document.addEventListener("compositionupdate", e => { compose = true; mot = e.data || ""; }, true);
+    document.addEventListener("compositionend", () => { compose = false; }, true);
+    document.addEventListener("beforeinput", e => {
+      const el = e.composedPath()[0];
+      const ligne = e.inputType === "insertLineBreak" || e.inputType === "insertParagraph";
+      // un texte avec lettre ou chiffre (suggestion, autocorrection) remplace le mot : la plage du beforeinput est juste
+      const separe = e.inputType === "insertText" && !/[\p{L}\p{N}]/u.test(e.data || "");
+      if (!compose || !(ligne || separe) || !String(el.className).startsWith("qt-window-")) return;
+      compose = false;
+      el.dispatchEvent(new CompositionEvent("compositionend", {data: mot, bubbles: true}));
+      e.stopPropagation();  // sa plage (le mot composé) n'atteint pas Qt : l'input qui suit s'insère après le mot
+      if (!ligne) return;
+      e.preventDefault();  // Entrée, que Qt a laissée passer pendant la composition, lui revient en touche
+      for (const type of ["keydown", "keyup"])
+        el.dispatchEvent(new KeyboardEvent(type, {key: "Enter", code: "Enter", keyCode: 13, bubbles: true}));
+    }, true);"""
+
+
+def _valider_la_composition():
+    """Le mot en cours de composition est validé avant un texte inséré qui ne la termine pas. Le clavier d'un téléphone
+    compose chaque mot (souligné, texte prédictif) ; certains (téléphone d'un élève, 24/11/2026) envoient l'espace en
+    ``insertText`` pendant que la composition est encore ouverte, sans ``compositionend`` avant. Qt-WASM 6.10.2
+    (``qwasminputcontext.cpp``) ne valide sa pré-édition qu'au ``compositionend`` : l'``insertText`` la remplaçait, et
+    chaque mot disparaissait à l'espace (« les mot se soulignent, puis quand on appuis sur espace se supriment
+    completement »). Un ``compositionend`` est donc envoyé à l'élément de Qt juste avant, en phase de capture : Qt y
+    valide sa propre pré-édition. Le ``beforeinput`` de l'espace s'arrête là : sa plage cible est le mot composé, que
+    Qt aurait remplacé par l'espace (``insertText`` avec ``rangesPair``) ; sans elle, l'``input`` qui suit insère
+    l'espace après le mot. Entrée en pleine composition (``insertLineBreak``, ``insertParagraph``) : Qt a ignoré sa
+    touche (``isComposing``) et n'a pas de cas pour ces deux types ; le mot restait souligné, jamais validé, et le retour
+    à la ligne perdu. Le mot est validé de même, puis Entrée lui est rendue en touche. Un texte qui porte une lettre ou un
+    chiffre (suggestion choisie, autocorrection) remplace le mot composé : Qt le fait juste avec la plage, on n'y touche
+    pas ; seuls l'espace et la ponctuation séparent le mot. Sans effet quand le navigateur
+    termine lui-même la composition (Gboard) ; si Qt corrige un jour ce cas, son ``compositionend`` trouvera une pré-édition
+    vide et n'en fera rien."""
+    import js  # noqa: PLC0415 - voir la docstring du module
+
+    js.Function.new(_VALIDER_LA_COMPOSITION)()
 
 
 def _coller():
