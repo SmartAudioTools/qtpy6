@@ -1,14 +1,25 @@
---- a/src/corelib/platform/wasm/qwasmsuspendresumecontrol.cpp	2026-11-25 22:05:48.303134736 +0100
-+++ b/src/corelib/platform/wasm/qwasmsuspendresumecontrol.cpp	2026-11-25 22:05:56.672771418 +0100
-@@ -170,6 +170,11 @@
-     while (count-- > 0) {
+--- a/src/corelib/platform/wasm/qwasmsuspendresumecontrol.cpp	2026-11-25 23:09:10.241262765 +0100
++++ b/src/corelib/platform/wasm/qwasmsuspendresumecontrol.cpp	2026-11-25 23:09:17.737808836 +0100
+@@ -164,15 +164,18 @@
+     Q_ASSERT(emscripten_is_main_runtime_thread());
+ #endif
+     emscripten::val pendingEvents = suspendResumeControlJs()["pendingEvents"];
+-    int count = pendingEvents["length"].as<int>();
+-    if (count == 0)
+-        return false;
+-    while (count-- > 0) {
++    // The queue length is read again on every turn, as Qt dev does: an event handler may process events itself (a
++    // nested processEvents() from a slot), which sends and removes the remaining events. Counting them once beforehand
++    // made shift() return undefined, and event["index"] threw "undefined is not an object (evaluating 'handle[key]')"
++    // (Safari), killing the instance. The count of sent events is returned (it was -1 after a full loop).
++    int count = 0;
++    while (pendingEvents["length"].as<int>() > 0) {
          // Grab one event (handler and arg), and call it
          emscripten::val event = pendingEvents.call<val>("shift");
-+        // An event handler may process events itself (a nested processEvents() from a slot), which sends and removes
-+        // the events counted above: the queue is then empty, shift() returns undefined, and event["index"] threw
-+        // "undefined is not an object (evaluating 'handle[key]')" (Safari), killing the instance.
-+        if (event.isUndefined())
-+            break;
          auto it = m_eventHandlers.find(event["index"].as<int>());
          Q_ASSERT(it != m_eventHandlers.end());
          it->second(event["arg"]);
++        ++count;
+     }
+     return count;
+ }
