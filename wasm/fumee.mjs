@@ -10,7 +10,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const dist = resolve(process.argv[2] || "/DATA/Python/outils_wasm/pyside6/build/dynamique/dist") + "/";
 // L'enveloppe pyodide.mjs (pyodide-qt.mjs) ne charge l'agrégat de Qt que dans une page : on s'en donne l'air, fetch lisant
 // le disque (sans jumeaux compressés ici : elle se rabat sur le fichier lui-même, comme en développement).
-globalThis.document = {};
+globalThis.document = { addEventListener() {} };  // qtpy6.web.fichiers.installer (glisser-déposer) s'y abonne
 globalThis.window = globalThis;  // le répartiteur d'événements de Qt programme ses réveils par window.setTimeout (QQmlEngine en poste)
 globalThis.location = { href: pathToFileURL(dist).href };
 globalThis.fetch = async u => readFile(fileURLToPath(String(u))).then(o => new Response(o), () => new Response(null, { status: 404 }));

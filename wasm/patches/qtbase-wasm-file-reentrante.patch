@@ -1,0 +1,14 @@
+--- a/src/corelib/platform/wasm/qwasmsuspendresumecontrol.cpp	2026-11-25 22:05:48.303134736 +0100
++++ b/src/corelib/platform/wasm/qwasmsuspendresumecontrol.cpp	2026-11-25 22:05:56.672771418 +0100
+@@ -170,6 +170,11 @@
+     while (count-- > 0) {
+         // Grab one event (handler and arg), and call it
+         emscripten::val event = pendingEvents.call<val>("shift");
++        // An event handler may process events itself (a nested processEvents() from a slot), which sends and removes
++        // the events counted above: the queue is then empty, shift() returns undefined, and event["index"] threw
++        // "undefined is not an object (evaluating 'handle[key]')" (Safari), killing the instance.
++        if (event.isUndefined())
++            break;
+         auto it = m_eventHandlers.find(event["index"].as<int>());
+         Q_ASSERT(it != m_eventHandlers.end());
+         it->second(event["arg"]);
