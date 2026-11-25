@@ -57,7 +57,7 @@ def test_application_persistant_dans_le_navigateur():
                                    syncfs=lambda peupler, rappel: rappel())
         sys.modules["pyodide_js"] = types.SimpleNamespace(FS=fs)
         sys.modules["js"] = types.SimpleNamespace(document=types.SimpleNamespace(addEventListener=lambda *a: None),
-                                                  setInterval=lambda *a: 0, Function=types.SimpleNamespace(new=lambda *a: lambda *b: None),
+                                                  setInterval=lambda *a: 0, Function=types.SimpleNamespace(new=lambda *a: lambda *b: types.SimpleNamespace(attendre=lambda f: None, poser=lambda *c: False)),
                                                   Object=types.SimpleNamespace(new=types.SimpleNamespace), navigator=types.SimpleNamespace())
         sys.modules["pyodide"], sys.modules["pyodide.ffi"] = types.ModuleType("pyodide"), types.SimpleNamespace(create_proxy=lambda f: f, create_once_callable=lambda f: f)
         from qtpy6.web import application, bloquant
@@ -1109,7 +1109,7 @@ def test_police_fixe_dans_le_navigateur():
         # application() branche Ctrl+V sur la page (_coller) : js et pyodide.ffi réduits à ce qu'il en touche
         sys.modules["js"] = types.SimpleNamespace(document=types.SimpleNamespace(addEventListener=lambda *a: None),
                                                   setInterval=lambda *a: 0,  # la pompe de QtCore, inerte ici
-                                                  Function=types.SimpleNamespace(new=lambda *a: lambda *b: None))  # _dessiner_aussitot
+                                                  Function=types.SimpleNamespace(new=lambda *a: lambda *b: types.SimpleNamespace(attendre=lambda f: None, poser=lambda *c: False)))  # _dessiner_aussitot
         sys.modules["pyodide"], sys.modules["pyodide.ffi"] = types.ModuleType("pyodide"), types.SimpleNamespace(create_proxy=lambda f: f)
         from qtpy6.QtGui import QFontDatabase
         from qtpy6.web import application
@@ -1132,7 +1132,7 @@ def test_coller_passe_par_qt():
         ecouteurs = {}
         sys.modules["js"] = types.SimpleNamespace(
             document=types.SimpleNamespace(addEventListener=lambda nom, f, *a: ecouteurs.setdefault(nom, f)),
-            setInterval=lambda *a: 0, Function=types.SimpleNamespace(new=lambda *a: lambda *b: None))
+            setInterval=lambda *a: 0, Function=types.SimpleNamespace(new=lambda *a: lambda *b: types.SimpleNamespace(attendre=lambda f: None, poser=lambda *c: False)))
         sys.modules["pyodide"], sys.modules["pyodide.ffi"] = types.ModuleType("pyodide"), types.SimpleNamespace(create_proxy=lambda f: f)
         from qtpy6.QtCore import QEvent, QObject
         from qtpy6.QtGui import QKeySequence
@@ -2170,6 +2170,41 @@ def test_directory_loaded_reporte_comme_en_natif():
         tourner()
     """)
     assert sortie.splitlines() == ["apres emit", "recu /x"]
+
+
+def test_le_champ_cache_suit_le_texte_de_qt():
+    """Le champ caché de Qt-WASM reprend le texte et le curseur de Qt (``poser``), sauf pendant une composition : sinon un
+    clavier de téléphone y relit le mot que Qt a effacé et le recompose (« bonjour » vidé, puis « s » : « bonjours » ;
+    Samsung S23 sous Chrome, 25/11/2026). Une frappe hors composition après laquelle le champ et Qt diffèrent est
+    signalée (``attendre``), pour la boîte noire."""
+    from qtpy6.web import _SUIVRE_LE_TEXTE_DE_QT
+    from qtpy6.web.sonde import Blink
+
+    navigateur = Blink("about:blank", 400, 300)
+    try:
+        navigateur.execute_script(f"""
+            const el = document.createElement("input");
+            el.className = "qt-window-input-element";
+            document.body.append(el);
+            el.value = "bonjour"; el.focus(); el.setSelectionRange(7, 7);
+            window.champ = new Function({json.dumps(_SUIVRE_LE_TEXTE_DE_QT)})();
+            window.signale = [];
+            champ.attendre((valeur, genre) => signale.push(genre + "=" + valeur));""")
+        change = navigateur.execute_script('return champ.poser("", 0, 0)')  # Qt a vidé le champ
+        # le clavier reprend le mot collé au curseur, lu dans le champ : sans correctif, « bonjour » ; ici, rien
+        valeur, curseur = navigateur.execute_script("return [document.activeElement.value, document.activeElement.selectionStart]")
+        prefixe = valeur[:curseur].split(" ")[-1]
+        navigateur.cdp("Input.imeSetComposition", text=prefixe + "s", selectionStart=len(prefixe) + 1,
+                       selectionEnd=len(prefixe) + 1, replacementStart=curseur - len(prefixe), replacementEnd=curseur)
+        pendant = navigateur.execute_script('return champ.poser("x", 1, 1)')  # en composition : le champ n'est pas touché
+        navigateur.cdp("Input.insertText", text=prefixe + "s")
+        navigateur.cdp("Input.insertText", text="!")  # une frappe hors composition : signalée si Qt diffère
+        navigateur.execute_script("return new Promise(r => setTimeout(r, 50))")
+        final, signale = navigateur.execute_script("return [document.activeElement.value, signale]")
+    finally:
+        navigateur.quit()
+    assert (change, pendant, final) == (True, False, "s!")
+    assert signale and signale[-1] == "insertText=s!", signale  # « s » seul peut l'être aussi, selon Chromium
 
 
 @pytest.mark.parametrize("touche", ["espace", "entree", "suggestion"])

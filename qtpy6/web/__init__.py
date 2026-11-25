@@ -92,6 +92,7 @@ def application(polices: str | os.PathLike[str] | None = None, defaut: QFont | t
             _coller()
             _garder_le_focus()
             _valider_la_composition()
+            _suivre_le_texte_de_qt()
             _dessiner_aussitot()
             _plein_ecran(app)
             from . import boite_noire  # noqa: PLC0415
@@ -246,6 +247,89 @@ def _valider_la_composition():
     import js  # noqa: PLC0415 - voir la docstring du module
 
     js.Function.new(_VALIDER_LA_COMPOSITION)()
+
+
+_SUIVRE_LE_TEXTE_DE_QT = """let compose = false, verifier = null;
+    document.addEventListener("compositionstart", () => { compose = true; }, true);
+    document.addEventListener("compositionend", () => { compose = false; }, true);
+    const champ = () => {
+      let el = document.activeElement;
+      while (el && el.shadowRoot && el.shadowRoot.activeElement) el = el.shadowRoot.activeElement;
+      return el && String(el.className).startsWith("qt-window-input-element") ? el : null;
+    };
+    // après la frappe, une fois Qt passé (son écouteur est sur le champ) : le champ et Qt doivent dire le même texte
+    document.addEventListener("input", e => {
+      if (compose || e.isComposing || !verifier) return;
+      setTimeout(() => { const el = champ(); if (el && !compose) verifier(el.value, e.inputType || ""); }, 0);
+    }, true);
+    return {
+      attendre: f => { verifier = f; },
+      poser: (valeur, ancre, curseur) => {  // rend true si le texte du champ a changé
+        const el = champ();
+        if (compose || !el) return false;
+        const debut = Math.min(ancre, curseur), fin = Math.max(ancre, curseur);
+        if (el.value === valeur && el.selectionStart === debut && el.selectionEnd === fin) return false;
+        const change = el.value !== valeur;
+        if (change) el.value = valeur;
+        el.setSelectionRange(debut, fin, ancre > curseur ? "backward" : "forward");
+        return change;
+      },
+    };"""
+
+
+def _suivre_le_texte_de_qt():
+    """Le champ caché du navigateur suit le texte et le curseur de Qt. Qt-WASM 6.10.2 (``qwasminputcontext.cpp``,
+    ``updateInputElement``) n'y recopie le texte du widget (``ImSurroundingText``) et sa sélection qu'au changement de
+    focus ; or le clavier d'un téléphone lit dans ce champ le mot collé au curseur pour le recomposer (prédiction,
+    reprise du mot) et Qt applique la plage qu'il en tire. Un texte changé par Qt seul (champ vidé ou réécrit par
+    l'application) ou un curseur déplacé par un tap laissaient au champ l'ancien texte : le clavier recomposait le mot
+    effacé (« bonjour », vidé, puis « s » : « bonjours »), ou réinsérait le mot de fin de ligne là où l'élève avait
+    tapé (Samsung S23 sous Chrome, élève de SECONDE 3, 25/11/2026 ; reproduit sous Chromium par CDP). À chaque
+    déplacement du curseur de Qt, le champ reprend donc texte et sélection de Qt, comme au focus, hors composition (le
+    mot composé n'est pas encore chez Qt). Une frappe après laquelle le champ et Qt diffèrent encore (cas non prévu ici)
+    est notée une fois par visite dans la boîte noire (« saisie divergente »), puis le champ est réaligné."""
+    import js  # noqa: PLC0415 - voir la docstring du module
+    from pyodide.ffi import create_proxy  # noqa: PLC0415
+    from qtpy6.QtCore import QCoreApplication, Qt, QTimer  # noqa: PLC0415
+    from qtpy6.QtGui import QGuiApplication, QInputMethodQueryEvent  # noqa: PLC0415
+
+    from . import boite_noire  # noqa: PLC0415
+
+    champ = js.Function.new(_SUIVRE_LE_TEXTE_DE_QT)()
+    Q = Qt.InputMethodQuery
+    notee = [False]
+
+    def qt() -> tuple[str, int, int] | None:
+        objet = QGuiApplication.focusObject()
+        if objet is None:
+            return None
+        requete = QInputMethodQueryEvent(Q.ImEnabled | Q.ImSurroundingText | Q.ImAnchorPosition | Q.ImCursorPosition)
+        QCoreApplication.sendEvent(objet, requete)
+        if not requete.value(Q.ImEnabled):
+            return None
+        return str(requete.value(Q.ImSurroundingText) or ""), int(requete.value(Q.ImAnchorPosition) or 0), \
+            int(requete.value(Q.ImCursorPosition) or 0)
+
+    def poser() -> None:
+        etat = qt()
+        if etat is not None:
+            champ.poser(*etat)
+
+    def verifier(valeur, genre) -> None:
+        etat = qt()
+        if etat is None or str(valeur) == etat[0]:
+            return
+        if not notee[0]:
+            notee[0] = True
+            boite_noire.noter(f"saisie divergente après {genre} : champ {str(valeur)[-60:]!r}, Qt {etat[0][-60:]!r}")
+        champ.poser(*etat)
+
+    minuterie = QTimer(QCoreApplication.instance(), singleShot=True, interval=0)  # une fois par tour de boucle
+    minuterie.timeout.connect(poser)
+    methode = QGuiApplication.inputMethod()
+    methode.cursorRectangleChanged.connect(minuterie.start)
+    methode.anchorRectangleChanged.connect(minuterie.start)
+    champ.attendre(create_proxy(verifier))
 
 
 def _coller():
