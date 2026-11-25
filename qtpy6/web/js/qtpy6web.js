@@ -20,7 +20,10 @@
 // attendu : `tailles` ({nom: octets décompressés}, que la page connaît), compté dès le départ ; un fichier hors de `tailles` pèse
 // son Content-Length (juste s'il n'est pas compressé) une fois commencé. L'avancement ne recule jamais. `jumeaux` : les noms
 // (dernier segment de l'adresse) d'autres fichiers servis aussi compressés à côté (NOM.br et NOM.gz), comme pyodide.asm.wasm
-// et python_stdlib.zip de Pyodide-Qt (hebergement/telecharger.sh) : voir `en_jumeau`.
+// et python_stdlib.zip de Pyodide-Qt (hebergement/telecharger.sh) : voir `en_jumeau`. `qt` : les modules Qt à la demande
+// (« Network » pour PySide6.QtNetwork : DEMANDE de pyodide-qt.mjs) que `module` importe dès son chargement, téléchargés et
+// chargés avant son import, pendant le dépaquetage. Sinon chacun se charge à son premier import par une suspension JSPI
+// (run_sync), que Safari peut refuser au démarrage : l'import échoue, la page ne s'ouvre pas (iOS 27.0.1, 25/11/2026).
 const t0 = performance.now();
 export const journal = [];
 let ecouter = () => {};
@@ -782,7 +785,7 @@ function verifier_navigateur() {
 }
 
 export async function preparer(conteneur, { indexURL, archives = [], roues = [], env = {}, sur_ligne, progres = () => {},
-                                            tailles = {}, jumeaux = [], module, boucles = true, mort: texte } = {}) {
+                                            tailles = {}, jumeaux = [], qt = [], module, boucles = true, mort: texte } = {}) {
   if (sur_ligne) ecouter = sur_ligne;
   if (texte) texte_mort = texte;
   const avance = avancement(progres);
@@ -824,6 +827,10 @@ export async function preparer(conteneur, { indexURL, archives = [], roues = [],
                                                perte]);
   py._api.on_fatal = mourir;  // l'API privée de Pyodide (fatal_error l'appelle une fois, après console.error)
   if (boucles) { suspension.M = py._module; figer_les_evenements(py._module); }
+  // Les modules Qt de `qt`, chargés pendant le dépaquetage et les roues : à l'import de `module`, le chercheur de Pyodide-Qt
+  // les trouve déjà chargés (`deja`) et ne suspend plus (pyodide-qt.mjs, _pyodide_qt ; voir l'en-tête).
+  const qt_charges = qt.length ? qt.map(m => py.pyimport("_pyodide_qt").charger(`/lib/pyside_Qt${m}.so`)) : [];
+  qt_charges.forEach(c => c.catch(() => {}));  // relevés par l'await plus bas
   print(`Pyodide-Qt ${py.version} chargé${donnees.length ? " ; archives " + donnees.map(d => (d.byteLength / 1024) | 0).join(", ") + " Kio" : ""}`);
   avance.debut("archives");
   archives.forEach((a, i) => py.unpackArchive(donnees[i], "zip", { extractDir: a.dossier }));
@@ -860,6 +867,7 @@ f = s and pathlib.Path(s.submodule_search_locations[0], "web", "versions.json")
 f.read_text() if f and f.exists() else "null"`), versions = JSON.parse(attendue);
   if (versions && versions.pyodide_qt.version !== py.version)
     print(`attention : Pyodide-Qt ${py.version} là où qtpy6.web attend ${versions.pyodide_qt.version} (roues ${versions.pyodide_qt.abi})`);
+  await Promise.all(qt_charges);
   let modules;
   if (module) {
     avance.debut("module");

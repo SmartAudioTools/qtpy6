@@ -50,3 +50,24 @@ def test_refus_dans_un_chercheur_d_import_l_import_aboutit(moteur: str) -> None:
     r = lancer(moteur, "import")
     assert r["mort"] is None and r["vivant"] is True and r["retour"] == 0
     assert r["note"].startswith("[True, 'refus'") and r["note"].endswith("'importé']")
+
+
+# Pyodide-Qt DYNAMIQUE (construire.sh, phase dynamique : l'agrégat et un pyside_Qt<M>.so par module à la demande)
+DYNAMIQUE = Path(os.environ.get("PYODIDE_QT_DYNAMIQUE", "/DATA/Python/outils_wasm/pyside6/build/dynamique/dist"))
+
+
+@pytest.mark.parametrize("prechargement", ["sans", "avec"])
+def test_module_qt_a_la_demande_precharge_s_importe_sans_suspension(moteur: str, prechargement: str) -> None:
+    # L-61 (iPhone iOS 27.0.1, 25/11/2026) : PySide6.QtNetwork, importé au démarrage, se chargeait par run_sync dans le
+    # chercheur de pyodide-qt.mjs ; Safari a refusé la suspension, la JsException a fait échouer l'import. Préchargé
+    # (`qt` de preparer : _pyodide_qt.charger avant l'import), il s'importe là même où toute suspension est refusée.
+    if not (DYNAMIQUE / "pyside_QtNetwork.so").exists():
+        pytest.skip(f"Pyodide-Qt dynamique absent : {DYNAMIQUE}")
+    sortie = subprocess.run([moteur, str(ICI / "qt_demande_harnais.mjs"), JS.as_uri(), DYNAMIQUE.as_uri() + "/",
+                             prechargement], capture_output=True, text=True, timeout=300, check=True).stdout
+    r = json.loads(sortie.strip().splitlines()[-1])
+    assert r["mort"] is None and r["retour"] == 0
+    if prechargement == "sans":  # le témoin : le défaut de L-61, reproduit
+        assert r["note"] == "['échec JsException']" and r["refus_sync"] == 1
+    else:
+        assert r["note"] == "['importé QNetworkRequest']" and r["refus_sync"] == 0
