@@ -11,7 +11,7 @@ Object.assign(globalThis, {
   window: globalThis,
 });
 const m = await import(chemin_js);
-if (mode === "avec") m.boucles_qt();
+if (mode !== "sans") m.boucles_qt();
 const { loadPyodide } = await import(new URL("pyodide.mjs", dossier).href);
 const py = await loadPyodide({ indexURL: new URL(dossier).pathname, stdout: () => {}, stderr: () => {} });
 m.suspension.M = py._module;
@@ -19,7 +19,28 @@ let mort = null;
 py._api.on_fatal = e => { mort = String(e && e.message); };
 globalThis.attendre = () => new Promise(r => setTimeout(r, 0));
 globalThis.rappel = () => {
-  const M = py._module, ptr = M.stringToNewUTF8(`
+  // mode « import » : le refus arrive dans un chercheur de sys.meta_path pendant un import (la Pause de qtpy6.web.importer,
+  // élève sur iPhone du 25/11/2026, W1027) ; l'import doit aboutir.
+  const M = py._module, ptr = M.stringToNewUTF8(mode === "import" ? `
+from pyodide.ffi import run_sync, can_run_sync, JsException
+import js, sys
+note.append(can_run_sync())
+class Pause:
+    @staticmethod
+    def find_spec(*_):
+        try:
+            run_sync(js.attendre())
+        except JsException:
+            note.append("refus")
+        return None
+sys.meta_path.insert(0, Pause)
+try:
+    import fractions
+    note.append("importé")
+except BaseException as e:
+    note.append("échec " + type(e).__name__)
+finally:
+    sys.meta_path.remove(Pause)` : `
 from pyodide.ffi import run_sync, can_run_sync, JsException
 import js
 note.append(can_run_sync())

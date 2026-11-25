@@ -37,3 +37,12 @@ def test_le_message_nomme_le_navigateur_et_dit_quoi_faire(mesure: dict) -> None:
 def test_navigateurs_reconnus(mesure: dict) -> None:
     assert mesure["navigateurs"] == {"chrome_windows": "Chrome 131", "edge": "Edge 120", "firefox": "Firefox 128",
                                      "safari_mac": "Safari 26.1", "chrome_iphone": "iOS 26.1"}
+
+
+def test_le_conseil_suit_l_appareil(mesure: dict) -> None:
+    """iPhone : mettre à jour iOS, sinon un ordinateur ; Mac : macOS ; Firefox : Firefox ; tous : Chrome ou Edge."""
+    c = mesure["conseils"]
+    assert "Mise à jour logicielle" in c["chrome_iphone"] and "ordinateur" in c["chrome_iphone"]
+    assert "macOS" in c["safari_mac"] and "Firefox" in c["firefox"]
+    assert all("Chrome ou Microsoft Edge" in t for t in c.values())
+    assert "Mise à jour logicielle" in mesure["refus"]["message"]

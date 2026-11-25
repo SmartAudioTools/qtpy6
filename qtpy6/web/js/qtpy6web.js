@@ -752,6 +752,19 @@ export function navigateur(agent = navigator.userAgent) {
   return "inconnu";
 }
 
+// Ce que l'élève doit faire, selon ce qu'il a en main (le professeur, 25/11/2026, W1027 : l'écran de refus le dit lui-même).
+// Sur iPhone et iPad, tout navigateur est WebKit : seule la mise à jour d'iOS aide, ou un autre appareil si iOS 27 n'est pas
+// proposé (iPhone XS, XR et plus anciens restent en iOS 18).
+const AILLEURS = "ouvrez ce lien dans Google Chrome ou Microsoft Edge à jour (version 137 ou plus)";
+export function conseil(nom) {
+  if (nom.startsWith("iOS ")) return "Mettez à jour l'iPhone ou l'iPad : Réglages › Général › Mise à jour logicielle, iOS 27 ou "
+    + "plus (gratuit). Si iOS 27 n'est pas proposé, l'appareil est trop ancien : " + AILLEURS + " sur un ordinateur, au lycée "
+    + "ou à la maison.";
+  if (nom.startsWith("Safari ")) return "Mettez à jour macOS (Safari 27 ou plus), ou " + AILLEURS + ".";
+  if (nom.startsWith("Firefox ")) return "Mettez Firefox à jour (menu › Aide › À propos de Firefox), ou " + AILLEURS + ".";
+  return "Mettez-le à jour, ou " + AILLEURS + ".";
+}
+
 // Pyodide-Qt et Qt-WASM sont compilés pour la JSPI (WebAssembly.Suspending) : sans elle, Pyodide s'arrête sur « WebAssembly
 // stack switching not supported in this JavaScript runtime », message que personne ne comprend (élève du 22/11/2026, W925). Il
 // n'y a pas d'autre chemin (Pyodide ne suspend plus que par JSPI ; une recompilation Asyncify de Qt et de Pyodide, plus lourde
@@ -762,8 +775,7 @@ function verifier_navigateur() {
   const nom = navigateur();
   noter(`navigateur sans JSPI : ${nom} (${navigator.userAgent})`);
   sceller();
-  const erreur = new Error(`ce navigateur (${nom}) est trop ancien pour cette page. Mettez-le à jour, ou ouvrez ce lien dans `
-    + "Google Chrome ou Microsoft Edge à jour (version 137 ou plus) ; sur iPad ou iPhone, il faut iOS 27 ou plus.");
+  const erreur = new Error(`ce navigateur (${nom}) est trop ancien pour cette page. ${conseil(nom)}`);
   erreur.name = "NavigateurSansJSPI";
   erreur.navigateur = nom;
   throw erreur;

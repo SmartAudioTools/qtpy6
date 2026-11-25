@@ -43,3 +43,10 @@ def test_avec_aiguilleur_le_refus_est_une_exception_python(moteur: str) -> None:
     assert r["mort"] is None and r["vivant"] is True
     assert r["note"] == "[True, 'refus']" and r["retour"] == 0 and r["refus_sync"] == 1
     assert r["normal"] == "suspendu"  # une suspension ordinaire passe toujours
+
+
+def test_refus_dans_un_chercheur_d_import_l_import_aboutit(moteur: str) -> None:
+    # la Pause de qtpy6.web.importer : le refus arrive dans find_spec pendant un import (iPhone, 25/11/2026, W1027)
+    r = lancer(moteur, "import")
+    assert r["mort"] is None and r["vivant"] is True and r["retour"] == 0
+    assert r["note"].startswith("[True, 'refus'") and r["note"].endswith("'importé']")

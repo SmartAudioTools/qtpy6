@@ -37,5 +37,6 @@ const agents = {
 };
 navigator.maxTouchPoints = 0;
 mesure.navigateurs = Object.fromEntries(Object.entries(agents).map(([k, a]) => [k, m.navigateur(a)]));
+mesure.conseils = Object.fromEntries(Object.entries(mesure.navigateurs).map(([k, n]) => [k, m.conseil(n)]));
 console.log(JSON.stringify(mesure));
 process.exit(0);
