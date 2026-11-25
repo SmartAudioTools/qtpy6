@@ -15,11 +15,11 @@ permissions:
   pages: write
   id-token: write
 jobs:
-  deploy:
+  # Deux jobs, comme le modèle de GitHub : dans un seul, deploy-pages demande l'artefact moins d'une seconde après son
+  # téléversement, avant que GitHub ne le liste (« Fetching artifact metadata failed », « No artifacts named
+  # github-pages », runs 45714305541 et 45716988220 du 25/11/2026, GitHub opérationnel ; actions/deploy-pages #451).
+  build:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get install -y -q brotli  # telecharger.sh : les jumeaux .br de Pyodide-Qt (gzip, pour les .gz, est déjà là)
@@ -29,5 +29,12 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
       - id: deploy
         uses: actions/deploy-pages@v4
