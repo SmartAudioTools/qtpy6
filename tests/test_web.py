@@ -2207,6 +2207,73 @@ def test_le_champ_cache_suit_le_texte_de_qt():
     assert signale and signale[-1] == "insertText=s!", signale  # « s » seul peut l'être aussi, selon Chromium
 
 
+def test_le_champ_cache_refuse_la_prediction_si_qt_la_refuse():
+    """Qt-WASM ignore ``ImhNoPredictiveText`` (il ne lit que ``ImhHiddenText``) : le champ caché porte alors autocomplete,
+    autocorrect, autocapitalize à « off » et spellcheck à false (éditeur de code : pas de suggestion de mots, le
+    professeur, 25/11/2026), puis les perd pour le widget suivant qui ne la refuse pas."""
+    from qtpy6.web import _SUIVRE_LE_TEXTE_DE_QT
+    from qtpy6.web.sonde import Blink
+
+    lire = """const el = document.activeElement;
+        return ["autocomplete", "autocorrect", "autocapitalize", "spellcheck"].map(n => el.getAttribute(n))"""
+    navigateur = Blink("about:blank", 400, 300)
+    try:
+        navigateur.execute_script(f"""
+            const el = document.createElement("input");
+            el.className = "qt-window-input-element";
+            document.body.append(el);
+            el.focus();
+            window.champ = new Function({json.dumps(_SUIVRE_LE_TEXTE_DE_QT)})();""")
+        navigateur.execute_script("champ.sans_prediction(true)")
+        sans = navigateur.execute_script(lire)
+        navigateur.execute_script("champ.sans_prediction(false)")
+        avec = navigateur.execute_script(lire)
+    finally:
+        navigateur.quit()
+    assert sans == ["off", "off", "off", "false"]
+    assert avec == [None, None, None, None]
+
+
+def test_composition_sans_plage_recoit_celle_du_mot():
+    """Clavier Samsung (S23, Chrome Android, 25/11/2026) : il reprend le mot collé au curseur (« print( », reprise sans
+    ``input``) puis l'efface en composition (« print », « prin »). Sans plage cible (``getTargetRanges`` vide), Qt-WASM
+    calcule le remplacement depuis son propre curseur (``qwasminputcontext.cpp``, ``insertCompositionText``) et
+    efface les PREMIÈRES lettres du mot (« print( » devenait « rint( », puis « nt( »). La fenêtre de Qt reçoit donc la plage
+    du mot composé, comme Blink la donne sur l'ordinateur ; une plage déjà donnée n'est pas touchée."""
+    from qtpy6.web import _VALIDER_LA_COMPOSITION
+    from qtpy6.web.sonde import Blink
+
+    types = "['beforeinput','input','compositionstart','compositionupdate','compositionend','keydown','keyup']"
+    navigateur = Blink("about:blank", 400, 300)
+    try:
+        navigateur.execute_script(f"""
+            const fenetre = document.createElement("div"), el = document.createElement("input");
+            fenetre.className = "qt-window";  // Qt-WASM écoute sur sa fenêtre, parente du champ caché
+            el.className = "qt-window-input-element";
+            fenetre.append(el);
+            document.body.append(fenetre);
+            window.plages = [];
+            fenetre.addEventListener("beforeinput", e => {{ if (e.inputType === "insertCompositionText")
+              plages.push(e.getTargetRanges().map(r => r.startOffset + "-" + r.endOffset).join(",")); }});
+            new Function({json.dumps(_VALIDER_LA_COMPOSITION)})();
+            el.value = "a print("; el.focus(); el.setSelectionRange(8, 8);
+            InputEvent.prototype.getTargetRanges = function () {{ return []; }};  // Chrome Android
+            window.cacher = e => e.stopImmediatePropagation();
+            for (const t of {types}) window.addEventListener(t, cacher, true);""")
+        # la reprise du mot : le navigateur compose « print( » sans qu'aucun événement n'en sorte...
+        navigateur.cdp("Input.imeSetComposition", text="print(", selectionStart=6, selectionEnd=6,
+                       replacementStart=2, replacementEnd=8)
+        navigateur.execute_script(f"""for (const t of {types}) window.removeEventListener(t, cacher, true);
+            const el = document.activeElement;  // ...que son compositionstart, qui porte le mot repris
+            el.dispatchEvent(new CompositionEvent("compositionstart", {{data: "print(", bubbles: true, composed: true}}));""")
+        for mot in ("print", "prin"):
+            navigateur.cdp("Input.imeSetComposition", text=mot, selectionStart=len(mot), selectionEnd=len(mot))
+        plages = navigateur.execute_script("return plages")
+    finally:
+        navigateur.quit()
+    assert plages == ["2-8", "2-7"]
+
+
 @pytest.mark.parametrize("touche", ["espace", "entree", "suggestion"])
 def test_touche_en_pleine_composition_valide_le_mot(touche):
     """Un clavier de téléphone qui envoie l'espace (``insertText``) ou Entrée (``insertLineBreak``) pendant la

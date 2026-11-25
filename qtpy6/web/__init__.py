@@ -208,16 +208,33 @@ def _garder_le_focus():
         }, true);""")()
 
 
-_VALIDER_LA_COMPOSITION = """let compose = false, mot = "";
-    document.addEventListener("compositionstart", () => { compose = true; mot = ""; }, true);
+_VALIDER_LA_COMPOSITION = """let compose = false, mot = "", debut = 0, longueur = 0;
+    const de_qt = el => String(el.className).startsWith("qt-window-");
+    document.addEventListener("compositionstart", e => {
+      compose = true; mot = "";
+      const el = e.composedPath()[0], repris = e.data || "";  // repris : le mot existant que le clavier recompose
+      if (!de_qt(el) || el.selectionStart == null) return;
+      debut = el.selectionStart; longueur = el.selectionEnd - debut;
+      if (!longueur && repris && el.value.slice(debut - repris.length, debut) === repris) {
+        debut -= repris.length; longueur = repris.length;
+      }
+    }, true);
     document.addEventListener("compositionupdate", e => { compose = true; mot = e.data || ""; }, true);
     document.addEventListener("compositionend", () => { compose = false; }, true);
     document.addEventListener("beforeinput", e => {
       const el = e.composedPath()[0];
+      if (e.inputType === "insertCompositionText" && de_qt(el)) {
+        if (!e.getTargetRanges().length) {  // la plage que Qt lit : celle du mot composé, que Blink donne sur l'ordinateur
+          const plage = {startOffset: debut, endOffset: debut + longueur};
+          e.getTargetRanges = () => [plage];
+        }
+        longueur = (e.data || "").length;
+        return;
+      }
       const ligne = e.inputType === "insertLineBreak" || e.inputType === "insertParagraph";
       // un texte avec lettre ou chiffre (suggestion, autocorrection) remplace le mot : la plage du beforeinput est juste
       const separe = e.inputType === "insertText" && !/[\p{L}\p{N}]/u.test(e.data || "");
-      if (!compose || !(ligne || separe) || !String(el.className).startsWith("qt-window-")) return;
+      if (!compose || !(ligne || separe) || !de_qt(el)) return;
       compose = false;
       el.dispatchEvent(new CompositionEvent("compositionend", {data: mot, bubbles: true}));
       e.stopPropagation();  // sa plage (le mot composé) n'atteint pas Qt : l'input qui suit s'insère après le mot
@@ -243,7 +260,11 @@ def _valider_la_composition():
     chiffre (suggestion choisie, autocorrection) remplace le mot composé : Qt le fait juste avec la plage, on n'y touche
     pas ; seuls l'espace et la ponctuation séparent le mot. Sans effet quand le navigateur
     termine lui-même la composition (Gboard) ; si Qt corrige un jour ce cas, son ``compositionend`` trouvera une pré-édition
-    vide et n'en fera rien."""
+    vide et n'en fera rien. Un ``insertCompositionText`` sans plage cible (``getTargetRanges`` vide : clavier Samsung S23
+    sous Chrome Android, 25/11/2026, qui reprend le mot collé au curseur puis l'efface en composition) reçoit celle du
+    mot composé, suivie depuis le ``compositionstart`` (le mot repris qu'il porte, juste avant le curseur) : sans plage,
+    Qt calcule le remplacement depuis son propre curseur et effaçait les premières lettres du mot (« print( » devenait
+    « rint( », puis « nt( »). Une plage donnée par le navigateur (Blink sur l'ordinateur) n'est pas touchée."""
     import js  # noqa: PLC0415 - voir la docstring du module
 
     js.Function.new(_VALIDER_LA_COMPOSITION)()
@@ -274,6 +295,14 @@ _SUIVRE_LE_TEXTE_DE_QT = """let compose = false, verifier = null;
         el.setSelectionRange(debut, fin, ancre > curseur ? "backward" : "forward");
         return change;
       },
+      // un widget qui refuse la prédiction (ImhNoPredictiveText, que Qt-WASM ignore) : le clavier ne suggère ni ne corrige
+      sans_prediction: sans => {
+        const el = champ();
+        if (!el || el.hasAttribute("autocorrect") === sans) return;
+        for (const nom of ["autocomplete", "autocorrect", "autocapitalize"])
+          sans ? el.setAttribute(nom, "off") : el.removeAttribute(nom);
+        sans ? el.setAttribute("spellcheck", "false") : el.removeAttribute("spellcheck");
+      },
     };"""
 
 
@@ -287,7 +316,10 @@ def _suivre_le_texte_de_qt():
     tapé (Samsung S23 sous Chrome, élève de SECONDE 3, 25/11/2026 ; reproduit sous Chromium par CDP). À chaque
     déplacement du curseur de Qt, le champ reprend donc texte et sélection de Qt, comme au focus, hors composition (le
     mot composé n'est pas encore chez Qt). Une frappe après laquelle le champ et Qt diffèrent encore (cas non prévu ici)
-    est notée une fois par visite dans la boîte noire (« saisie divergente »), puis le champ est réaligné."""
+    est notée une fois par visite dans la boîte noire (« saisie divergente »), puis le champ est réaligné. Qt-WASM ignore
+    aussi ``ImhNoPredictiveText`` : le champ porte alors autocomplete, autocorrect, autocapitalize « off » et spellcheck
+    false (éditeur de code, le professeur, 25/11/2026 : « pour les questions de code, il faut pas autoriser la suggestion
+    de mots »), retirés pour un widget qui ne la refuse pas."""
     import js  # noqa: PLC0415 - voir la docstring du module
     from pyodide.ffi import create_proxy  # noqa: PLC0415
     from qtpy6.QtCore import QCoreApplication, Qt, QTimer  # noqa: PLC0415
@@ -303,17 +335,20 @@ def _suivre_le_texte_de_qt():
         objet = QGuiApplication.focusObject()
         if objet is None:
             return None
-        requete = QInputMethodQueryEvent(Q.ImEnabled | Q.ImSurroundingText | Q.ImAnchorPosition | Q.ImCursorPosition)
+        requete = QInputMethodQueryEvent(Q.ImEnabled | Q.ImSurroundingText | Q.ImAnchorPosition | Q.ImCursorPosition
+                                         | Q.ImHints)
         QCoreApplication.sendEvent(objet, requete)
         if not requete.value(Q.ImEnabled):
             return None
+        sans = bool(Qt.InputMethodHint(int(requete.value(Q.ImHints) or 0)) & Qt.InputMethodHint.ImhNoPredictiveText)
         return str(requete.value(Q.ImSurroundingText) or ""), int(requete.value(Q.ImAnchorPosition) or 0), \
-            int(requete.value(Q.ImCursorPosition) or 0)
+            int(requete.value(Q.ImCursorPosition) or 0), sans
 
     def poser() -> None:
         etat = qt()
         if etat is not None:
-            champ.poser(*etat)
+            champ.sans_prediction(etat[3])
+            champ.poser(*etat[:3])
 
     def verifier(valeur, genre) -> None:
         etat = qt()
@@ -322,13 +357,14 @@ def _suivre_le_texte_de_qt():
         if not notee[0]:
             notee[0] = True
             boite_noire.noter(f"saisie divergente après {genre} : champ {str(valeur)[-60:]!r}, Qt {etat[0][-60:]!r}")
-        champ.poser(*etat)
+        champ.poser(*etat[:3])
 
     minuterie = QTimer(QCoreApplication.instance(), singleShot=True, interval=0)  # une fois par tour de boucle
     minuterie.timeout.connect(poser)
     methode = QGuiApplication.inputMethod()
     methode.cursorRectangleChanged.connect(minuterie.start)
     methode.anchorRectangleChanged.connect(minuterie.start)
+    QGuiApplication.instance().focusObjectChanged.connect(lambda _objet: minuterie.start())
     champ.attendre(create_proxy(verifier))
 
 
