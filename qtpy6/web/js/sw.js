@@ -57,20 +57,29 @@ self.addEventListener("message", e => e.waitUntil(caches.open(CACHE).then(cache 
     reponse = new Response(reponse.body.pipeThrough(new DecompressionStream(format)), { headers: {
       "Content-Type": /\.wasm\.\w+$/.test(nom) ? "application/wasm" : "application/octet-stream", "X-Qtpy6-Decompresse": "1" } });
   await cache.put(url, reponse);
-})))));
-self.addEventListener("fetch", e => {
-  if (e.request.method !== "GET") return;
-  e.respondWith(caches.open(CACHE).then(async cache => {
-    const garde = await cache.match(e.request);
-    if (garde) return garde;
-    if (PYODIDE && e.request.url.startsWith(PYODIDE)) {
+}))).catch(() => {})));  // un Cache Storage qui refuse : rien de rangé, la page continue servie par le réseau
+// Un Cache Storage qui refuse (caches.open ou match rejette : base abîmée d'un profil Firefox) ne devient jamais une erreur
+// réseau : la demande passe au réseau. Sans cela, chaque GET de la page échouait (« NetworkError when attempting to fetch
+// resource », « error loading dynamically imported module ») pendant que ses POST passaient (SmartTeacher W1051, 26/11/2026).
+async function garde_du_cache(requete) {
+  try {
+    const cache = await caches.open(CACHE);
+    let garde = await cache.match(requete);
+    if (!garde && PYODIDE && requete.url.startsWith(PYODIDE))
       // un worker demande l'URL BRUTE d'un fichier que la page n'a chargé que par son jumeau (pyodide.asm.wasm.br…) :
       // l'entrée du jumeau, rangée décompressée (message), est la bonne réponse — sans elle, retéléchargement brut
-      const jumeau = await cache.match(e.request.url + ".br") || await cache.match(e.request.url + ".gz");
-      if (jumeau) return jumeau;
-    }
+      garde = await cache.match(requete.url + ".br") || await cache.match(requete.url + ".gz");
+    return { cache, garde };
+  } catch {
+    return {};
+  }
+}
+self.addEventListener("fetch", e => {
+  if (e.request.method !== "GET") return;
+  e.respondWith(garde_du_cache(e.request).then(async ({ cache, garde }) => {
+    if (garde) return garde;
     const reponse = await fetch(e.request);
-    if (PYODIDE && e.request.url.startsWith(PYODIDE) && reponse.ok && ["basic", "cors"].includes(reponse.type)
+    if (cache && PYODIDE && e.request.url.startsWith(PYODIDE) && reponse.ok && ["basic", "cors"].includes(reponse.type)
         && !/\.(br|gz)$/.test(new URL(e.request.url).pathname))
       // jamais une réponse opaque ou en erreur ; jamais un jumeau, que seul « message » range, décompressé : rangé brut
       // ici (la page le demande dès qu'elle est contrôlée, quand p=… est le Pyodide-Qt de la page), « message » le

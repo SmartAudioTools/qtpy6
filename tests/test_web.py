@@ -1934,6 +1934,70 @@ def test_service_worker_fichier_republie():
     assert dit == {"rangé par la 2": "B", "reçu, la 2 active": "B"}, dit
 
 
+def cache_refuse(sw: Path = SW) -> dict[str, str]:
+    """Une page contrôlée par ``sw`` dont le Cache Storage refuse (caches.open rejette, comme la base abîmée d'un profil
+    Firefox) : ce que reçoivent son fetch et son import dynamique. Page minimale, sans Pyodide (~6 s)."""
+    import http.server
+    import threading
+
+    from selenium import webdriver
+
+    refus = b'CacheStorage.prototype.open = () => Promise.reject(new DOMException("base abimee", "UnknownError"));\n'
+    page = b"""<!doctype html><meta charset=utf-8><script type=module>
+await navigator.serviceWorker.register("sw.js?v=1");
+await navigator.serviceWorker.ready;
+const dit = {};
+try { dit.fetch = await (await fetch("fichier.txt")).text(); } catch (e) { dit.fetch = "ERREUR " + e.message; }
+try { dit.import = (await import("./module.mjs")).valeur; } catch (e) { dit.import = "ERREUR " + e.message; }
+dit.controle = !!navigator.serviceWorker.controller; window.dit = dit;
+</script>"""
+    corps = {"/app/sw.js": (refus + Path(sw).read_bytes(), "text/javascript"), "/app/index.html": (page, "text/html"),
+             "/app/fichier.txt": (b"contenu", "text/plain"),
+             "/app/module.mjs": (b"export const valeur = 'module';", "text/javascript")}
+
+    class Gestionnaire(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *_):
+            pass
+
+        def do_GET(self):
+            contenu, type_ = corps.get(self.path.split("?")[0], (b"", "text/plain"))
+            self.send_response(200 if contenu else 404)
+            self.send_header("Content-Type", type_)
+            self.send_header("Content-Length", str(len(contenu)))
+            self.end_headers()
+            self.wfile.write(contenu)
+
+    def visite():
+        navigateur.get(base)
+        limite = time.time() + 30
+        while time.time() < limite and not navigateur.execute_script("return window.dit"):
+            time.sleep(0.2)
+        return navigateur.execute_script("return window.dit")
+
+    serveur = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Gestionnaire)
+    threading.Thread(target=serveur.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{serveur.server_port}/app/index.html"
+    options = webdriver.FirefoxOptions()
+    options.add_argument("--headless")
+    navigateur = webdriver.Firefox(options=options)
+    try:
+        visite()  # enregistre sw (claim : contrôlée dès cette visite-ci)
+        return visite() or {"page": "non chargée"}  # avant le correctif, la navigation elle-même échouait
+    finally:
+        navigateur.quit()
+        serveur.shutdown()
+
+
+@pytest.mark.skipif(not FIREFOX, reason="Firefox et geckodriver requis")
+def test_service_worker_cache_refuse():
+    """Un Cache Storage qui refuse ne devient pas une erreur réseau : la page reçoit ses fichiers du réseau. Avant le
+    26/11/2026, chaque GET d'une page contrôlée échouait (« NetworkError », « error loading dynamically imported module »)
+    chez des élèves sous Firefox, pendant que leurs POST passaient (SmartTeacher W1051)."""
+    dit = cache_refuse()
+    # avant le correctif, la navigation rejetée par sw.js faisait échapper la page au service worker (controle False)
+    assert dit == {"controle": True, "fetch": "contenu", "import": "module"}, dit
+
+
 
 _GLISSER = """
 import functools, http.server, sys, threading, time
