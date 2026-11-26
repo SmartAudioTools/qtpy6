@@ -141,12 +141,28 @@ class _SansClicAuGlisse(QObject):
 _EN_ATTENTE = []  # les zones de ``defiler_au_doigt`` construites avant ``activer``
 
 
+DECELERATION = 2500  # px/s² : la course après le lâcher (``arrivee``), à peu près celle d'iOS pour un geste ordinaire
+
+
+def arrivee(position, vitesse, deceleration=DECELERATION):
+    """Où s'arrête la course lancée de ``position`` à ``vitesse`` (px/s, par axe), freinée à ``deceleration`` : à
+    v²/2a dans la direction du geste. Calculé ici, en pixels de la page : ``QScroller.finalPosition`` partait de sa
+    propre vitesse, en mètres par seconde convertis par une densité d'écran que le navigateur ne lui donne pas, et
+    sur un téléphone la page filait beaucoup trop loin (SmartTeacher, 26/11/2026 : « sur telephone l'accueil defilait
+    beaucoup trop vite »)."""
+    norme = sum(v * v for v in vitesse) ** 0.5
+    if norme < 1:
+        return tuple(position)
+    distance = norme * norme / (2 * deceleration)
+    return tuple(p + v / norme * distance for p, v in zip(position, vitesse))
+
+
 class _Inertie(QObject):
     """La course de ``QScroller`` une fois le doigt levé, finie au rythme des images de l'écran. ``QScroller`` avance
     à la minuterie de Qt, que rien ne cale sur l'écran : sur un téléphone simulé (bac NSI, 412 px, densité 2,6),
     40 % des images restaient sans mouvement (pas espacés de 32 à 48 ms) alors qu'une image coûtait 2-3 ms à dessiner
     (``QCM/web/pyqt6/sonde_lecteur.html``, scénario ``doigt``). Au passage en ``Scrolling``, la position où ``QScroller``
-    s'arrêterait (``finalPosition``, bornée à la plage : le rebond de fin est perdu) est relevée, lui arrêté, et une
+    s'arrêterait (``arrivee``, bornée à la plage : le rebond de fin est perdu) est calculée, lui arrêté, et une
     ``QPropertyAnimation`` de qtpy6 (menée par les images, ``qtpy6.animation``) mène chaque ascenseur jusqu'à elle en
     décélérant : ``OutQuad`` part à la vitesse du doigt quand sa durée vaut deux fois la distance divisée par cette
     vitesse. La vitesse est celle des positions des ascenseurs pendant les ``FENETRE`` dernières secondes du glissé :
@@ -204,8 +220,9 @@ class _Inertie(QObject):
             if len(recents) < 2:
                 return  # trop peu de positions pour une vitesse : QScroller finit seul
             (t0, *p0), (t1, *p1) = recents[0], recents[-1]
-            fin = self.scroller.finalPosition()
-            if self.courir(fin.x(), fin.y(), sum((b - a) ** 2 for a, b in zip(p0, p1)) ** 0.5 / max(t1 - t0, 1e-3)):
+            vitesse = [(b - a) / max(t1 - t0, 1e-3) for a, b in zip(p0, p1)]
+            x, y = arrivee(p1, vitesse)
+            if self.courir(x, y, sum(v * v for v in vitesse) ** 0.5):
                 self.scroller.stop()
 
     def _avaler(self, oui):

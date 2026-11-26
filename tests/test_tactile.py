@@ -120,3 +120,11 @@ def test_toucher_un_bouton_le_clique(page):
     QTest.touchEvent(page.viewport(), ecran).release(0, point)
     QTest.qWait(300)
     assert page.clics == [1]
+
+
+def test_arrivee_de_la_course_en_pixels_de_la_page():
+    """SmartTeacher, le professeur, 26/11/2026 (W1050) : « sur telephone l'accueil defilait beaucoup trop vite ». La
+    course après le lâcher se calcule en pixels de la page (v²/2a), sans la densité d'écran de ``QScroller``."""
+    assert tactile.arrivee((0, 1000), (0, 2000)) == (0, 1000 + 2000 ** 2 / (2 * tactile.DECELERATION))
+    assert tactile.arrivee((0, 1000), (0, -1000)) == (0, 800)
+    assert tactile.arrivee((5, 5), (0, 0)) == (5, 5)
