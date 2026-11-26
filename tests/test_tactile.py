@@ -12,7 +12,7 @@ import pytest
 from qtpy6.QtCore import QPoint, Qt
 from qtpy6.QtGui import QInputDevice
 from qtpy6.QtTest import QTest
-from qtpy6.QtWidgets import QVBoxLayout, QWidget
+from qtpy6.QtWidgets import QPushButton, QVBoxLayout, QWidget
 
 from qtpy6.web import tactile
 from qtpy6.web.defilement import ZoneDefilante
@@ -57,6 +57,12 @@ def page(app, monkeypatch):
     disposition.addSpacing(300)
     zone.relais = Relais()
     disposition.addWidget(zone.relais)
+    disposition.addSpacing(100)
+    zone.bouton = QPushButton("Un sujet")  # un bouton de la page (accueil de SmartTeacher : les titres des sujets)
+    zone.bouton.setFixedHeight(200)
+    zone.clics = []
+    zone.bouton.clicked.connect(lambda: zone.clics.append(1))
+    disposition.addWidget(zone.bouton)
     disposition.addSpacing(1500)
     zone.setWidget(contenu)
     zone.setWidgetResizable(True)
@@ -90,3 +96,27 @@ def test_glisse_sur_le_relais_ne_fait_pas_defiler(page):
     glisser(page, page.relais.mapTo(page.viewport(), page.relais.rect().center()))
     assert page.relais.souris > 0  # le relais reçoit bien le geste…
     assert page.verticalScrollBar().value() == 200  # …et la page ne défile pas (sans arreter_le_defilement : 200 → ~440)
+
+
+def test_glisse_sur_un_bouton_ne_le_clique_pas(page):
+    """SmartTeacher, le professeur, 26/11/2026 (W1050) : « en scrolant sur la page d'accueil , on pouvait
+    malencontreusement cliquer sur un sujet et l'ouvrir » : le glissé fait défiler la page, le bouton sous le doigt
+    n'est pas cliqué."""
+    page.verticalScrollBar().setValue(500)
+    QTest.qWait(50)
+    glisser(page, page.bouton.mapTo(page.viewport(), page.bouton.rect().center()))
+    assert page.verticalScrollBar().value() > 600  # la page a défilé
+    assert not page.clics and not page.bouton.isDown()
+
+
+def test_toucher_un_bouton_le_clique(page):
+    """Un doigt posé et levé sur place clique le bouton, comme la souris (témoin du précédent)."""
+    page.verticalScrollBar().setValue(500)
+    QTest.qWait(50)
+    ecran = QTest.createTouchDevice(QInputDevice.DeviceType.TouchScreen)
+    point = page.bouton.mapTo(page.viewport(), page.bouton.rect().center())
+    QTest.touchEvent(page.viewport(), ecran).press(0, point)
+    QTest.qWait(30)
+    QTest.touchEvent(page.viewport(), ecran).release(0, point)
+    QTest.qWait(300)
+    assert page.clics == [1]

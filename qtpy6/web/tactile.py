@@ -7,7 +7,7 @@ import time
 
 from qtpy6.QtCore import QAbstractAnimation, QEasingCurve, QEvent, QObject, QPropertyAnimation, Qt
 from qtpy6.QtGui import QInputDevice, QMouseEvent
-from qtpy6.QtWidgets import QApplication, QScroller, QScrollerProperties, QWidget
+from qtpy6.QtWidgets import QAbstractButton, QApplication, QScroller, QScrollerProperties, QWidget
 
 from . import navigateur
 
@@ -99,8 +99,43 @@ def defiler_au_doigt(zone):
         zone.destroyed.connect(lambda *_: _EN_ATTENTE.remove(zone) if zone in _EN_ATTENTE else None)
         return
     QScroller.grabGesture(zone.viewport(), QScroller.ScrollerGestureType.TouchGesture)
+    _SansClicAuGlisse(zone)
     if navigateur():
         _Inertie(zone)
+
+
+class _SansClicAuGlisse(QObject):
+    """Un glissé qui fait défiler la zone ne clique pas le bouton où le doigt s'est posé : ``QScroller`` laisse passer
+    la souris que Qt tire du doigt, et le bouton, qui suit la page sous le doigt, se croyait relâché sur lui (SmartTeacher,
+    26/11/2026 : « en scrolant sur la page d'accueil , on pouvait malencontreusement cliquer sur un sujet et l'ouvrir »).
+    Dès que le doigt s'éloigne de plus de ``startDragDistance`` (positions GLOBALES, comme ``Toucher``), le bouton est
+    relâché sans clic et la souris du geste ne lui parvient plus. Seuls les ``QAbstractButton`` : les widgets qui
+    distinguent eux-mêmes un toucher d'un glissé (``Toucher``) reçoivent tout le geste."""
+
+    def __init__(self, zone):
+        super().__init__(zone)
+        self.vue, self.bouton, self.point, self.glisse = zone.viewport(), None, None, False
+        QApplication.instance().installEventFilter(self)
+
+    def eventFilter(self, objet, evenement):
+        genre = evenement.type()
+        if genre not in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseMove, QEvent.Type.MouseButtonRelease):
+            return False
+        if genre == QEvent.Type.MouseButtonPress:
+            bouton = objet if isinstance(objet, QAbstractButton) else None
+            doigt = evenement.source() != Qt.MouseEventSource.MouseEventNotSynthesized
+            dedans = bouton is not None and self.vue.isAncestorOf(bouton)
+            self.bouton, self.point, self.glisse = (bouton, evenement.globalPosition(), False) if doigt and dedans else (None, None, False)
+            return False
+        if objet is not self.bouton or self.point is None:
+            return False
+        if not self.glisse and (evenement.globalPosition() - self.point).manhattanLength() > QApplication.startDragDistance():
+            self.glisse = True
+            self.bouton.setDown(False)
+        if genre == QEvent.Type.MouseButtonRelease:
+            glisse, self.bouton, self.point, self.glisse = self.glisse, None, None, False
+            return glisse
+        return self.glisse
 
 
 _EN_ATTENTE = []  # les zones de ``defiler_au_doigt`` construites avant ``activer``
