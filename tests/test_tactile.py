@@ -128,3 +128,27 @@ def test_arrivee_de_la_course_en_pixels_de_la_page():
     assert tactile.arrivee((0, 1000), (0, 2000)) == (0, 1000 + 2000 ** 2 / (2 * tactile.DECELERATION))
     assert tactile.arrivee((0, 1000), (0, -1000)) == (0, 800)
     assert tactile.arrivee((5, 5), (0, 0)) == (5, 5)
+
+
+def test_la_course_est_plafonnee():
+    """Un geste très vif ne mène pas au bout de la page (SmartTeacher, 26/11/2026 : « qu'avec un simple gest ou pouvait
+    se retrouver quasiment à la fin de la page »)."""
+    assert tactile.arrivee((0, 0), (0, 10000)) == tactile.arrivee((0, 0), (0, tactile.VITESSE_MAX))
+    assert tactile.arrivee((0, 0), (0, 10000))[1] <= 1800
+
+
+def test_glisse_sur_un_bouton_a_menu_ne_l_ouvre_pas(page):
+    """Jauges de révision de l'accueil : un QPushButton à menu ouvre son menu à l'appui ; au doigt, seul un toucher sur
+    place l'ouvre."""
+    from qtpy6.QtCore import QTimer
+    from qtpy6.QtWidgets import QMenu
+    menu = QMenu(page.bouton)
+    menu.addAction("historique")
+    ouvertures = []
+    menu.aboutToShow.connect(lambda: (ouvertures.append(1), QTimer.singleShot(0, menu.close)))
+    page.bouton.setMenu(menu)
+    page.verticalScrollBar().setValue(500)
+    QTest.qWait(50)
+    glisser(page, page.bouton.mapTo(page.viewport(), page.bouton.rect().center()))
+    QTest.qWait(100)
+    assert not ouvertures and page.verticalScrollBar().value() > 600

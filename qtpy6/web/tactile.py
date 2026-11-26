@@ -5,9 +5,9 @@ par les dispositions ne sont pas toutes refaites."""
 
 import time
 
-from qtpy6.QtCore import QAbstractAnimation, QEasingCurve, QEvent, QObject, QPropertyAnimation, Qt
+from qtpy6.QtCore import QAbstractAnimation, QEasingCurve, QEvent, QObject, QPropertyAnimation, Qt, QTimer
 from qtpy6.QtGui import QInputDevice, QMouseEvent
-from qtpy6.QtWidgets import QAbstractButton, QApplication, QScroller, QScrollerProperties, QWidget
+from qtpy6.QtWidgets import QAbstractButton, QApplication, QPushButton, QScroller, QScrollerProperties, QWidget
 
 from . import navigateur
 
@@ -110,7 +110,12 @@ class _SansClicAuGlisse(QObject):
     26/11/2026 : « en scrolant sur la page d'accueil , on pouvait malencontreusement cliquer sur un sujet et l'ouvrir »).
     Dès que le doigt s'éloigne de plus de ``startDragDistance`` (positions GLOBALES, comme ``Toucher``), le bouton est
     relâché sans clic et la souris du geste ne lui parvient plus. Seuls les ``QAbstractButton`` : les widgets qui
-    distinguent eux-mêmes un toucher d'un glissé (``Toucher``) reçoivent tout le geste."""
+    distinguent eux-mêmes un toucher d'un glissé (``Toucher``) reçoivent tout le geste. Un ``QPushButton`` à menu
+    (jauges de révision de l'accueil) ouvrirait son menu dès l'appui : au doigt, l'appui ne lui parvient pas, et le menu
+    s'ouvre au relâchement d'un toucher sur place.
+
+    Écarté : relâcher le bouton au passage de ``QScroller`` en ``Dragging`` (un seuil au lieu de deux, filtre posé
+    le temps du geste seulement) : le menu, ouvert à l'appui, serait déjà là ; l'appui doit donc être vu au filtre."""
 
     def __init__(self, zone):
         super().__init__(zone)
@@ -126,33 +131,44 @@ class _SansClicAuGlisse(QObject):
             doigt = evenement.source() != Qt.MouseEventSource.MouseEventNotSynthesized
             dedans = bouton is not None and self.vue.isAncestorOf(bouton)
             self.bouton, self.point, self.glisse = (bouton, evenement.globalPosition(), False) if doigt and dedans else (None, None, False)
-            return False
+            return self.bouton is not None and self._a_menu(self.bouton)
         if objet is not self.bouton or self.point is None:
             return False
         if not self.glisse and (evenement.globalPosition() - self.point).manhattanLength() > QApplication.startDragDistance():
             self.glisse = True
             self.bouton.setDown(False)
         if genre == QEvent.Type.MouseButtonRelease:
-            glisse, self.bouton, self.point, self.glisse = self.glisse, None, None, False
+            bouton, glisse, self.bouton, self.point, self.glisse = self.bouton, self.glisse, None, None, False
+            if self._a_menu(bouton):
+                if not glisse:
+                    QTimer.singleShot(0, bouton.showMenu)  # après le relâchement : le menu est modal
+                return True
             return glisse
-        return self.glisse
+        return self.glisse or self._a_menu(self.bouton)
+
+    @staticmethod
+    def _a_menu(bouton):
+        return isinstance(bouton, QPushButton) and bouton.menu() is not None
 
 
 _EN_ATTENTE = []  # les zones de ``defiler_au_doigt`` construites avant ``activer``
 
 
-DECELERATION = 2500  # px/s² : la course après le lâcher (``arrivee``), à peu près celle d'iOS pour un geste ordinaire
+DECELERATION = 2500  # px/s² : le freinage de la course après le lâcher (``arrivee``)
+VITESSE_MAX = 3000  # px/s : au-delà, la course part à cette vitesse (au plus 1800 px, deux à trois écrans de téléphone)
 
 
-def arrivee(position, vitesse, deceleration=DECELERATION):
-    """Où s'arrête la course lancée de ``position`` à ``vitesse`` (px/s, par axe), freinée à ``deceleration`` : à
-    v²/2a dans la direction du geste. Calculé ici, en pixels de la page : ``QScroller.finalPosition`` partait de sa
-    propre vitesse, en mètres par seconde convertis par une densité d'écran que le navigateur ne lui donne pas, et
-    sur un téléphone la page filait beaucoup trop loin (SmartTeacher, 26/11/2026 : « sur telephone l'accueil defilait
-    beaucoup trop vite »)."""
+def arrivee(position, vitesse, deceleration=DECELERATION, plafond=VITESSE_MAX):
+    """Où s'arrête la course lancée de ``position`` à ``vitesse`` (px/s, par axe, ramenée à ``plafond``), freinée à
+    ``deceleration`` : à v²/2a dans la direction du geste, en pixels de la page. Remplace ``QScroller.finalPosition``,
+    réglé pour un bureau : 0,125 m/s² (≈ 490 px/s² à 100 points par pouce, cinq fois plus glissant), course jusqu'à
+    ≈ 3900 px, cinq écrans de téléphone (SmartTeacher, 26/11/2026 : « sur telephone l'accueil defilait beaucoup trop
+    vite », « qu'avec un simple gest ou pouvait se retrouver quasiment à la fin de la page »)."""
     norme = sum(v * v for v in vitesse) ** 0.5
     if norme < 1:
         return tuple(position)
+    if norme > plafond:
+        vitesse, norme = [v * plafond / norme for v in vitesse], plafond
     distance = norme * norme / (2 * deceleration)
     return tuple(p + v / norme * distance for p, v in zip(position, vitesse))
 
@@ -167,7 +183,7 @@ class _Inertie(QObject):
     décélérant : ``OutQuad`` part à la vitesse du doigt quand sa durée vaut deux fois la distance divisée par cette
     vitesse. La vitesse est celle des positions des ascenseurs pendant les ``FENETRE`` dernières secondes du glissé :
     ``QScroller.velocity`` est en mètres par seconde, convertis par une densité d'écran que le navigateur ne connaît
-    pas. Un doigt reposé, une plage qui change ou la zone détruite arrêtent la course ; le doigt qui l'arrête n'est pas
+    pas ; au moins ``DUREE_MIN`` entre la première et la dernière, sinon QScroller finit seul, réglé au même freinage. Un doigt reposé, une plage qui change ou la zone détruite arrêtent la course ; le doigt qui l'arrête n'est pas
     un clic : son appui et son relâchement n'atteignent pas la page (sans cela, mesuré, il cochait la case dessous 12
     fois sur 12, QScroller seul compris : dans le navigateur, il laisse passer la souris que Qt tire du doigt). Mesuré
     au même profil : après le lâcher, 0 image sans mouvement au lieu de 33 à 48 %, pas d'avant et d'après du même ordre
@@ -180,6 +196,7 @@ class _Inertie(QObject):
     09/10/2026 ; 0 sur 4 sans dépassement). Coût accepté : plus aucun rebond élastique au doigt dans le navigateur."""
 
     FENETRE = 0.1  # s
+    DUREE_MIN = 0.03  # s : deux positions plus rapprochées que cela donneraient une vitesse au hasard
 
     def __init__(self, zone):
         super().__init__(zone)
@@ -189,6 +206,10 @@ class _Inertie(QObject):
         for metrique in (QScrollerProperties.ScrollMetric.HorizontalOvershootPolicy,
                          QScrollerProperties.ScrollMetric.VerticalOvershootPolicy):
             proprietes.setScrollMetric(metrique, QScrollerProperties.OvershootPolicy.OvershootAlwaysOff)
+        # le repli (trop peu de positions pour une vitesse) : QScroller finit seul, au même freinage et plafond
+        par_metre = (zone.screen() or QApplication.primaryScreen()).physicalDotsPerInch() / 0.0254
+        proprietes.setScrollMetric(QScrollerProperties.ScrollMetric.DecelerationFactor, DECELERATION / par_metre)
+        proprietes.setScrollMetric(QScrollerProperties.ScrollMetric.MaximumVelocity, VITESSE_MAX / par_metre)
         self.scroller.setScrollerProperties(proprietes)
         self.scroller.stateChanged.connect(self._etat)
         for barre in self._barres():
@@ -217,12 +238,12 @@ class _Inertie(QObject):
             maintenant = time.perf_counter()
             recents = [p for p in self.trace if maintenant - p[0] <= self.FENETRE]
             self.trace = []
-            if len(recents) < 2:
-                return  # trop peu de positions pour une vitesse : QScroller finit seul
+            if len(recents) < 2 or recents[-1][0] - recents[0][0] < self.DUREE_MIN:
+                return  # trop peu de positions pour une vitesse (rafale d'événements) : QScroller finit seul
             (t0, *p0), (t1, *p1) = recents[0], recents[-1]
-            vitesse = [(b - a) / max(t1 - t0, 1e-3) for a, b in zip(p0, p1)]
+            vitesse = [(b - a) / (t1 - t0) for a, b in zip(p0, p1)]
             x, y = arrivee(p1, vitesse)
-            if self.courir(x, y, sum(v * v for v in vitesse) ** 0.5):
+            if self.courir(x, y, min(sum(v * v for v in vitesse) ** 0.5, VITESSE_MAX)):
                 self.scroller.stop()
 
     def _avaler(self, oui):
